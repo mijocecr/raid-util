@@ -1,0 +1,110 @@
+<Window
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="clr-namespace:RAID_Util"
+    x:Class="RAID_Util.MainWindow"
+    Width="500"
+    Height="580"
+    MinWidth="500"
+    MinHeight="580"
+    MaxWidth="500"
+    MaxHeight="580"
+    CanResize="False"
+    Title="raid-util">
+
+    <DockPanel>
+
+        
+        <Border Background="{DynamicResource SteamPanel}" Padding="10" DockPanel.Dock="Top">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto">
+
+                <TextBlock 
+                    Grid.Row="0" 
+                    Grid.Column="0"
+                    Text="Raid Management"
+                    TextAlignment="Center"
+                    FontSize="26"
+                    FontWeight="Bold"
+                    VerticalAlignment="Center"
+                />
+
+                <Button Content="⚙"
+                        Grid.Column="1"
+                        Grid.Row="0"
+                        Margin="10"
+                        FontSize="18"
+                        
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Classes="SteamButton"/>
+            </Grid>
+        </Border>
+
+        <!-- BOTTOM STATUS BAR -->
+        <Border Background="{DynamicResource SteamPanel}" Padding="6" DockPanel.Dock="Bottom">
+            <TextBlock x:Name="StatusBarText"
+                       Text="Ready."
+                       TextAlignment="Center"
+                       FontSize="14"
+                       Foreground="{DynamicResource SteamText}"
+                       
+                       Opacity="0.85"/>
+        </Border>
+
+        <!-- MAIN CONTENT -->
+        <TabControl x:Name="MainTabs">
+
+            <!-- STATUS TAB -->
+            <TabItem >
+                <TabItem.Header>
+                    <TextBlock Text="Status" Tag="0"/>
+                </TabItem.Header>
+
+                
+            </TabItem>
+
+            <!-- RAID TAB -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="RAID" Tag="1"
+                               />
+                </TabItem.Header>
+
+                
+            </TabItem>
+
+            <!-- JBOD TAB -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="JBOD" Tag="2"
+                               />
+                </TabItem.Header>
+
+                
+            </TabItem>
+
+            <!-- DISKS TAB -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="Disks" Tag="3"
+                               />
+                </TabItem.Header>
+
+                
+            </TabItem>
+            
+            <!-- LOGs TAB -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="Logs" Tag="4"
+                    />
+                </TabItem.Header>
+
+                
+            </TabItem>
+
+
+        </TabControl>
+
+    </DockPanel>
+</Window>
