@@ -1,6 +1,7 @@
 <UserControl
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="clr-namespace:RAID_Util.Services"
     x:Class="RAID_Util.Views.Tabs.StatusView"
     Background="{DynamicResource BMWSurfaceBrush}"
     Foreground="{DynamicResource BMWTextBrush}">
@@ -8,7 +9,9 @@
     <ScrollViewer>
         <StackPanel Margin="20" Spacing="18">
 
-            <!-- PANEL PRINCIPAL -->
+            <!-- ===================================================== -->
+            <!-- 🟥 RAID HEALTH SUMMARY                                -->
+            <!-- ===================================================== -->
             <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
                     BorderBrush="{DynamicResource BMWBorderBrush}"
                     BorderThickness="1"
@@ -16,116 +19,196 @@
                     Padding="18"
                     BoxShadow="0 2 6 0 #22000000">
 
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="12">
 
-                    <!-- TÍTULO -->
-                    <TextBlock Text="System Status"
+                    <TextBlock Text="RAID Health Summary"
                                FontSize="20"
                                FontWeight="Bold"
                                Foreground="{DynamicResource BMWTextBrush}"/>
 
-                    <!-- ESTADO GENERAL -->
+                    <!-- Estado global -->
+                    <Border Background="{DynamicResource BMWInputBrush}"
+                            BorderBrush="{DynamicResource BMWBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+
+                        <TextBlock x:Name="TxtOverallRaidHealth"
+                                   Text="Checking..."
+                                   FontSize="18"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                    </Border>
+
+                    <!-- Resumen numérico -->
                     <StackPanel Spacing="6">
-                        <TextBlock Text="Overall Health:"
-                                   FontSize="14"
-                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
-
-                        <Border Background="{DynamicResource BMWInputBrush}"
-                                BorderBrush="{DynamicResource BMWBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Padding="10">
-
-                            <TextBlock x:Name="TxtOverallHealth"
-                                       Text="Checking..."
-                                       FontSize="16"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
-                        </Border>
-                    </StackPanel>
-
-                    <!-- ESTADO DE SERVICIOS -->
-                    <StackPanel Spacing="10">
-
-                        <TextBlock Text="Services"
-                                   FontSize="16"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
 
                         <DockPanel LastChildFill="False">
-                            <TextBlock Text="mdadm:"
+                            <TextBlock Text="Arrays:"
                                        Width="150"
-                                       VerticalAlignment="Center"
                                        Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtMdadmStatus"
-                                       Text="Checking..."
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                            <TextBlock x:Name="TxtArraysSummary"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold"/>
                         </DockPanel>
 
                         <DockPanel LastChildFill="False">
-                            <TextBlock Text="RAID Monitor:"
+                            <TextBlock Text="Disks:"
                                        Width="150"
-                                       VerticalAlignment="Center"
                                        Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtRaidMonitorStatus"
-                                       Text="Checking..."
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                            <TextBlock x:Name="TxtDisksSummary"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold"/>
                         </DockPanel>
 
                         <DockPanel LastChildFill="False">
-                            <TextBlock Text="Hotplug:"
+                            <TextBlock Text="Rebuilds:"
                                        Width="150"
-                                       VerticalAlignment="Center"
                                        Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtHotplugStatus"
-                                       Text="Checking..."
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                            <TextBlock x:Name="TxtRebuildSummary"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold"/>
                         </DockPanel>
 
                     </StackPanel>
 
-                    <!-- INFORMACIÓN DEL SISTEMA -->
-                    <StackPanel Spacing="10">
+                </StackPanel>
+            </Border>
 
-                        <TextBlock Text="System Info"
-                                   FontSize="16"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
 
-                        <DockPanel LastChildFill="False">
-                            <TextBlock Text="Kernel:"
-                                       Width="150"
-                                       VerticalAlignment="Center"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtKernel"
-                                       Text="Loading..."
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
-                        </DockPanel>
+            <!-- ===================================================== -->
+            <!-- 🟧 ARRAYS AT RISK                                     -->
+            <!-- ===================================================== -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18"
+                    BoxShadow="0 2 6 0 #22000000">
 
-                        <DockPanel LastChildFill="False">
-                            <TextBlock Text="Distro:"
-                                       Width="150"
-                                       VerticalAlignment="Center"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtDistro"
-                                       Text="Loading..."
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
-                        </DockPanel>
+                <StackPanel Spacing="12">
 
-                        <DockPanel LastChildFill="False">
-                            <TextBlock Text="Hostname:"
-                                       Width="150"
-                                       VerticalAlignment="Center"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
-                            <TextBlock x:Name="TxtHostname"
-                                       Text="Loading..."
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
-                        </DockPanel>
+                    <TextBlock Text="Arrays at Risk"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource BMWTextBrush}"/>
 
-                    </StackPanel>
+                    <ItemsControl x:Name="ListArraysAtRisk">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:ArrayRiskInfo">
+
+                                <Border Background="{DynamicResource BMWInputBrush}"
+                                        BorderBrush="{DynamicResource BMWBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0 6">
+
+                                    <StackPanel Spacing="4">
+
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="16"
+                                                   FontWeight="Bold"/>
+
+                                        <TextBlock Text="{Binding Status}"
+                                                   FontSize="14"
+                                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
+
+                                        <TextBlock Text="{Binding Details}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource BMWTextBrush}"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                </StackPanel>
+            </Border>
+
+
+            <!-- ===================================================== -->
+            <!-- 🟨 DISK ALERTS                                        -->
+            <!-- ===================================================== -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18"
+                    BoxShadow="0 2 6 0 #22000000">
+
+                <StackPanel Spacing="12">
+
+                    <TextBlock Text="Disk Alerts"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource BMWTextBrush}"/>
+
+                    <ItemsControl x:Name="ListDiskAlerts">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:DiskAlertInfo">
+
+                                <Border Background="{DynamicResource BMWInputBrush}"
+                                        BorderBrush="{DynamicResource BMWBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0 6">
+
+                                    <StackPanel Spacing="4">
+
+                                        <TextBlock Text="{Binding Device}"
+                                                   FontSize="15"
+                                                   FontWeight="Bold"/>
+
+                                        <TextBlock Text="{Binding Alert}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
+
+                                    </StackPanel>
+
+                                </Border>
+
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                </StackPanel>
+            </Border>
+
+
+            <!-- ===================================================== -->
+            <!-- 🟦 RECENT EVENTS                                      -->
+            <!-- ===================================================== -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18"
+                    BoxShadow="0 2 6 0 #22000000">
+
+                <StackPanel Spacing="12">
+
+                    <TextBlock Text="Recent Events"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource BMWTextBrush}"/>
+
+                    <ItemsControl x:Name="ListRecentEvents">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+
+                                <TextBlock Text="{Binding}"
+                                           FontSize="13"
+                                           Margin="0 4"
+                                           Foreground="{DynamicResource BMWTextBrush}"/>
+
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
 
                 </StackPanel>
             </Border>

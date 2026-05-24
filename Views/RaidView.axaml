@@ -1,0 +1,13 @@
+<UserControl
+    x:Class="RAID_Util.Views.RaidView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer>
+        <StackPanel x:Name="ListArrays" Spacing="8" Margin="10"/>
+    </ScrollViewer>
+
+</UserControl>

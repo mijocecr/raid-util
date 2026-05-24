@@ -158,7 +158,8 @@
                         Grid.Column="1"
                         Background="{DynamicResource BMWSurfaceBrush}"
                         Foreground="{DynamicResource BMWTextBrush}"
-                        BorderBrush="{DynamicResource BMWBorderBrush}"
+                        
+                        BorderBrush="{DynamicResource BMWAccentBrush}"
                         BorderThickness="1"
                         CornerRadius="6"/>
             </Grid>

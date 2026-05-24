@@ -3,6 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:views="clr-namespace:RAID_Util"
     xmlns:tabs="clr-namespace:RAID_Util.Views.Tabs"
+    xmlns:views1="clr-namespace:RAID_Util.Views"
     x:Class="RAID_Util.MainWindow"
     Width="500"
     Height="580"
@@ -141,9 +142,11 @@
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
-                <!-- Se agregará más adelante -->
-                <Grid/>
+                <views1:RaidView x:Name="RaidView"/>
+
+
             </TabItem>
+
 
             <!-- JBOD TAB -->
             <TabItem>

@@ -4,22 +4,29 @@
              x:Class="RAID_Util.App"
              RequestedThemeVariant="Default">
 
+    <!-- ========================= -->
+    <!--   RECURSOS (COLORES BMW)  -->
+    <!-- ========================= -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
 
-                <!-- COLORES BMW -->
+                <!-- PALETA BMW CON SOPORTE LIGHT/DARK -->
                 <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml"/>
 
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>
 
+    <!-- ========================= -->
+    <!--   ESTILOS (BMW + FLUENT)  -->
+    <!-- ========================= -->
     <Application.Styles>
 
+        <!-- Tema Fluent (obligatorio para ThemeVariant) -->
         <fluent:FluentTheme/>
 
-        <!-- ESTILOS BMW -->
+        <!-- ESTILOS BMW (botones, bordes, textos, etc.) -->
         <StyleInclude Source="avares://RAID-Util/Styles/BMWStyles.axaml"/>
 
     </Application.Styles>

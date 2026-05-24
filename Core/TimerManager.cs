@@ -7,8 +7,6 @@ namespace RAID_Util.Core;
 public class TimerManager
 {
     private readonly StatusView? _statusView;
-   // private readonly RaidView? _raidView;
-    //private readonly DisksView? _disksView;
     private readonly LogsView? _logsView;
 
     private readonly DispatcherTimer _generalTimer;
@@ -17,16 +15,12 @@ public class TimerManager
 
     public TimerManager(
         StatusView? statusView,
-     //   RaidView? raidView,
-      //  DisksView? disksView,
         LogsView? logsView,
         int generalRefreshMs,
         int rebuildRefreshMs,
         int hotplugRefreshMs)
     {
         _statusView = statusView;
-       // _raidView = raidView;
-       // _disksView = disksView;
         _logsView = logsView;
 
         // TIMER GENERAL
@@ -37,36 +31,27 @@ public class TimerManager
         _generalTimer.Tick += async (_, _) =>
         {
             if (_statusView is not null)
-                await _statusView.UpdateStatus();
-
-         //   if (_disksView is not null)
-          //      await _disksView.UpdateDisks();
-
-            // Si quieres, aquí también algo ligero de RAID
-          //  if (_raidView is not null)
-           //     await _raidView.UpdateRaidSummary();
+                await _statusView.RefreshStatusAsync();
         };
 
-        // TIMER REBUILD
+        // TIMER REBUILD (vacío por ahora)
         _rebuildTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(rebuildRefreshMs)
         };
         _rebuildTimer.Tick += async (_, _) =>
         {
-           // if (_raidView is not null)
-             //   await _raidView.UpdateRebuildStatus();
+            // Aquí irá UpdateRebuildStatus() cuando exista RaidView
         };
 
-        // TIMER HOTPLUG
+        // TIMER HOTPLUG (vacío por ahora)
         _hotplugTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(hotplugRefreshMs)
         };
         _hotplugTimer.Tick += async (_, _) =>
         {
-          //  if (_disksView is not null)
-           //     await _disksView.CheckHotplug();
+            // Aquí irá CheckHotplug() cuando exista DisksView
         };
     }
 
