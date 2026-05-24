@@ -1,0 +1,48 @@
+<UserControl
+    x:Class="RAID_Util.Views.Tabs.LogsView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid RowDefinitions="Auto,*" Margin="15">
+
+        <!-- Toolbar -->
+        <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button x:Name="RefreshButton"
+                    Content="Refresh"
+                    HorizontalContentAlignment="Center"
+                    Width="100"
+                    Classes="accent"/>
+
+            <Button x:Name="OpenFullButton"
+                    Content="Open Full Log"
+                    HorizontalContentAlignment="Center"
+                    Width="140"
+                    Classes="neutral"/>
+        </StackPanel>
+
+        <!-- Log viewer panel -->
+        <Border Grid.Row="1"
+                Margin="0 12 0 0"
+                Background="{StaticResource ControlBackgroundBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="5">
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBox
+                    x:Name="LogTextBox"
+                    FontFamily="Consolas, monospace"
+                    FontSize="12"
+                    AcceptsReturn="True"
+                    IsReadOnly="True"
+                    Background="{StaticResource ControlBackgroundBrush}"
+                    Foreground="{StaticResource ForegroundBrush}"
+                    BorderThickness="0"
+                    TextWrapping="NoWrap"/>
+            </ScrollViewer>
+
+        </Border>
+
+    </Grid>
+</UserControl>

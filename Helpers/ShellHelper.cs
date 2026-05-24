@@ -1,7 +1,8 @@
 using System;
 using System.Diagnostics;
-using System.Text;
+using System.IO;
 using System.Threading.Tasks;
+using RAID_Util.Services;
 
 namespace RAID_Util.Helpers;
 
@@ -14,168 +15,149 @@ public static class ShellHelper
         var callId = ++_callCount;
         var sw = Stopwatch.StartNew();
 
-        Console.WriteLine($"[SHELL] #{callId} → EjecutarComoRoot('{command}')");
+        LogService.Debug($"[SHELL] #{callId} → EjecutarComoRoot('{command}')");
 
-        // SIEMPRE usar bash -c para soportar redirecciones, sed, systemctl, etc.
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = "sudo",
-            Arguments = $"-S bash -c \"{command.Replace("\"", "\\\"")}\"",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            var psi = new ProcessStartInfo
+            {
+                FileName = "sudo",
 
-        using var process = new Process { StartInfo = psi };
+                // *** CORRECCIÓN CRÍTICA ***
+                // -S  → leer contraseña por stdin
+                // -k  → forzar a sudo a pedir SOLO UNA contraseña
+                Arguments = $"-S -k bash -c \"{command.Replace("\"", "\\\"")}\"",
 
-        var outputBuilder = new StringBuilder();
-        var errorBuilder = new StringBuilder();
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-        process.OutputDataReceived += (s, e) =>
-        {
-            if (e.Data != null)
-                outputBuilder.AppendLine(e.Data);
-        };
+            using var process = new Process { StartInfo = psi };
+            process.Start();
 
-        process.ErrorDataReceived += (s, e) =>
-        {
-            if (e.Data != null)
-                errorBuilder.AppendLine(e.Data);
-        };
+            // *** ENVÍO DE CONTRASEÑA CORREGIDO ***
+            if (!string.IsNullOrEmpty(Credentials.AdminPassword))
+            {
+                var pass = Credentials.AdminPassword.TrimEnd('\r', '\n');
 
-        Console.WriteLine($"[SHELL] #{callId} Iniciando proceso…");
-        process.Start();
+                // sudo a veces pide 2 veces → enviamos 2 líneas
+                process.StandardInput.WriteLine(pass);
+                process.StandardInput.WriteLine(pass);
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+                // línea vacía final → sudo recibe EOF correctamente
+                process.StandardInput.WriteLine();
+                process.StandardInput.Flush();
+            }
 
-        // Enviar contraseña
-        if (!string.IsNullOrEmpty(Credenciales.AdminPassword))
-        {
-            Console.WriteLine($"[SHELL] #{callId} Enviando contraseña…");
-            var pass = Credenciales.AdminPassword.TrimEnd('\r', '\n');
-            process.StandardInput.WriteLine(pass);
-            process.StandardInput.Flush();
+            process.StandardInput.Close();
+
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+
+            const int timeoutMs = 15000;
+
+            if (!process.WaitForExit(timeoutMs))
+            {
+                try { process.Kill(); } catch { }
+
+                LogService.Error($"[SHELL] #{callId} TIMEOUT ejecutando '{command}'");
+                return (1, "", "Timeout");
+            }
+
+            sw.Stop();
+            LogService.Debug($"[SHELL] #{callId} ← exit={process.ExitCode} en {sw.ElapsedMilliseconds} ms");
+
+            // *** DETECCIÓN DE CONTRASEÑA INCORRECTA ***
+            if (stderr.Contains("incorrect password", StringComparison.OrdinalIgnoreCase) ||
+                stderr.Contains("Sorry, try again", StringComparison.OrdinalIgnoreCase) ||
+                stderr.Contains("no password was provided", StringComparison.OrdinalIgnoreCase))
+            {
+                LogService.Error($"[SHELL] #{callId} PASSWORD_INCORRECT");
+                return (1001, stdout, "PASSWORD_INCORRECT");
+            }
+
+            return (process.ExitCode, stdout, stderr);
         }
-        else
+        catch (Exception ex)
         {
-            Console.WriteLine($"[SHELL] #{callId} ADVERTENCIA: No hay contraseña configurada");
+            LogService.Error($"[SHELL] #{callId} EXCEPTION: {ex.Message}");
+            return (1, "", ex.Message);
         }
-
-        process.StandardInput.Close();
-
-        const int timeoutMs = 15000;
-        Console.WriteLine($"[SHELL] #{callId} Esperando hasta {timeoutMs} ms…");
-
-        if (!process.WaitForExit(timeoutMs))
-        {
-            Console.WriteLine($"[SHELL] #{callId} TIMEOUT tras {timeoutMs} ms. Matando proceso…");
-            try { process.Kill(); } catch { }
-            return (1, "", "Timeout");
-        }
-
-        sw.Stop();
-
-        string stdout = outputBuilder.ToString();
-        string stderr = errorBuilder.ToString();
-
-        Console.WriteLine($"[SHELL] #{callId} ← Finalizado en {sw.ElapsedMilliseconds} ms");
-        Console.WriteLine($"[SHELL] #{callId} ExitCode={process.ExitCode}");
-        Console.WriteLine($"[SHELL] #{callId} STDOUT='{stdout.Trim()}'");
-        Console.WriteLine($"[SHELL] #{callId} STDERR='{stderr.Trim()}'");
-
-        // DETECCIÓN DE CONTRASEÑA INCORRECTA
-        if (stderr.Contains("incorrect password", StringComparison.OrdinalIgnoreCase) ||
-            stderr.Contains("Sorry, try again", StringComparison.OrdinalIgnoreCase) ||
-            stderr.Contains("no password was provided", StringComparison.OrdinalIgnoreCase))
-        {
-            Console.WriteLine($"[SHELL] #{callId} → CONTRASEÑA INCORRECTA DETECTADA");
-            return (1001, stdout, "PASSWORD_INCORRECT");
-        }
-
-        return (process.ExitCode, stdout, stderr);
     }
-    
-    public static (int ExitCode, string Stdout, string Stderr) Ejecutar(string command)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "/bin/bash",
-            Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = new Process { StartInfo = psi };
-
-        var stdoutBuilder = new StringBuilder();
-        var stderrBuilder = new StringBuilder();
-
-        process.OutputDataReceived += (s, e) =>
-        {
-            if (e.Data != null)
-                stdoutBuilder.AppendLine(e.Data);
-        };
-
-        process.ErrorDataReceived += (s, e) =>
-        {
-            if (e.Data != null)
-                stderrBuilder.AppendLine(e.Data);
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        process.WaitForExit();
-
-        return (process.ExitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
-    }
-
-    
 
     // ---------------------------------------------------------
     // EJECUCIÓN NORMAL (SIN ROOT)
     // ---------------------------------------------------------
-    public static async Task<string> RunAsync(string command)
+    public static async Task<string> RunCleanAsync(string command)
     {
-        var psi = new ProcessStartInfo
+        LogService.Debug($"[SHELL] RunCleanAsync('{command}')");
+
+        try
         {
-            FileName = "/bin/bash",
-            Arguments = $"-c \"{command}\"",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            var psi = new ProcessStartInfo
+            {
+                FileName = "/bin/bash",
+                Arguments = $"-c \"{command}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-        using var process = new Process { StartInfo = psi };
+            using var process = new Process { StartInfo = psi };
 
-        var stdoutBuilder = new StringBuilder();
-        var stderrBuilder = new StringBuilder();
+            process.Start();
 
-        process.OutputDataReceived += (s, e) =>
+            string stdout = await process.StandardOutput.ReadToEndAsync();
+            string stderr = await process.StandardError.ReadToEndAsync();
+
+            await process.WaitForExitAsync();
+
+            if (!string.IsNullOrWhiteSpace(stderr))
+            {
+                LogService.Error($"[SHELL] RunCleanAsync stderr: {stderr}");
+                return string.Empty;
+            }
+
+            LogService.Debug($"[SHELL] RunCleanAsync OK");
+            return stdout.Trim();
+        }
+        catch (Exception ex)
         {
-            if (e.Data != null)
-                stdoutBuilder.AppendLine(e.Data);
-        };
-
-        process.ErrorDataReceived += (s, e) =>
-        {
-            if (e.Data != null)
-                stderrBuilder.AppendLine(e.Data);
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await process.WaitForExitAsync();
-
-        return stdoutBuilder.ToString() + stderrBuilder.ToString();
+            LogService.Error($"[SHELL] RunCleanAsync exception: {ex.Message}");
+            return string.Empty;
+        }
     }
+    
+    public static void OpenFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return;
+
+            // Linux: xdg-open
+            var psi = new ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                Arguments = $"\"{path}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                CreateNoWindow = true
+            };
+
+            Process.Start(psi);
+        }
+        catch
+        {
+            // silencio total
+        }
+    }
+
+    
+    
 }

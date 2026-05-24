@@ -1,0 +1,136 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Class="RAID_Util.Views.Tabs.StatusView"
+    Background="{DynamicResource BMWSurfaceBrush}"
+    Foreground="{DynamicResource BMWTextBrush}">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="18">
+
+            <!-- PANEL PRINCIPAL -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18"
+                    BoxShadow="0 2 6 0 #22000000">
+
+                <StackPanel Spacing="14">
+
+                    <!-- TÍTULO -->
+                    <TextBlock Text="System Status"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource BMWTextBrush}"/>
+
+                    <!-- ESTADO GENERAL -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Overall Health:"
+                                   FontSize="14"
+                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
+
+                        <Border Background="{DynamicResource BMWInputBrush}"
+                                BorderBrush="{DynamicResource BMWBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="10">
+
+                            <TextBlock x:Name="TxtOverallHealth"
+                                       Text="Checking..."
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ESTADO DE SERVICIOS -->
+                    <StackPanel Spacing="10">
+
+                        <TextBlock Text="Services"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource BMWTextBrush}"/>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="mdadm:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtMdadmStatus"
+                                       Text="Checking..."
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="RAID Monitor:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtRaidMonitorStatus"
+                                       Text="Checking..."
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Hotplug:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtHotplugStatus"
+                                       Text="Checking..."
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                    </StackPanel>
+
+                    <!-- INFORMACIÓN DEL SISTEMA -->
+                    <StackPanel Spacing="10">
+
+                        <TextBlock Text="System Info"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource BMWTextBrush}"/>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Kernel:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtKernel"
+                                       Text="Loading..."
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Distro:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtDistro"
+                                       Text="Loading..."
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Hostname:"
+                                       Width="150"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                            <TextBlock x:Name="TxtHostname"
+                                       Text="Loading..."
+                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                        </DockPanel>
+
+                    </StackPanel>
+
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

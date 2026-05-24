@@ -2,36 +2,72 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!-- ============================================
+         THEME DICTIONARIES (Light / Dark)
+         ============================================ -->
     <ResourceDictionary.ThemeDictionaries>
 
-        <!-- GitHub Light -->
+        <!-- LIGHT (mejorado) -->
         <ResourceDictionary x:Key="Light">
-            <Color x:Key="BackgroundColor">#FFFFFF</Color>
-            <Color x:Key="ForegroundColor">#1F2328</Color>
-            <Color x:Key="ControlBackgroundColor">#F6F8FA</Color>
-            <Color x:Key="BorderColor">#D0D7DE</Color>
-            <Color x:Key="HoverColor">#EEF2F6</Color>
-            <Color x:Key="AccentColor">#0969DA</Color>
+
+            <!-- Background hierarchy -->
+            <Color x:Key="BMWBackgroundColor">#EEF2F7</Color> <!-- gris-azulado suave -->
+            <Color x:Key="BMWSurfaceColor">#FFFFFF</Color> <!-- blanco limpio -->
+            <Color x:Key="BMWSurfaceElevatedColor">#F4F6FA</Color> <!-- panel elevado -->
+            <Color x:Key="BMWInputColor">#E1E7EF</Color> <!-- input definido -->
+
+            <!-- Text -->
+            <Color x:Key="BMWTextColor">#0A0A0A</Color>
+            <Color x:Key="BMWTextDimColor">#5A5A5A</Color>
+
+            <!-- Accent -->
+            <Color x:Key="BMWAccentColor">#1C69D4</Color>
+            <Color x:Key="BMWAccentHoverColor">#2A7BFF</Color>
+
+            <!-- Borders / Hover -->
+            <Color x:Key="BMWBorderColor">#C4CCD6</Color> <!-- borde más visible -->
+            <Color x:Key="BMWHoverColor">#E8EEF5</Color> <!-- hover suave -->
         </ResourceDictionary>
 
-        <!-- GitHub Dark -->
+        <!-- DARK (sin cambios) -->
         <ResourceDictionary x:Key="Dark">
-            <Color x:Key="BackgroundColor">#0D1117</Color>
-            <Color x:Key="ForegroundColor">#C9D1D9</Color>
-            <Color x:Key="ControlBackgroundColor">#161B22</Color>
-            <Color x:Key="BorderColor">#30363D</Color>
-            <Color x:Key="HoverColor">#21262D</Color>
-            <Color x:Key="AccentColor">#58A6FF</Color>
+
+            <!-- Background hierarchy -->
+            <Color x:Key="BMWBackgroundColor">#0D1117</Color>
+            <Color x:Key="BMWSurfaceColor">#161B22</Color>
+            <Color x:Key="BMWSurfaceElevatedColor">#1E242C</Color>
+            <Color x:Key="BMWInputColor">#2A313A</Color>
+
+            <!-- Text -->
+            <Color x:Key="BMWTextColor">#E6E6E6</Color>
+            <Color x:Key="BMWTextDimColor">#9AA0A6</Color>
+
+            <!-- Accent -->
+            <Color x:Key="BMWAccentColor">#1C69D4</Color>
+            <Color x:Key="BMWAccentHoverColor">#2A7BFF</Color>
+
+            <!-- Borders / Hover -->
+            <Color x:Key="BMWBorderColor">#2D333B</Color>
+            <Color x:Key="BMWHoverColor">#222830</Color>
         </ResourceDictionary>
 
     </ResourceDictionary.ThemeDictionaries>
 
-    <!-- Brushes -->
-    <SolidColorBrush x:Key="BackgroundBrush" Color="{DynamicResource BackgroundColor}"/>
-    <SolidColorBrush x:Key="ForegroundBrush" Color="{DynamicResource ForegroundColor}"/>
-    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="{DynamicResource ControlBackgroundColor}"/>
-    <SolidColorBrush x:Key="BorderBrush" Color="{DynamicResource BorderColor}"/>
-    <SolidColorBrush x:Key="HoverBrush" Color="{DynamicResource HoverColor}"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}"/>
+    <!-- ============================================
+         BRUSHES (estos sí van fuera)
+         ============================================ -->
+    <SolidColorBrush x:Key="BMWBackgroundBrush" Color="{DynamicResource BMWBackgroundColor}"/>
+    <SolidColorBrush x:Key="BMWSurfaceBrush" Color="{DynamicResource BMWSurfaceColor}"/>
+    <SolidColorBrush x:Key="BMWSurfaceElevatedBrush" Color="{DynamicResource BMWSurfaceElevatedColor}"/>
+    <SolidColorBrush x:Key="BMWInputBrush" Color="{DynamicResource BMWInputColor}"/>
+
+    <SolidColorBrush x:Key="BMWTextBrush" Color="{DynamicResource BMWTextColor}"/>
+    <SolidColorBrush x:Key="BMWTextDimBrush" Color="{DynamicResource BMWTextDimColor}"/>
+
+    <SolidColorBrush x:Key="BMWAccentBrush" Color="{DynamicResource BMWAccentColor}"/>
+    <SolidColorBrush x:Key="BMWAccentHoverBrush" Color="{DynamicResource BMWAccentHoverColor}"/>
+
+    <SolidColorBrush x:Key="BMWBorderBrush" Color="{DynamicResource BMWBorderColor}"/>
+    <SolidColorBrush x:Key="BMWHoverBrush" Color="{DynamicResource BMWHoverColor}"/>
 
 </ResourceDictionary>

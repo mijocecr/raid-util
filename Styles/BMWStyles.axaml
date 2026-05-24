@@ -1,96 +1,45 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Window -->
-    <Style Selector="Window">
-        <Setter Property="Background" Value="{StaticResource BackgroundBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-        <Setter Property="Icon"
-                Value="avares://SAMBA-Util/Assets/Icons/samba-util.png"/>
-    </Style>
+    <!-- SOLO estilos. NADA de Resources aquí. -->
 
-   
-
-    
-    <!-- TextBlock -->
-    <Style Selector="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-    </Style>
-
-    <!-- Button -->
     <Style Selector="Button">
-        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="Padding" Value="8,4"/>
-        <Setter Property="CornerRadius" Value="4"/>
-        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Background">
+            <Setter.Value>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="{DynamicResource BMWSurfaceElevated}" Offset="0"/>
+                    <GradientStop Color="{DynamicResource BMWSurface}" Offset="1"/>
+                </LinearGradientBrush>
+            </Setter.Value>
+        </Setter>
+
+        <Setter Property="Foreground" Value="{DynamicResource BMWTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BMWBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
-    <!-- TextBox -->
+    <Style Selector="Button:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource BMWAccentBrush}"/>
+    </Style>
+
+    <Style Selector="Button:pressed">
+        <Setter Property="Background" Value="{DynamicResource BMWAccentBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+
     <Style Selector="TextBox">
-        <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource BMWTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BMWBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="6,4"/>
-    </Style>
-
-    <!-- ListBox -->
-    <Style Selector="ListBox">
-        <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-    </Style>
-
-    <Style Selector="ListBoxItem">
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-        <Setter Property="Padding" Value="6"/>
-    </Style>
-
-    <Style Selector="ListBoxItem:pointerover">
-        <Setter Property="Background" Value="{StaticResource HoverBrush}"/>
-    </Style>
-
-    <Style Selector="ListBoxItem:selected">
-        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-        <Setter Property="Foreground" Value="White"/>
-    </Style>
-
-    <!-- TabControl -->
-    <Style Selector="TabControl">
-        <Setter Property="Background" Value="{StaticResource BackgroundBrush}"/>
-    </Style>
-
-    <Style Selector="TabItem">
-        <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+        <Setter Property="CornerRadius" Value="6"/>
         <Setter Property="Padding" Value="8,4"/>
     </Style>
 
-    <Style Selector="TabItem:selected">
-        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-        <Setter Property="Foreground" Value="White"/>
+    <Style Selector="TextBox:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource BMWAccentBrush}"/>
     </Style>
-
-    <!-- CheckBox / RadioButton / ToggleSwitch -->
-    <Style Selector="CheckBox, RadioButton, ToggleSwitch">
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-    </Style>
-
-    <!-- Slider / ProgressBar -->
-    <Style Selector="Slider, ProgressBar">
-        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
-    </Style>
-
-    <!-- ComboBox -->
-    <Style Selector="ComboBox">
-        <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="6,4"/>
-    </Style>
-
-   
 
 </Styles>

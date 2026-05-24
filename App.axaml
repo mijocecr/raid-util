@@ -1,10 +1,27 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fluent="clr-namespace:Avalonia.Themes.Fluent;assembly=Avalonia.Themes.Fluent"
              x:Class="RAID_Util.App"
              RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+
+                <!-- COLORES BMW -->
+                <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml"/>
+
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
 
     <Application.Styles>
-        <FluentTheme />
+
+        <fluent:FluentTheme/>
+
+        <!-- ESTILOS BMW -->
+        <StyleInclude Source="avares://RAID-Util/Styles/BMWStyles.axaml"/>
+
     </Application.Styles>
+
 </Application>
