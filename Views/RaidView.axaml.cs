@@ -22,7 +22,8 @@ public partial class RaidView : UserControl
     public RaidView()
     {
         InitializeComponent();
-        LoadRealData();
+        //LoadRealData();
+        LoadFakeData();
         BuildUI();
     }
 
@@ -50,6 +51,133 @@ public partial class RaidView : UserControl
         }
     }
 
+    
+    private void LoadFakeData()
+{
+    _arrays = new List<RaidArrayInfo>
+    {
+        new RaidArrayInfo
+        {
+            Name = "md0",
+            Level = "RAID1",
+            State = "Healthy",
+            StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
+            IsExpanded = false,
+            IsMounted = true,
+            PersistMount = true,
+            MountPath = "/mnt/md0",
+            Disks = new List<RaidDiskInfo>
+            {
+                new RaidDiskInfo
+                {
+                    Name = "sda1",
+                    Model = "Samsung SSD 860 EVO",
+                    Size = "500G",
+                    Role = "active",
+                    State = "OK",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                    ArrayName = "md0"
+                },
+                new RaidDiskInfo
+                {
+                    Name = "sdb1",
+                    Model = "Samsung SSD 860 EVO",
+                    Size = "500G",
+                    Role = "active",
+                    State = "OK",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                    ArrayName = "md0"
+                }
+            }
+        },
+
+        new RaidArrayInfo
+        {
+            Name = "md1",
+            Level = "RAID5",
+            State = "Degraded",
+            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
+            IsExpanded = true,
+            IsMounted = false,
+            PersistMount = false,
+            MountPath = "/mnt/md1",
+            Disks = new List<RaidDiskInfo>
+            {
+                new RaidDiskInfo
+                {
+                    Name = "sdc1",
+                    Model = "WD Blue 1TB",
+                    Size = "1T",
+                    Role = "active",
+                    State = "OK",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                    ArrayName = "md1"
+                },
+                new RaidDiskInfo
+                {
+                    Name = "sdd1",
+                    Model = "WD Blue 1TB",
+                    Size = "1T",
+                    Role = "active",
+                    State = "OK",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                    ArrayName = "md1"
+                },
+                new RaidDiskInfo
+                {
+                    Name = "sde1",
+                    Model = "WD Blue 1TB",
+                    Size = "1T",
+                    Role = "faulty",
+                    State = "FAULTY",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                    ArrayName = "md1"
+                }
+            }
+        },
+
+        new RaidArrayInfo
+        {
+            Name = "md2",
+            Level = "RAID0",
+            State = "Rebuilding",
+            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
+            IsExpanded = false,
+            IsMounted = false,
+            PersistMount = false,
+            MountPath = "/mnt/md2",
+            Disks = new List<RaidDiskInfo>
+            {
+                new RaidDiskInfo
+                {
+                    Name = "nvme0n1p1",
+                    Model = "Samsung 980 PRO",
+                    Size = "1T",
+                    Role = "rebuilding",
+                    State = "WARN",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-nvme.png",
+                    ArrayName = "md2"
+                },
+                new RaidDiskInfo
+                {
+                    Name = "nvme1n1p1",
+                    Model = "Samsung 980 PRO",
+                    Size = "1T",
+                    Role = "active",
+                    State = "OK",
+                    Icon = "avares://RAID-Util/Assets/Icons/disk-nvme.png",
+                    ArrayName = "md2"
+                }
+            }
+        }
+    };
+
+    BuildUI();
+}
+
+    
+    
+    
     
   
 private Color GetArrayGlowColor(string state)

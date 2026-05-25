@@ -10,6 +10,7 @@ namespace RAID_Util.Views
     public partial class PasswordDialog : Window
     {
         private bool _closeApp = true;
+        private bool _returningValue = false;
 
         public PasswordDialog()
         {
@@ -18,15 +19,13 @@ namespace RAID_Util.Views
             InitializeComponent();
             this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-            // === CIERRE GLOBAL EXACTO A ISCSI-UTIL ===
             this.Closed += (s, e) =>
             {
-                LogService.Debug($"[PWD_DIALOG] Closed → closeApp={_closeApp}");
+                LogService.Debug($"[PWD_DIALOG] Closed → closeApp={_closeApp}, returningValue={_returningValue}");
 
-                if (_closeApp)
+                if (!_returningValue && _closeApp)
                 {
                     LogService.Write("[PWD_DIALOG] Cerrando aplicación por cierre del diálogo.");
-
                     var lifetime = Avalonia.Application.Current?.ApplicationLifetime
                         as IClassicDesktopStyleApplicationLifetime;
 
@@ -35,12 +34,10 @@ namespace RAID_Util.Views
             };
         }
 
-        // ============================================================
-        // BOTÓN ACEPTAR
-        // ============================================================
         private void OnAccept(object? sender, RoutedEventArgs e)
         {
             string pass = PwdBox.Text ?? "";
+            pass = pass.Trim(); // 🔥 CRÍTICO
 
             if (string.IsNullOrWhiteSpace(pass))
             {
@@ -51,33 +48,27 @@ namespace RAID_Util.Views
 
             LogService.Write("[PWD_DIALOG] Contraseña aceptada por el usuario.");
 
-            _closeApp = false;   // EXACTO A ISCSI-UTIL
+            _closeApp = false;
+            _returningValue = true; // 🔥 EVITA CIERRE PREMATURO
             Close(pass);
         }
 
-        // ============================================================
-        // BOTÓN CANCELAR
-        // ============================================================
         private void OnCancel(object? sender, RoutedEventArgs e)
         {
             LogService.Write("[PWD_DIALOG] Cancelado por el usuario. Cerrando aplicación.");
-            _closeApp = true;    // EXACTO A ISCSI-UTIL
+            _closeApp = true;
+            _returningValue = true;
             Close(null);
         }
 
-        // ============================================================
-        // BOTÓN CLOSE (X)
-        // ============================================================
         private void OnClose(object? sender, RoutedEventArgs e)
         {
             LogService.Write("[PWD_DIALOG] Botón Close pulsado. Cerrando aplicación.");
-            _closeApp = true;    // EXACTO A ISCSI-UTIL
+            _closeApp = true;
+            _returningValue = true;
             Close(null);
         }
 
-        // ============================================================
-        // ENTER / ESC
-        // ============================================================
         private void OnPasswordKeyDown(object? sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter)
@@ -92,9 +83,6 @@ namespace RAID_Util.Views
             }
         }
 
-        // ============================================================
-        // MOSTRAR ERROR
-        // ============================================================
         private void ShowError(string message)
         {
             LogService.Debug($"[PWD_DIALOG] Error mostrado: {message}");

@@ -10,6 +10,9 @@ namespace RAID_Util.Views.Tabs
 {
     public partial class LogsView : UserControl
     {
+        private string LogPath =>
+            Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
+
         public LogsView()
         {
             InitializeComponent();
@@ -18,30 +21,30 @@ namespace RAID_Util.Views.Tabs
 
         private void HookEvents()
         {
-            RefreshButton.Click += async (_, _) => await LoadLogs();
+            RefreshButton.Click += async (_, _) => await LoadLogsAsync();
             OpenFullButton.Click += OnOpenFullLog;
         }
 
         // ============================================================
-        // CARGAR LOGS
+        // CARGAR LOGS (OPTIMIZADO)
         // ============================================================
-        public async Task LoadLogs()
+        public async Task LoadLogsAsync()
         {
             try
             {
-                string logPath = Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
-
-                if (!File.Exists(logPath))
+                if (!File.Exists(LogPath))
                 {
                     LogTextBox.Text = "[No log file found]";
                     return;
                 }
 
-                string content = await File.ReadAllTextAsync(logPath);
+                // Leer archivo sin bloquear UI
+                string content = await File.ReadAllTextAsync(LogPath);
+
                 LogTextBox.Text = content;
 
-                // Auto-scroll al final
-                await Task.Delay(10);
+                // Auto-scroll estable
+                await Task.Yield();
                 LogTextBox.CaretIndex = LogTextBox.Text.Length;
             }
             catch (Exception ex)
@@ -50,6 +53,9 @@ namespace RAID_Util.Views.Tabs
             }
         }
 
+        
+        
+        
         // ============================================================
         // ABRIR LOG COMPLETO EN EDITOR
         // ============================================================
@@ -57,14 +63,12 @@ namespace RAID_Util.Views.Tabs
         {
             try
             {
-                string logPath = Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
-
-                if (File.Exists(logPath))
-                    ShellHelper.OpenFile(logPath);
+                if (File.Exists(LogPath))
+                    ShellHelper.OpenFile(LogPath);
             }
             catch
             {
-                // silencio
+                // silencio total
             }
         }
     }

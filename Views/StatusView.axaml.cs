@@ -5,6 +5,7 @@ using System;
 using System.Threading.Tasks;
 using Avalonia.Animation;
 using Avalonia.Media;
+using System.Collections.Generic;
 
 namespace RAID_Util.Views.Tabs
 {
@@ -31,21 +32,73 @@ namespace RAID_Util.Views.Tabs
         }
 
         // ============================================================
-        // CARGA PRINCIPAL DEL STATUS
+        // CARGA PRINCIPAL DEL STATUS (OPTIMIZADA)
         // ============================================================
         private async Task LoadStatusAsync()
-{
-    try
-    {
-        // --------------------------------------------------------
-        // 1) Estado global RAID
-        // --------------------------------------------------------
-        var raidHealth = await _statusService.GetOverallRaidHealthAsync();
-        TxtOverallRaidHealth.Text = raidHealth;
-
-        // Transición suave de color (solo se crea una vez)
-        if (TxtOverallRaidHealth.Transitions == null)
         {
+            try
+            {
+                // --------------------------------------------------------
+                // 0) Lanzar todas las tareas en paralelo (MUCHO MÁS RÁPIDO)
+                // --------------------------------------------------------
+                var tHealth = _statusService.GetOverallRaidHealthAsync();
+                var tArrays = _statusService.GetArraysSummaryAsync();
+                var tDisks = _statusService.GetDisksSummaryAsync();
+                var tRebuild = _statusService.GetRebuildSummaryAsync();
+                var tAtRisk = _statusService.GetArraysAtRiskAsync();
+                var tDiskAlerts = _statusService.GetDiskAlertsAsync();
+                var tEvents = _statusService.GetRecentEventsAsync();
+
+                await Task.WhenAll(tHealth, tArrays, tDisks, tRebuild, tAtRisk, tDiskAlerts, tEvents);
+
+                // --------------------------------------------------------
+                // 1) Estado global RAID
+                // --------------------------------------------------------
+                string raidHealth = tHealth.Result;
+                TxtOverallRaidHealth.Text = raidHealth;
+
+                EnsureTransitions();
+
+                TxtOverallRaidHealth.Foreground = GetHealthBrush(raidHealth);
+
+                // --------------------------------------------------------
+                // 2) Resúmenes numéricos
+                // --------------------------------------------------------
+                TxtArraysSummary.Text = tArrays.Result;
+                TxtDisksSummary.Text = tDisks.Result;
+                TxtRebuildSummary.Text = tRebuild.Result;
+
+                // --------------------------------------------------------
+                // 3) Arrays en riesgo
+                // --------------------------------------------------------
+                ListArraysAtRisk.ItemsSource = tAtRisk.Result;
+
+                // --------------------------------------------------------
+                // 4) Alertas de discos
+                // --------------------------------------------------------
+                ListDiskAlerts.ItemsSource = tDiskAlerts.Result;
+
+                // --------------------------------------------------------
+                // 5) Eventos recientes
+                // --------------------------------------------------------
+                ListRecentEvents.ItemsSource = tEvents.Result;
+            }
+            catch (Exception ex)
+            {
+                TxtOverallRaidHealth.Text = $"Error: {ex.Message}";
+                TxtOverallRaidHealth.Foreground = this.FindResource("BMWHealthCriticalBrush") as IBrush;
+            }
+        }
+
+        // ============================================================
+        // HELPERS
+        // ============================================================
+
+        private void EnsureTransitions()
+        {
+            if (TxtOverallRaidHealth.Transitions != null)
+                return;
+
             TxtOverallRaidHealth.Transitions = new Transitions
             {
                 new BrushTransition
@@ -56,67 +109,15 @@ namespace RAID_Util.Views.Tabs
             };
         }
 
-        // Aplicar color dinámico según estado
-        switch (raidHealth)
+        private IBrush GetHealthBrush(string state)
         {
-            case "Healthy":
-                TxtOverallRaidHealth.Foreground =
-                    this.FindResource("BMWHealthHealthyBrush") as IBrush;
-                break;
-
-            case "Warning":
-                TxtOverallRaidHealth.Foreground =
-                    this.FindResource("BMWHealthWarningBrush") as IBrush;
-                break;
-
-            case "Critical":
-                TxtOverallRaidHealth.Foreground =
-                    this.FindResource("BMWHealthCriticalBrush") as IBrush;
-                break;
-
-            default:
-                TxtOverallRaidHealth.Foreground =
-                    this.FindResource("BMWHealthNoneBrush") as IBrush;
-                break;
+            return state switch
+            {
+                "Healthy"  => this.FindResource("BMWHealthHealthyBrush") as IBrush,
+                "Warning"  => this.FindResource("BMWHealthWarningBrush") as IBrush,
+                "Critical" => this.FindResource("BMWHealthCriticalBrush") as IBrush,
+                _          => this.FindResource("BMWHealthNoneBrush") as IBrush
+            };
         }
-
-        // --------------------------------------------------------
-        // 2) Resúmenes numéricos
-        // --------------------------------------------------------
-        TxtArraysSummary.Text =
-            await _statusService.GetArraysSummaryAsync();
-
-        TxtDisksSummary.Text =
-            await _statusService.GetDisksSummaryAsync();
-
-        TxtRebuildSummary.Text =
-            await _statusService.GetRebuildSummaryAsync();
-
-        // --------------------------------------------------------
-        // 3) Arrays en riesgo
-        // --------------------------------------------------------
-        ListArraysAtRisk.ItemsSource =
-            await _statusService.GetArraysAtRiskAsync();
-
-        // --------------------------------------------------------
-        // 4) Alertas de discos
-        // --------------------------------------------------------
-        ListDiskAlerts.ItemsSource =
-            await _statusService.GetDiskAlertsAsync();
-
-        // --------------------------------------------------------
-        // 5) Eventos recientes
-        // --------------------------------------------------------
-        ListRecentEvents.ItemsSource =
-            await _statusService.GetRecentEventsAsync();
-    }
-    catch (Exception ex)
-    {
-        TxtOverallRaidHealth.Text = $"Error: {ex.Message}";
-        TxtOverallRaidHealth.Foreground =
-            this.FindResource("BMWHealthCriticalBrush") as IBrush;
-    }
-}
-
     }
 }

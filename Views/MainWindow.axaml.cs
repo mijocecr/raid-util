@@ -30,121 +30,121 @@ public partial class MainWindow : Window
         Title = "raid-util";
 
         LogService.Debug("[MAIN] Main window initialized.");
+
         SaveSettingButton.Click += OnOpenConfig;
+
+        // Ruta B: cargar RAID al entrar a la pestaña
+        MainTabs.SelectionChanged += OnTabChanged;
     }
 
     // ============================================================
     // FLUJO PRINCIPAL OnOpened 
     // ============================================================
+   
     protected override async void OnOpened(EventArgs e)
+{
+    base.OnOpened(e);
+
+    LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
+
+    // 0) Config
+    _config = ConfigManager.Load();
+    LogService.Debug("[MAIN] Configuration loaded.");
+
+    StatusBarText.Text = "Initializing...";
+    await Task.Delay(120);
+
+    // 1) Password + sudo
+    const int maxAttempts = 2;
+    int attempts = 0;
+
+    while (true)
     {
-        base.OnOpened(e);
+        attempts++;
 
-        LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
+        LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
+        await SolicitarPassword();
 
-        // ------------------------------------------------------------
-        // 0) CARGAR CONFIGURACIÓN GLOBAL
-        // ------------------------------------------------------------
-        _config = ConfigManager.Load();   // <--- AHORA DEVUELVE AppConfig
-        LogService.Debug("[MAIN] Configuration loaded.");
+        LogService.Debug($"[MAIN] Password length: {Credentials.AdminPassword?.Length ?? 0}");
 
-        StatusBarText.Text = "Initializing...";
-        await Task.Delay(120);
-
-        // ------------------------------------------------------------
-        // 1) VALIDACIÓN DE CONTRASEÑA
-        // ------------------------------------------------------------
-        const int maxAttempts = 2;
-        int attempts = 0;
-
-        while (true)
+        if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
         {
-            attempts++;
-
-            LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
-            await SolicitarPassword();
-
-            if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
-            {
-                StatusBarText.Text = "Initialization aborted.";
-                LogService.Error("[MAIN] Initialization aborted: no password provided.");
-                return;
-            }
-
-            StatusBarText.Text = "Validating password...";
-            LogService.Debug("[MAIN] Validating admin password...");
-
-            var result = ShellHelper.EjecutarComoRoot("bash -c \"echo OK\"");
-
-            if (result.ExitCode == 0)
-            {
-                LogService.Write("[MAIN] Password validated successfully.");
-                break;
-            }
-
-            LogService.Error($"[MAIN] Incorrect administrator password. attempt={attempts}");
-
-            var dlg = new IncorrectPasswordDialog();
-            await dlg.ShowDialog(this);
-
-            if (attempts >= maxAttempts)
-            {
-                LogService.Error("[MAIN] Too many failed attempts. Closing to avoid sudo lockout.");
-                StatusBarText.Text = "Too many failed attempts. Try again later.";
-                Close();
-                return;
-            }
-        }
-
-        // ------------------------------------------------------------
-        // 2) COMPROBAR SUBSISTEMA RAID
-        // ------------------------------------------------------------
-        StatusBarText.Text = "Checking RAID subsystem...";
-        LogService.Debug("[MAIN] Checking mdadm availability...");
-
-        var mdadmCheck = ShellHelper.EjecutarComoRoot("which mdadm");
-
-        if (mdadmCheck.ExitCode != 0)
-        {
-            LogService.Error("[MAIN] mdadm not found. RAID subsystem unavailable.");
-            StatusBarText.Text = "RAID subsystem unavailable.";
+            StatusBarText.Text = "Initialization aborted.";
+            LogService.Error("[MAIN] Initialization aborted: no password provided.");
             return;
         }
 
-        await Task.Delay(120);
+        StatusBarText.Text = "Validating password...";
+        LogService.Debug("[MAIN] Validating admin password...");
 
-        // ------------------------------------------------------------
-        // 3) CARGAR INFORMACIÓN RAID
-        // ------------------------------------------------------------
-        StatusBarText.Text = "Loading RAID information...";
-        LogService.Debug("[MAIN] Loading RAID arrays overview...");
-        await LoadRaidAsync();
+        // 👇 OJO: aquí ya NO pasamos 'bash -c ...'
+        var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
 
-        // ------------------------------------------------------------
-        // 4) INICIALIZAR TIMER MANAGER
-        // ------------------------------------------------------------
-        LogService.Debug("[MAIN] Initializing TimerManager...");
+        LogService.Debug($"[MAIN] sudo test exit={exit}");
+        LogService.Debug($"[MAIN] sudo stdout='{stdout}'");
+        LogService.Debug($"[MAIN] sudo stderr='{stderr}'");
 
-        _timerManager = new TimerManager(
-            statusView: StatusViewControl,
-            logsView: LogsViewControl,
-            generalRefreshMs: _config.GeneralRefreshMs,
-            rebuildRefreshMs: _config.RebuildRefreshMs,
-            hotplugRefreshMs: _config.HotplugRefreshMs
-        );
+        if (exit == 0)
+        {
+            LogService.Write("[MAIN] Password validated successfully.");
+            break;
+        }
 
+        LogService.Error($"[MAIN] Incorrect administrator password. attempt={attempts}");
 
-        _timerManager.StartAll();
+        var dlg = new IncorrectPasswordDialog();
+        await dlg.ShowDialog(this);
 
-        LogService.Write("[MAIN] TimerManager started.");
-
-        // ------------------------------------------------------------
-        // 5) FINALIZADO
-        // ------------------------------------------------------------
-        StatusBarText.Text = "Ready.";
-        LogService.Write("[MAIN] Initialization completed. System ready.");
+        if (attempts >= maxAttempts)
+        {
+            LogService.Error("[MAIN] Too many failed attempts. Closing to avoid sudo lockout.");
+            StatusBarText.Text = "Too many failed attempts. Try again later.";
+            Close();
+            return;
+        }
     }
 
+    // 2) Comprobar mdadm (también sin doble bash)
+    StatusBarText.Text = "Checking RAID subsystem...";
+    LogService.Debug("[MAIN] Checking mdadm availability...");
+
+    var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
+    LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut}', err='{mdErr}'");
+
+    if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
+    {
+        LogService.Error("[MAIN] mdadm not found. RAID subsystem unavailable.");
+        StatusBarText.Text = "RAID subsystem unavailable.";
+        return;
+    }
+
+    await Task.Delay(120);
+
+    // 3) Status inicial
+    StatusBarText.Text = "System ready.";
+    LogService.Debug("[MAIN] Status tab initialized.");
+
+    // 4) TimerManager
+    LogService.Debug("[MAIN] Initializing TimerManager...");
+
+    _timerManager = new TimerManager(
+        statusView: StatusViewControl,
+        logsView: LogsViewControl,
+        generalRefreshMs: _config.GeneralRefreshMs,
+        rebuildRefreshMs: _config.RebuildRefreshMs,
+        hotplugRefreshMs: _config.HotplugRefreshMs
+    );
+
+    _timerManager.StartAll();
+
+    LogService.Write("[MAIN] TimerManager started.");
+
+    // 5) Fin
+    StatusBarText.Text = "Ready.";
+    LogService.Write("[MAIN] Initialization completed. System ready.");
+}
+
+    
     // ============================================================
     // DIÁLOGO DE CONTRASEÑA
     // ============================================================
@@ -161,15 +161,94 @@ public partial class MainWindow : Window
     }
 
     // ============================================================
-    // CARGAR RAID
+    // RUTA B: CARGAR RAID AL ENTRAR A LA PESTAÑA
+    // ============================================================
+    private async void OnTabChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (MainTabs.SelectedIndex == 1) // pestaña RAID
+        {
+            StatusBarText.Text = "Loading RAID information...";
+            LogService.Debug("[MAIN] RAID tab selected → triggering LoadRaidAsync()");
+            await LoadRaidAsync();
+        }
+    }
+
+    // ============================================================
+    // CARGA REAL DE RAID (CON LOGS DETALLADOS)
     // ============================================================
     private async Task LoadRaidAsync()
     {
-        LogService.Debug("[MAIN] Loading RAID arrays...");
+        LogService.Write("[MAIN] ================= RAID LOAD START =================");
 
-        using (LoadingService.Show("Loading RAID arrays..."))
+        try
         {
-            LogService.Debug("[MAIN] RAID arrays loaded.");
+            using (LoadingService.Show("Loading RAID arrays..."))
+            {
+                var service = new RaidService();
+
+                // ------------------------------------------------------------
+                // 1) Obtener arrays
+                // ------------------------------------------------------------
+                LogService.Debug("[MAIN] Calling RaidService.GetArraysAsync()...");
+                var arrays = await service.GetArraysAsync();
+                LogService.Debug($"[MAIN] Arrays returned: {arrays.Count}");
+
+                foreach (var a in arrays)
+                {
+                    LogService.Debug($"[MAIN] ARRAY → {a.Name} | Level={a.Level} | State={a.State}");
+                }
+
+                // ------------------------------------------------------------
+                // 2) Obtener discos
+                // ------------------------------------------------------------
+                LogService.Debug("[MAIN] Calling RaidService.GetAllDisksAsync()...");
+                var disks = await service.GetAllDisksAsync();
+                LogService.Debug($"[MAIN] Disks returned: {disks.Count}");
+
+                foreach (var d in disks)
+                {
+                    LogService.Debug($"[MAIN] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State}");
+                }
+
+                // ------------------------------------------------------------
+                // 3) Asociar discos a arrays
+                // ------------------------------------------------------------
+                LogService.Debug("[MAIN] Associating disks to arrays...");
+
+                foreach (var array in arrays)
+                {
+                    array.Disks = disks.FindAll(d => d.ArrayName == array.Name);
+
+                    LogService.Debug($"[MAIN] ARRAY {array.Name} → {array.Disks.Count} disks associated");
+
+                    foreach (var d in array.Disks)
+                    {
+                        LogService.Debug($"[MAIN]   ↳ DISK {d.Name} | Role={d.Role} | State={d.State}");
+                    }
+                }
+
+                // ------------------------------------------------------------
+                // 4) Enviar datos a la GUI
+                // ------------------------------------------------------------
+                LogService.Debug("[MAIN] Sending arrays to RaidView.SetArrays()...");
+               // RaidView.SetArrays(arrays);
+
+                StatusBarText.Text = "RAID information loaded.";
+            }
+
+            LogService.Write("[MAIN] ================= RAID LOAD END =================");
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("[MAIN] EXCEPTION DURING RAID LOAD:");
+            LogService.Error(ex.ToString());
+
+            StatusBarText.Text = "Error loading RAID information.";
+
+            // fallback seguro
+           // RaidView.SetArrays(new());
+
+            LogService.Write("[MAIN] ================= RAID LOAD FAILED =================");
         }
     }
 
@@ -180,12 +259,11 @@ public partial class MainWindow : Window
     {
         LogService.Debug("[MAIN] Opening configuration window...");
 
-        var win = new ConfigWindow(_config);   // <--- PASAMOS LA INSTANCIA
+        var win = new ConfigWindow(_config);
         await win.ShowDialog(this);
 
         LogService.Write("[MAIN] Configuration updated.");
 
-        // ACTUALIZAR INTERVALOS DEL TIMER
         if (_timerManager is not null)
         {
             _timerManager.UpdateIntervals(

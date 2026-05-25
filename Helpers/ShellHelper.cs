@@ -4,160 +4,141 @@ using System.IO;
 using System.Threading.Tasks;
 using RAID_Util.Services;
 
-namespace RAID_Util.Helpers;
-
-public static class ShellHelper
+namespace RAID_Util.Helpers
 {
-    private static long _callCount = 0;
-
-    public static (int ExitCode, string Stdout, string Stderr) EjecutarComoRoot(string command)
+    public static class ShellHelper
     {
-        var callId = ++_callCount;
-        var sw = Stopwatch.StartNew();
+        private static long _callCount = 0;
 
-        LogService.Debug($"[SHELL] #{callId} → EjecutarComoRoot('{command}')");
-
-        try
+        private static string FixCommandPath(string cmd)
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "sudo",
+            // Si el comando empieza por "mdadm", lo reemplazamos por la ruta absoluta
+            if (cmd.TrimStart().StartsWith("mdadm "))
+                return cmd.Replace("mdadm", "/usr/sbin/mdadm");
 
-                // *** CORRECCIÓN CRÍTICA ***
-                // -S  → leer contraseña por stdin
-                // -k  → forzar a sudo a pedir SOLO UNA contraseña
-                Arguments = $"-S -k bash -c \"{command.Replace("\"", "\\\"")}\"",
-
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = new Process { StartInfo = psi };
-            process.Start();
-
-            // *** ENVÍO DE CONTRASEÑA CORREGIDO ***
-            if (!string.IsNullOrEmpty(Credentials.AdminPassword))
-            {
-                var pass = Credentials.AdminPassword.TrimEnd('\r', '\n');
-
-                // sudo a veces pide 2 veces → enviamos 2 líneas
-                process.StandardInput.WriteLine(pass);
-                process.StandardInput.WriteLine(pass);
-
-                // línea vacía final → sudo recibe EOF correctamente
-                process.StandardInput.WriteLine();
-                process.StandardInput.Flush();
-            }
-
-            process.StandardInput.Close();
-
-            string stdout = process.StandardOutput.ReadToEnd();
-            string stderr = process.StandardError.ReadToEnd();
-
-            const int timeoutMs = 15000;
-
-            if (!process.WaitForExit(timeoutMs))
-            {
-                try { process.Kill(); } catch { }
-
-                LogService.Error($"[SHELL] #{callId} TIMEOUT ejecutando '{command}'");
-                return (1, "", "Timeout");
-            }
-
-            sw.Stop();
-            LogService.Debug($"[SHELL] #{callId} ← exit={process.ExitCode} en {sw.ElapsedMilliseconds} ms");
-
-            // *** DETECCIÓN DE CONTRASEÑA INCORRECTA ***
-            if (stderr.Contains("incorrect password", StringComparison.OrdinalIgnoreCase) ||
-                stderr.Contains("Sorry, try again", StringComparison.OrdinalIgnoreCase) ||
-                stderr.Contains("no password was provided", StringComparison.OrdinalIgnoreCase))
-            {
-                LogService.Error($"[SHELL] #{callId} PASSWORD_INCORRECT");
-                return (1001, stdout, "PASSWORD_INCORRECT");
-            }
-
-            return (process.ExitCode, stdout, stderr);
+            return cmd;
         }
-        catch (Exception ex)
+
+        public static (int ExitCode, string Stdout, string Stderr) EjecutarComoRoot(string command)
         {
-            LogService.Error($"[SHELL] #{callId} EXCEPTION: {ex.Message}");
-            return (1, "", ex.Message);
+            var callId = ++_callCount;
+            var sw = Stopwatch.StartNew();
+
+            Console.WriteLine($"[SHELL] #{callId} EjecutarComoRoot: {command}");
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "sudo",
+                    Arguments = $"-S bash -c \"{command.Replace("\"", "\\\"")}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                if (!string.IsNullOrEmpty(Credentials.AdminPassword))
+                {
+                    var pass = Credentials.AdminPassword.TrimEnd('\r', '\n');
+                    process.StandardInput.WriteLine(pass);
+                    process.StandardInput.Flush();
+                }
+
+                process.StandardInput.Close();
+
+                const int timeoutMs = 15000;
+
+                if (!process.WaitForExit(timeoutMs))
+                {
+                    try { process.Kill(); } catch { }
+                    Console.WriteLine($"[SHELL] #{callId} TIMEOUT ejecutando '{command}'");
+                    return (1, "", "Timeout");
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+
+                sw.Stop();
+
+                Console.WriteLine($"[SHELL] #{callId} EXIT={process.ExitCode} ({sw.ElapsedMilliseconds} ms)");
+                Console.WriteLine($"[SHELL] #{callId} STDOUT:\n{stdout}");
+                Console.WriteLine($"[SHELL] #{callId} STDERR:\n{stderr}");
+
+                return (process.ExitCode, stdout, stderr);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SHELL] #{callId} EXCEPTION: {ex}");
+                return (1, "", ex.Message);
+            }
         }
-    }
 
-    // ---------------------------------------------------------
-    // EJECUCIÓN NORMAL (SIN ROOT)
-    // ---------------------------------------------------------
-    public static async Task<string> RunCleanAsync(string command)
-    {
-        LogService.Debug($"[SHELL] RunCleanAsync('{command}')");
-
-        try
+        public static async Task<string> RunCleanAsync(string command)
         {
-            var psi = new ProcessStartInfo
+            var callId = ++_callCount;
+
+            // 🔥 Asegurar que mdadm tenga ruta absoluta
+            command = FixCommandPath(command);
+
+            Console.WriteLine($"[SHELL] #{callId} RunCleanAsync: {command}");
+
+            try
             {
-                FileName = "/bin/bash",
-                Arguments = $"-c \"{command}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "/bin/bash",
+                    Arguments = $"-c \"{command}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
 
-            using var process = new Process { StartInfo = psi };
+                using var process = new Process { StartInfo = psi };
+                process.Start();
 
-            process.Start();
+                string stdout = await process.StandardOutput.ReadToEndAsync();
+                string stderr = await process.StandardError.ReadToEndAsync();
 
-            string stdout = await process.StandardOutput.ReadToEndAsync();
-            string stderr = await process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync();
 
-            await process.WaitForExitAsync();
+                Console.WriteLine($"[SHELL] #{callId} STDOUT:\n{stdout}");
+                Console.WriteLine($"[SHELL] #{callId} STDERR:\n{stderr}");
 
-            if (!string.IsNullOrWhiteSpace(stderr))
+                return (stdout + "\n" + stderr).Trim();
+            }
+            catch (Exception ex)
             {
-                LogService.Error($"[SHELL] RunCleanAsync stderr: {stderr}");
+                Console.WriteLine($"[SHELL] #{callId} EXCEPTION: {ex}");
                 return string.Empty;
             }
-
-            LogService.Debug($"[SHELL] RunCleanAsync OK");
-            return stdout.Trim();
         }
-        catch (Exception ex)
-        {
-            LogService.Error($"[SHELL] RunCleanAsync exception: {ex.Message}");
-            return string.Empty;
-        }
-    }
-    
-    public static void OpenFile(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-                return;
 
-            // Linux: xdg-open
-            var psi = new ProcessStartInfo
+        public static void OpenFile(string path)
+        {
+            try
             {
-                FileName = "xdg-open",
-                Arguments = $"\"{path}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                CreateNoWindow = true
-            };
+                if (!File.Exists(path))
+                    return;
 
-            Process.Start(psi);
-        }
-        catch
-        {
-            // silencio total
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "xdg-open",
+                    Arguments = $"\"{path}\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false,
+                    CreateNoWindow = true
+                };
+
+                Process.Start(psi);
+            }
+            catch { }
         }
     }
-
-    
-    
 }
