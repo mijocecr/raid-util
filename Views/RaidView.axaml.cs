@@ -7,6 +7,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Layout;
+using System.Linq;
+
 using Avalonia.Platform;
 using Avalonia.Styling;
 using RAID_Util.Core;
@@ -22,8 +24,8 @@ public partial class RaidView : UserControl
     public RaidView()
     {
         InitializeComponent();
-        //LoadRealData();
-        LoadFakeData();
+        LoadRealData();
+        //LoadFakeData();
         BuildUI();
     }
 
@@ -52,7 +54,7 @@ public partial class RaidView : UserControl
     }
 
     
-    private void LoadFakeData()
+   private void LoadFakeData()
 {
     _arrays = new List<RaidArrayInfo>
     {
@@ -66,6 +68,16 @@ public partial class RaidView : UserControl
             IsMounted = true,
             PersistMount = true,
             MountPath = "/mnt/md0",
+
+            TotalSize = "500 GB",
+            UsableSize = "500 GB",
+            ParitySize = "0 GB",
+            AverageTemp = 34,
+            DiskSummary = "2× SSD SATA",
+            Uptime = "12 days",
+            RebuildProgress = 0,
+            RebuildETA = "",
+
             Disks = new List<RaidDiskInfo>
             {
                 new RaidDiskInfo
@@ -101,6 +113,16 @@ public partial class RaidView : UserControl
             IsMounted = false,
             PersistMount = false,
             MountPath = "/mnt/md1",
+
+            TotalSize = "3 TB",
+            UsableSize = "2 TB",
+            ParitySize = "1 TB",
+            AverageTemp = 41,
+            DiskSummary = "3× HDD 7200 RPM",
+            Uptime = "3 days",
+            RebuildProgress = 37,
+            RebuildETA = "12 min",
+
             Disks = new List<RaidDiskInfo>
             {
                 new RaidDiskInfo
@@ -146,6 +168,16 @@ public partial class RaidView : UserControl
             IsMounted = false,
             PersistMount = false,
             MountPath = "/mnt/md2",
+
+            TotalSize = "2 TB",
+            UsableSize = "2 TB",
+            ParitySize = "0 TB",
+            AverageTemp = 46,
+            DiskSummary = "2× NVMe PCIe 4.0",
+            Uptime = "7 hours",
+            RebuildProgress = 82,
+            RebuildETA = "3 min",
+
             Disks = new List<RaidDiskInfo>
             {
                 new RaidDiskInfo
@@ -230,7 +262,7 @@ private async void AnimateArrayGlow(Border border, SolidColorBrush brush)
 
 
 ///---------------------
-
+/*
 private Border BuildArrayCard(RaidArrayInfo array)
 {
     // BIG ICON (left column, spans all rows)
@@ -402,7 +434,131 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     return glowBorder;
 }
+*/
 
+///-----------------------
+
+private Border BuildArrayCard(RaidArrayInfo array)
+{
+    var icon = LoadImage(array.StateIcon, 150);
+    icon.Margin = new Thickness(4);
+    icon.VerticalAlignment = VerticalAlignment.Center;
+
+    var name = new TextBlock
+    {
+        Text = $"{array.Name} ({array.Level})",
+        FontSize = 22,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+        FontWeight = FontWeight.Bold,
+        Margin = new Thickness(0, 0, 0, 4)
+    };
+
+    var info = new StackPanel
+    {
+        Spacing = 2
+    };
+
+    info.Children.Add(name);
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"State: {array.State}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Disks: {array.Disks.Count} ({array.Disks.Count(d => d.State == "OK")} OK, {array.Disks.Count(d => d.State == "FAULTY")} Faulty)",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Size: {array.TotalSize} (Usable {array.UsableSize}, Parity {array.ParitySize})",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Avg Temp: {array.AverageTemp}°C",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Type: {array.DiskSummary}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Uptime: {array.Uptime}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    if (array.RebuildProgress > 0)
+    {
+        info.Children.Add(new TextBlock
+        {
+            Text = $"Rebuild: {array.RebuildProgress}% (ETA {array.RebuildETA})",
+            FontSize = 14,
+            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+        });
+    }
+
+    var grid = new Grid
+    {
+        ColumnDefinitions =
+        {
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star)
+        }
+    };
+
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
+
+    grid.Children.Add(info);
+    Grid.SetColumn(info, 1);
+
+    var glowColor = GetArrayGlowColor(array.State);
+    var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
+
+    var glowBorder = new Border
+    {
+        Background = glowBrush,
+        CornerRadius = new CornerRadius(14),
+        Padding = new Thickness(0),
+        Margin = new Thickness(0, 0, 0, 8)
+    };
+
+    var cardBorder = new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        CornerRadius = new CornerRadius(10),
+        Cursor = new Cursor(StandardCursorType.Hand),
+        Padding = new Thickness(12),
+        Child = grid
+    };
+
+    glowBorder.Child = cardBorder;
+
+    AnimateArrayGlow(glowBorder, glowBrush);
+
+    cardBorder.PointerPressed += (_, _) =>
+    {
+        array.IsExpanded = !array.IsExpanded;
+        BuildUI();
+    };
+
+    return glowBorder;
+}
 
 
  ///----------------------

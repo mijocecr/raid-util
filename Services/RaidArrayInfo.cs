@@ -35,6 +35,16 @@ public class RaidArrayInfo
     public bool PersistMount { get; set; }
     public bool AutoMount { get; set; }
     public string? MountPath { get; set; }
+    
+    
+    
+    public string ParitySize { get; set; } = "Unknown";
+    public int AverageTemp { get; set; } = 0;
+    public string DiskSummary { get; set; } = "";
+    public string Uptime { get; set; } = "Unknown";
+    
+    public string RebuildETA { get; set; } = "";
+
 
     
 }
