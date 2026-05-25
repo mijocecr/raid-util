@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using RAID_Util.Models;
 
 namespace RAID_Util.Services;
 
@@ -29,16 +30,16 @@ public class RaidArrayInfo
 
     // Para expandir/cerrar la tarjeta
     public bool IsExpanded { get; set; } = false;
+    
+    public bool IsMounted { get; set; }
+    public bool PersistMount { get; set; }
+    public bool AutoMount { get; set; }
+    public string? MountPath { get; set; }
+
+    
 }
 
 
 
 
 
-public class RaidDiskInfo
-{
-    public string Name { get; set; }
-    public string Role { get; set; }
-    public string State { get; set; }
-    public string Icon { get; set; }
-}

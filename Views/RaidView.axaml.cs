@@ -9,6 +9,8 @@ using Avalonia.Media;
 using Avalonia.Layout;
 using Avalonia.Platform;
 using Avalonia.Styling;
+using RAID_Util.Core;
+using RAID_Util.Models;
 using RAID_Util.Services;
 
 namespace RAID_Util.Views;
@@ -20,136 +22,36 @@ public partial class RaidView : UserControl
     public RaidView()
     {
         InitializeComponent();
-        LoadFakeData();
+        LoadRealData();
         BuildUI();
     }
 
-   private void LoadFakeData()
-{
-    _arrays = new()
+    
+    private async void LoadRealData()
     {
-        // 1) RAID1 — Healthy (HDD)
-        new RaidArrayInfo
+        try
         {
-            Name = "md0",
-            Level = "RAID1",
-            State = "Healthy",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sda", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" },
-                new RaidDiskInfo { Name="/dev/sdb", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" }
-            }
-        },
+            var service = new RaidService();
 
-        // 2) RAID5 — Degraded (SSD faulty)
-        new RaidArrayInfo
-        {
-            Name = "md1",
-            Level = "RAID5",
-            State = "Degraded",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdc", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" },
-                new RaidDiskInfo { Name="/dev/sdd", Role="faulty", State="FAULTY", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" },
-                new RaidDiskInfo { Name="/dev/sde", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" }
-            }
-        },
+            // Obtener arrays reales del sistema
+            _arrays = await service.GetArraysAsync();
 
-        // 3) RAID6 — Rebuilding (NVMe)
-        new RaidArrayInfo
-        {
-            Name = "md2",
-            Level = "RAID6",
-            State = "Rebuilding",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
-            Disks =
+            // Si no hay arrays, mostrar UI vacía
+            if (_arrays == null || _arrays.Count == 0)
             {
-                new RaidDiskInfo { Name="/dev/sdf", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sdg", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sdh", Role="rebuilding", State="WARN", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sdi", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" }
+                _arrays = new List<RaidArrayInfo>();
             }
-        },
 
-        // 4) RAID10 — Missing disk (Virtual)
-        new RaidArrayInfo
-        {
-            Name = "md3",
-            Level = "RAID10",
-            State = "Degraded",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdj", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-virtual.png" },
-                new RaidDiskInfo { Name="/dev/sdk", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-virtual.png" },
-                new RaidDiskInfo { Name="/dev/sdl", Role="missing", State="MISSING", Icon="avares://RAID-Util/Assets/Icons/disk-virtual.png" },
-                new RaidDiskInfo { Name="/dev/sdm", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-virtual.png" }
-            }
-        },
-
-        // 5) RAID0 — Mixed disks (HDD + SSD)
-        new RaidArrayInfo
-        {
-            Name = "md4",
-            Level = "RAID0",
-            State = "Warning",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdn", Role="stripe", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" },
-                new RaidDiskInfo { Name="/dev/sdo", Role="stripe", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" }
-            }
-        },
-
-        // 6) RAID5 — Spare disk (NVMe spare)
-        new RaidArrayInfo
-        {
-            Name = "md5",
-            Level = "RAID5",
-            State = "Healthy",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdp", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sdq", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sdr", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" },
-                new RaidDiskInfo { Name="/dev/sds", Role="spare", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-nvme.png" }
-            }
-        },
-
-        // 7) RAID1 — Read-only (SSD)
-        new RaidArrayInfo
-        {
-            Name = "md6",
-            Level = "RAID1",
-            State = "Read-Only",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-readonly.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdt", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" },
-                new RaidDiskInfo { Name="/dev/sdu", Role="active", State="OK", Icon="avares://RAID-Util/Assets/Icons/disk-ssd.png" }
-            }
-        },
-
-        // 8) RAID5 — Fully failed (HDD faulty)
-        new RaidArrayInfo
-        {
-            Name = "md7",
-            Level = "RAID5",
-            State = "Failed",
-            StateIcon = "avares://RAID-Util/Assets/Icons/array-error.png",
-            Disks =
-            {
-                new RaidDiskInfo { Name="/dev/sdv", Role="faulty", State="FAULTY", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" },
-                new RaidDiskInfo { Name="/dev/sdw", Role="faulty", State="FAULTY", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" },
-                new RaidDiskInfo { Name="/dev/sdx", Role="faulty", State="FAULTY", Icon="avares://RAID-Util/Assets/Icons/disk-hdd.png" }
-            }
+            BuildUI();
         }
-    };
-}
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading real RAID data: {ex.Message}");
+        }
+    }
 
+    
+  
 private Color GetArrayGlowColor(string state)
 {
     bool isDark = Application.Current!.ActualThemeVariant == ThemeVariant.Dark;
@@ -215,20 +117,57 @@ private Border BuildArrayCard(RaidArrayInfo array)
         FontSize = 22,
         Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
         FontWeight = FontWeight.Bold,
-        
         Margin = new Thickness(0, 0, 0, 4)
     };
 
-    // MENU BUTTON (top-right)
+    // BOTÓN ⋮ BMW
     var btnMenu = new Button
     {
         Content = "⋮",
         Width = 32,
         Height = 32,
-        BorderBrush=(IBrush)Application.Current!.FindResource("BMWAccentBrush")!,
+        Classes = { "IconButton" },
         HorizontalContentAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Top,
         HorizontalAlignment = HorizontalAlignment.Right
+    };
+
+    // MENÚ BMW + LÓGICA REAL
+    btnMenu.Click += (_, _) =>
+    {
+        var menu = new ContextMenu
+        {
+            Items =
+            {
+                new MenuItem
+                {
+                    Header = "Details",
+                    Command = new LambdaCommand(() => ShowArrayDetails(array))
+                },
+                new MenuItem
+                {
+                    Header = "Check Array",
+                    Command = new LambdaCommand(() => RunArrayCheck(array))
+                },
+                new MenuItem
+                {
+                    Header = "Repair Array",
+                    Command = new LambdaCommand(() => RunArrayRepair(array))
+                },
+                new MenuItem
+                {
+                    Header = "Add Spare",
+                    Command = new LambdaCommand(() => AddSpareToArray(array))
+                },
+                new MenuItem
+                {
+                    Header = "Remove Array",
+                    Command = new LambdaCommand(() => RemoveArray(array))
+                }
+            }
+        };
+
+        menu.Open(btnMenu);
     };
 
     // INFO BLOCK
@@ -267,29 +206,11 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Children = { name, infoStack }
     };
 
-    // ACTION BUTTONS (BOTTOM)
-    var btnDetails = new Button { Content = "Details", Margin = new Thickness(0, 0, 6, 0) };
-    var btnCheck = new Button { Content = "Check", Margin = new Thickness(0, 0, 6, 0) };
-    var btnRepair = new Button { Content = "Repair", Margin = new Thickness(0, 0, 6, 0) };
-
-    var bottomButtons = new StackPanel
-    {
-        Orientation = Orientation.Horizontal,
-        Spacing = 6,
-        HorizontalAlignment = HorizontalAlignment.Left,
-        Margin = new Thickness(0, 8, 0, 0)
-    };
-
-    bottomButtons.Children.Add(btnDetails);
-    bottomButtons.Children.Add(btnCheck);
-    bottomButtons.Children.Add(btnRepair);
-
-    // MAIN GRID (2 rows, 3 columns)
+    // MAIN GRID (solo 1 fila ahora)
     var grid = new Grid
     {
         RowDefinitions =
         {
-            new RowDefinition(GridLength.Auto),
             new RowDefinition(GridLength.Auto)
         },
         ColumnDefinitions =
@@ -300,30 +221,23 @@ private Border BuildArrayCard(RaidArrayInfo array)
         }
     };
 
-    // ICON spans both rows
+    // ICON
     grid.Children.Add(icon);
     Grid.SetRow(icon, 0);
     Grid.SetColumn(icon, 0);
-    Grid.SetRowSpan(icon, 2);
 
-    // NAME + INFO (center)
+    // NAME + INFO
     grid.Children.Add(nameAndInfo);
     Grid.SetRow(nameAndInfo, 0);
     Grid.SetColumn(nameAndInfo, 1);
 
-    // MENU BUTTON (top-right)
+    // MENU BUTTON
     grid.Children.Add(btnMenu);
     Grid.SetRow(btnMenu, 0);
     Grid.SetColumn(btnMenu, 2);
 
-    // BOTTOM BUTTONS (full width)
-    grid.Children.Add(bottomButtons);
-    Grid.SetRow(bottomButtons, 1);
-    Grid.SetColumn(bottomButtons, 1);
-    Grid.SetColumnSpan(bottomButtons, 2);
-
     // -------------------------------
-    // GLOW EXTERIOR BMW (DynamicResource)
+    // GLOW EXTERIOR BMW
     // -------------------------------
     var glowColor = GetArrayGlowColor(array.State);
     var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
@@ -336,7 +250,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Margin = new Thickness(0, 0, 0, 8)
     };
 
-    // Tarjeta interior BMW (usa BMWSurfaceElevatedBrush)
+    // Tarjeta interior BMW
     var cardBorder = new Border
     {
         Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
@@ -345,7 +259,6 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Padding = new Thickness(12),
         Child = grid
     };
-
 
     glowBorder.Child = cardBorder;
 
@@ -364,41 +277,125 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
 
 
-///----------------------
+ ///----------------------
 
-    
-    private Border BuildExpandedCard(RaidArrayInfo array)
+private Border BuildExpandedCard(RaidArrayInfo array)
+{
+    var panel = new StackPanel { Spacing = 10 };
+
+    panel.Children.Add(new TextBlock
     {
-        var panel = new StackPanel { Spacing = 10 };
+        Text = array.Name,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        TextAlignment = TextAlignment.Center,
+        FontSize = 20,
+        FontWeight = FontWeight.Bold,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+        Margin = new Thickness(0, 0, 0, 8)
+    });
 
-        panel.Children.Add(new TextBlock
-        {
-            Text = array.Name,
-            FontSize = 20,
-            FontWeight = FontWeight.Bold,
-            Foreground = Brushes.White,
-            Margin = new Thickness(0, 0, 0, 8)
-        });
+    // Opciones de montaje
+    panel.Children.Add(BuildMountOptions(array));
 
-        foreach (var disk in array.Disks)
-            panel.Children.Add(BuildDiskCard(disk));
+    // Discos
+    foreach (var disk in array.Disks)
+        panel.Children.Add(BuildDiskCard(disk));
 
-        return new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(25, 25, 25)),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(16),
-            Margin = new Thickness(0, 0, 0, 16),
-            Child = panel
-        };
-    }
+    return new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        CornerRadius = new CornerRadius(10),
+        Padding = new Thickness(16),
+        Margin = new Thickness(0, 0, 0, 16),
+        Child = panel
+    };
+}
 
-   private Border BuildDiskCard(RaidDiskInfo disk)
+private Control BuildMountOptions(RaidArrayInfo array)
+{
+    var panel = new StackPanel
+    {
+        Spacing = 12,
+        Margin = new Thickness(0, 0, 0, 10)
+    };
+
+    // 🔵 BOTONES CENTRADOS
+    var buttonsRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 10,
+        
+        HorizontalAlignment = HorizontalAlignment.Right
+    };
+
+    var btnMount = new Button
+    {
+        Content = array.IsMounted ? "Unmount" : "Mount",
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "PrimaryButton" },
+        Width = 100
+    };
+
+    btnMount.Click += (_, _) =>
+    {
+        array.IsMounted = !array.IsMounted;
+        BuildUI();
+    };
+
+    var btnOpen = new Button
+    {
+        Content = "Open",
+        Classes = { "SecondaryButton" },
+        Width = 90
+    };
+
+    buttonsRow.Children.Add(btnMount);
+    buttonsRow.Children.Add(btnOpen);
+
+    panel.Children.Add(buttonsRow);
+
+    // 🔵 TOGGLE ÚNICO (CENTRADO)
+    var togglesRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 30,
+        HorizontalAlignment = HorizontalAlignment.Left
+    };
+
+    var chkPersist = new CheckBox
+    {
+        Content = "Persist Mount",
+        IsChecked = array.PersistMount,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
+    };
+
+    chkPersist.Checked += (_, _) => array.PersistMount = true;
+    chkPersist.Unchecked += (_, _) => array.PersistMount = false;
+
+    togglesRow.Children.Add(chkPersist);
+
+    panel.Children.Add(togglesRow);
+
+    // 🔵 RUTA DE MONTAJE (IZQUIERDA)
+    panel.Children.Add(new TextBlock
+    {
+        Text = $"Mount Path: {array.MountPath ?? "/mnt/" + array.Name}",
+        FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    return panel;
+}
+
+   
+  private Border BuildDiskCard(RaidDiskInfo disk)
 {
     var icon = LoadImage(disk.Icon, 72);
     icon.Margin = new Thickness(2);
 
-    // TEXTOS BMW (Light/Dark automáticos)
+    // TEXTOS BMW
     var name = new TextBlock
     {
         Text = disk.Name,
@@ -427,31 +424,67 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Children = { name, role, state }
     };
 
-    // DOT con glow y animación (ya BMW)
+    // DOT con glow BMW
     var statusDot = BuildStatusDot(disk.State);
 
-    // Botón ⋮ (se estiliza vía BMWStyles.axaml)
+    // BOTÓN ⋮ BMW
     var manageButton = new Button
     {
         Content = "⋮",
         Width = 32,
         Height = 32,
-        BorderBrush=(IBrush)Application.Current!.FindResource("BMWAccentBrush")!,
+        Classes = { "IconButton" },
         HorizontalContentAlignment = HorizontalAlignment.Center,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        
-        VerticalAlignment = VerticalAlignment.Center
+        VerticalContentAlignment = VerticalAlignment.Center
     };
 
-    
+    // MENÚ BMW + LÓGICA REAL
+    manageButton.Click += (_, _) =>
+    {
+        var menu = new ContextMenu
+        {
+            Items =
+            {
+                new MenuItem
+                {
+                    Header = "Details",
+                    Command = new LambdaCommand(() => ShowDiskDetails(disk))
+                },
+                new MenuItem
+                {
+                    Header = "Check",
+                    Command = new LambdaCommand(() => RunDiskCheck(disk))
+                },
+                new MenuItem
+                {
+                    Header = "Repair",
+                    Command = new LambdaCommand(() => RunDiskRepair(disk))
+                },
+                new MenuItem
+                {
+                    Header = "SMART Info",
+                    Command = new LambdaCommand(() => ShowSmartInfo(disk))
+                },
+                new MenuItem
+                {
+                    Header = "Mark as Faulty",
+                    Command = new LambdaCommand(() => MarkDiskAsFaulty(disk))
+                }
+            }
+        };
+
+        menu.Open(manageButton);
+    };
+
+    // GRID
     var grid = new Grid
     {
-        ColumnDefinitions = new ColumnDefinitions
+        ColumnDefinitions =
         {
-            new ColumnDefinition(GridLength.Auto),   // icono
-            new ColumnDefinition(GridLength.Star),   // texto
-            new ColumnDefinition(GridLength.Auto),   // botón ⋮
-            new ColumnDefinition(GridLength.Auto)    // dot
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star),
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Auto)
         },
         VerticalAlignment = VerticalAlignment.Center
     };
@@ -468,19 +501,20 @@ private Border BuildArrayCard(RaidArrayInfo array)
     grid.Children.Add(statusDot);
     Grid.SetColumn(statusDot, 3);
 
-    // TARJETA BMW (Light/Dark automático)
+    // TARJETA BMW
     return new Border
     {
         Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(12),
         BorderBrush = (IBrush)Application.Current!.FindResource("BMWBorderBrush")!,
         BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(12),
         Child = grid
     };
 }
 
-    
+  
+  
     private Border BuildStatusDot(string state)
     {
         Color color = state switch
@@ -602,4 +636,60 @@ private Border BuildArrayCard(RaidArrayInfo array)
             Height = size
         };
     }
+    
+    
+    private void ShowDiskDetails(RaidDiskInfo disk)
+    {
+        Console.WriteLine($"Details for {disk.Name}");
+    }
+
+    private void RunDiskCheck(RaidDiskInfo disk)
+    {
+        Console.WriteLine($"Checking {disk.Name}");
+    }
+
+    private void RunDiskRepair(RaidDiskInfo disk)
+    {
+        Console.WriteLine($"Repairing {disk.Name}");
+    }
+
+    private void ShowSmartInfo(RaidDiskInfo disk)
+    {
+        Console.WriteLine($"SMART info for {disk.Name}");
+    }
+
+    private void MarkDiskAsFaulty(RaidDiskInfo disk)
+    {
+        Console.WriteLine($"Marking {disk.Name} as faulty");
+    }
+
+    
+    private void ShowArrayDetails(RaidArrayInfo array)
+    {
+        Console.WriteLine($"Array details: {array.Name}");
+    }
+
+    private void RunArrayCheck(RaidArrayInfo array)
+    {
+        Console.WriteLine($"Checking array {array.Name}");
+    }
+
+    private void RunArrayRepair(RaidArrayInfo array)
+    {
+        Console.WriteLine($"Repairing array {array.Name}");
+    }
+
+    private void AddSpareToArray(RaidArrayInfo array)
+    {
+        Console.WriteLine($"Adding spare to array {array.Name}");
+    }
+
+    private void RemoveArray(RaidArrayInfo array)
+    {
+        Console.WriteLine($"Removing array {array.Name}");
+    }
+
+  
+    
+    
 }
