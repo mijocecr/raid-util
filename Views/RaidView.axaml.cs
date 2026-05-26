@@ -8,7 +8,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Layout;
 using System.Linq;
-
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using RAID_Util.Core;
@@ -27,7 +27,11 @@ public partial class RaidView : UserControl
     public RaidView()
     {
         InitializeComponent();
-
+        BtnCreateArray.Click += OnCreateArrayClicked;
+        BtnDeleteArray.Click += OnDeleteArrayClicked;
+        BtnRefreshArrays.Click += OnRefreshArraysClicked;
+        BtnConfigArrays.Click += OnConfigArraysClicked;
+        
         Console.WriteLine("[RAIDVIEW] Constructor RaidView ejecutado.");
 
         if (FORCE_FAKE_DATA)
@@ -903,4 +907,111 @@ public partial class RaidView : UserControl
     {
         Console.WriteLine($"Removing array {array.Name}");
     }
+    
+    private void LoadArrays()
+    {
+        // This method reloads all RAID arrays and rebuilds the UI.
+        // It replaces the previous MainWindow.LoadRaidAsync call.
+    }
+
+    private void OpenCreateArrayWindow()
+    {
+        // Opens the Create Array window.
+    }
+
+    private void OpenDeleteArrayWindow()
+    {
+        // Opens the Delete Array window.
+    }
+
+    private void OpenRaidConfigWindow()
+    {
+        // Opens the global RAID configuration window.
+    }
+
+    
+    private void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+    {
+        Console.WriteLine("Create Array button clicked.");
+        OpenCreateArrayWindow();
+    }
+
+    private void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
+    {
+        Console.WriteLine("Delete Array button clicked.");
+        OpenDeleteArrayWindow();
+    }
+
+    private async void OnRefreshArraysClicked(object? sender, RoutedEventArgs e)
+    {
+        Console.WriteLine("Refresh button clicked.");
+        await LoadRaidAsync();
+    }
+
+
+    private void OnConfigArraysClicked(object? sender, RoutedEventArgs e)
+    {
+        Console.WriteLine("Config button clicked.");
+        OpenRaidConfigWindow();
+    }
+
+   private async Task LoadRaidAsync()
+{
+    LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
+    LogService.Debug("[RAIDVIEW] LoadRaidAsync() ENTER");
+
+    try
+    {
+        using (LoadingService.Show("Loading RAID arrays..."))
+        {
+            var service = new RaidService();
+
+            LogService.Debug("[RAIDVIEW] Calling RaidService.GetArraysAsync()...");
+            var arrays = await service.GetArraysAsync();
+
+            LogService.Debug($"[RAIDVIEW] Arrays returned: {arrays.Count}");
+            foreach (var a in arrays)
+                LogService.Debug($"[RAIDVIEW] ARRAY → {a.Name} | Level={a.Level} | State={a.State} | Disks={a.Disks.Count}");
+
+            LogService.Debug("[RAIDVIEW] Calling RaidService.GetAllDisksAsync()...");
+            var disks = await service.GetAllDisksAsync();
+
+            LogService.Debug($"[RAIDVIEW] Disks returned: {disks.Count}");
+            foreach (var d in disks)
+                LogService.Debug($"[RAIDVIEW] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
+
+            LogService.Debug("[RAIDVIEW] Sending arrays to SetArrays()...");
+            SetArrays(arrays);
+
+            // Update MainWindow status bar
+            if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                var main = desktop.MainWindow as MainWindow;
+                main?.UpdateStatus("RAID information refreshed.");
+            }
+        }
+
+        LogService.Write("[RAIDVIEW] ================= RAID LOAD END =================");
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
+        LogService.Error(ex.ToString());
+
+        // Update MainWindow status bar
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var main = desktop.MainWindow as MainWindow;
+            main?.UpdateStatus("Error loading RAID information.");
+        }
+
+        LogService.Write("[RAIDVIEW] ================= RAID LOAD FAILED =================");
+    }
+    finally
+    {
+        LogService.Debug("[RAIDVIEW] LoadRaidAsync() EXIT");
+    }
 }
+
+    
+}//Fin de Clase

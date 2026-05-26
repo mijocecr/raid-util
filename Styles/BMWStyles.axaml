@@ -1,14 +1,13 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- SOLO estilos. NADA de Resources aquí. -->
-
+    <!-- Global button style -->
     <Style Selector="Button">
         <Setter Property="Background">
             <Setter.Value>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="{DynamicResource BMWSurfaceElevated}" Offset="0"/>
-                    <GradientStop Color="{DynamicResource BMWSurface}" Offset="1"/>
+                    <GradientStop Color="{DynamicResource BMWSurfaceElevatedColor}" Offset="0"/>
+                    <GradientStop Color="{DynamicResource BMWSurfaceColor}" Offset="1"/>
                 </LinearGradientBrush>
             </Setter.Value>
         </Setter>
@@ -30,12 +29,14 @@
         <Setter Property="Foreground" Value="White"/>
     </Style>
 
+    <!-- TextBox style -->
     <Style Selector="TextBox">
         <Setter Property="Foreground" Value="{DynamicResource BMWTextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BMWBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="6"/>
         <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="Background" Value="{DynamicResource BMWInputBrush}"/>
     </Style>
 
     <Style Selector="TextBox:pointerover">

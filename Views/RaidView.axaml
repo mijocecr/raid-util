@@ -8,9 +8,42 @@
     mc:Ignorable="d">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="ListArrays"
-                    Spacing="8"
-                    Margin="10"/>
+
+        <StackPanel Spacing="10" Margin="10">
+
+            <!-- Header bar for global array actions -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    Padding="12"
+                    CornerRadius="4"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1">
+
+                <StackPanel Orientation="Horizontal" Spacing="10">
+
+                    <Button Content="Create Array"
+                            x:Name="BtnCreateArray"
+                            Classes="HeaderButton"/>
+
+                    <Button Content="Delete Array"
+                            x:Name="BtnDeleteArray"
+                            Classes="HeaderButton"/>
+
+                    <Button Content="Refresh"
+                            x:Name="BtnRefreshArrays"
+                            Classes="HeaderButton"/>
+
+                    <Button Content="Config"
+                            x:Name="BtnConfigArrays"
+                            Classes="HeaderButton"/>
+
+                </StackPanel>
+            </Border>
+
+            <!-- Array list container -->
+            <StackPanel x:Name="ListArrays"
+                        Spacing="8"/>
+        </StackPanel>
+
     </ScrollViewer>
 
 </UserControl>

@@ -76,6 +76,7 @@
                        Text="Ready."
                        TextAlignment="Center"
                        FontSize="14"
+                       PointerPressed="Set_Status"
                        Foreground="{DynamicResource BMWTextDimBrush}"
                        Opacity="0.85"/>
         </Border>

@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using RAID_Util.Helpers;
 using RAID_Util.Services;
@@ -232,4 +233,15 @@ public partial class MainWindow : Window
             );
         }
     }
+
+    private void Set_Status(object? sender, PointerPressedEventArgs e)
+    {
+        UpdateStatus("Cerratonix  | https://github.com/mijocecr");
+    }
+
+    public void UpdateStatus(string text)
+    {
+        StatusBarText.Text = text;
+    }
+    
 }
