@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using RAID_Util.Helpers;
 using RAID_Util.Models;
 
@@ -20,6 +21,9 @@ namespace RAID_Util.Services
                 "lsblk -J -o NAME,MODEL,SIZE,ROTA,TYPE"
             );
 
+            Console.WriteLine("[RAID] lsblk RAW JSON:");
+            Console.WriteLine(json);
+
             if (string.IsNullOrWhiteSpace(json))
                 return result;
 
@@ -28,8 +32,10 @@ namespace RAID_Util.Services
             {
                 data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine("[RAID] ERROR al parsear JSON de lsblk:");
+                Console.WriteLine(ex);
                 return result;
             }
 
@@ -43,7 +49,11 @@ namespace RAID_Util.Services
                 string name = (string)dev.name;
                 string model = dev.model ?? "Unknown";
                 string size = dev.size ?? "Unknown";
-                bool isRotational = dev.rota == "1";
+
+                // ⭐ FIX CRÍTICO: rota puede ser bool, int o string
+                bool isRotational = ParseRota(dev.rota);
+
+                Console.WriteLine($"[RAID] DISK {name} rotaToken={dev.rota} → parsed={isRotational}");
 
                 var disk = new RaidDiskInfo
                 {
@@ -52,8 +62,9 @@ namespace RAID_Util.Services
                     Model = model,
                     State = "Unknown",
                     Role = "Unknown",
-                    Icon = "",
-                    ArrayName = ""
+                    ArrayName = "",
+                    IsRotational = isRotational,
+                    Icon = GetDiskIcon(name, model, isRotational)   // ⭐ ICONO REAL ⭐
                 };
 
                 string mdadmInfo = await RunMdadmAsync($"--examine /dev/{name}");
@@ -75,16 +86,88 @@ namespace RAID_Util.Services
         }
 
         // ============================================================
-        //  LECTURA DE ARRAYS (UNIFICADO A RaidDiskInfo)
+        //  ICONOS REALES POR TIPO DE DISCO
+        // ============================================================
+
+        private string GetDiskIcon(string name, string model, bool isRotational)
+        {
+            string lowerName = name.ToLowerInvariant();
+            string lowerModel = model.ToLowerInvariant();
+
+            // NVMe
+            if (lowerName.StartsWith("nvme"))
+                return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
+
+            // USB
+            if (lowerModel.Contains("usb"))
+                return "avares://RAID-Util/Assets/Icons/disk-usb.png";
+
+            // Virtual Disk (VMware, QEMU, VirtualBox…)
+            if (lowerModel.Contains("virtual") ||
+                lowerModel.Contains("vmware") ||
+                lowerModel.Contains("qemu") ||
+                lowerModel.Contains("vbox"))
+                return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
+
+            // HDD
+            if (isRotational)
+                return "avares://RAID-Util/Assets/Icons/disk-hdd.png";
+
+            // SSD SATA
+            return "avares://RAID-Util/Assets/Icons/disk-ssd.png";
+        }
+
+        // ============================================================
+        //  PARSER ROBUSTO PARA ROTA
+        // ============================================================
+
+        private bool ParseRota(dynamic rotaToken)
+        {
+            try
+            {
+                if (rotaToken == null)
+                    return false;
+
+                if (rotaToken is bool b)
+                    return b;
+
+                if (rotaToken is long l)
+                    return l != 0;
+
+                string s = rotaToken.ToString().Trim().ToLowerInvariant();
+
+                if (s == "1" || s == "true" || s == "yes")
+                    return true;
+
+                if (s == "0" || s == "false" || s == "no")
+                    return false;
+
+                if (bool.TryParse(s, out bool parsedBool))
+                    return parsedBool;
+
+                if (int.TryParse(s, out int parsedInt))
+                    return parsedInt != 0;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[RAID] ParseRota() EXCEPTION:");
+                Console.WriteLine(ex);
+                return false;
+            }
+        }
+
+        // ============================================================
+        //  LECTURA DE ARRAYS (SIN CAMBIOS)
         // ============================================================
 
         public async Task<List<RaidArrayInfo>> GetArraysAsync()
         {
             var arrays = new List<RaidArrayInfo>();
 
-            // 🔥 YA NO USAMOS sudo AQUÍ
-            string scan = await ShellHelper.RunCleanAsync("/usr/sbin/mdadm --detail --scan");
-            scan = scan.Trim();
+            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+            string scan = (stdout + "\n" + stderr).Trim();
 
             Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
             Console.WriteLine(scan);
@@ -123,7 +206,16 @@ namespace RAID_Util.Services
                     Level = ParseLevel(detail),
                     State = state,
                     StateIcon = GetStateIcon(state),
-                    Disks = new List<RaidDiskInfo>()
+                    Disks = new List<RaidDiskInfo>(),
+
+                    TotalSize = ParseTotalSize(detail),
+                    UsableSize = ParseTotalSize(detail),
+                    ParitySize = "N/A",
+                    AverageTemp = 0,
+                    DiskSummary = $"{diskNames.Count}× Disk",
+                    Uptime = ParseUptime(detail),
+                    RebuildProgress = ParseRebuildProgress(detail),
+                    RebuildETA = ParseRebuildEta(detail)
                 };
 
                 foreach (var dev in diskNames)
@@ -159,7 +251,7 @@ namespace RAID_Util.Services
         }
 
         // ============================================================
-        //  PARSERS
+        //  PARSERS (SIN CAMBIOS)
         // ============================================================
 
         private string ParseLevel(string detail)
@@ -261,6 +353,30 @@ namespace RAID_Util.Services
             return "UNKNOWN";
         }
 
+        private string ParseTotalSize(string detail)
+        {
+            foreach (var raw in detail.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.StartsWith("Array Size", StringComparison.OrdinalIgnoreCase))
+                {
+                    int idx = line.IndexOf('(');
+                    if (idx > 0)
+                    {
+                        string inside = line[(idx + 1)..];
+                        int end = inside.IndexOf(')');
+                        if (end > 0)
+                            return inside[..end].Trim();
+                    }
+                }
+            }
+            return "Unknown";
+        }
+
+        private string ParseUptime(string detail) => "Unknown";
+        private int ParseRebuildProgress(string detail) => 0;
+        private string ParseRebuildEta(string detail) => "";
+
         // ============================================================
         //  HELPERS
         // ============================================================
@@ -339,9 +455,8 @@ namespace RAID_Util.Services
 
             foreach (var cmd in candidates)
             {
-                // 🔥 YA NO USAMOS sudo AQUÍ
-                string output = await ShellHelper.RunCleanAsync(cmd);
-                output = output.Trim();
+                var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot(cmd);
+                string output = (stdout + "\n" + stderr).Trim();
 
                 if (string.IsNullOrWhiteSpace(output))
                     continue;

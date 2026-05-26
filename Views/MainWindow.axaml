@@ -4,6 +4,7 @@
     xmlns:views="clr-namespace:RAID_Util"
     xmlns:tabs="clr-namespace:RAID_Util.Views.Tabs"
     xmlns:views1="clr-namespace:RAID_Util.Views"
+
     x:Class="RAID_Util.MainWindow"
     Width="500"
     Height="580"
@@ -16,7 +17,6 @@
     Background="{DynamicResource BMWBackgroundBrush}"
     Foreground="{DynamicResource BMWTextBrush}">
 
-    <!-- IMPORTA BMW -->
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -47,7 +47,6 @@
                     Foreground="{DynamicResource BMWTextBrush}"
                     VerticalAlignment="Center"/>
 
-                <!-- BOTÓN CONFIGURACIÓN BMW -->
                 <Button Content="⚙"
                         x:Name="SaveSettingButton"
                         Grid.Column="1"
@@ -61,20 +60,7 @@
                         BorderBrush="{DynamicResource BMWAccentBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
-                        Padding="8">
-
-                    <Button.Styles>
-                        <Style Selector="Button:pointerover">
-                            <Setter Property="Background" Value="{DynamicResource BMWHoverBrush}"/>
-                            <Setter Property="BorderBrush" Value="{DynamicResource BMWAccentHoverBrush}"/>
-                        </Style>
-                        <Style Selector="Button:pressed">
-                            <Setter Property="Background" Value="{DynamicResource BMWAccentBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
-                        </Style>
-                    </Button.Styles>
-
-                </Button>
+                        Padding="8"/>
             </Grid>
         </Border>
 
@@ -102,29 +88,6 @@
                     BorderThickness="1"
                     Padding="6">
 
-            <TabControl.Styles>
-
-                <!-- TAB NORMAL -->
-                <Style Selector="TabItem">
-                    <Setter Property="Background" Value="{DynamicResource BMWSurfaceBrush}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource BMWTextBrush}"/>
-                    <Setter Property="Padding" Value="10,6"/>
-                </Style>
-
-                <!-- HOVER -->
-                <Style Selector="TabItem:pointerover">
-                    <Setter Property="Background" Value="{DynamicResource BMWHoverBrush}"/>
-                </Style>
-
-                <!-- SELECCIONADO -->
-                <Style Selector="TabItem:selected">
-                    <Setter Property="Background" Value="{DynamicResource BMWSurfaceElevatedBrush}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource BMWAccentBrush}"/>
-                    <Setter Property="BorderThickness" Value="0,0,0,3"/>
-                </Style>
-
-            </TabControl.Styles>
-
             <!-- STATUS TAB -->
             <TabItem>
                 <TabItem.Header>
@@ -142,11 +105,10 @@
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
-                <views1:RaidView x:Name="RaidView"/>
-
+                <!-- ⭐ CONTROL CORRECTO, RESUELTO, FUNCIONAL ⭐ -->
+                <views1:RaidView x:Name="RaidViewControl"/>
 
             </TabItem>
-
 
             <!-- JBOD TAB -->
             <TabItem>
@@ -155,7 +117,6 @@
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
-                <!-- Se agregará más adelante -->
                 <Grid/>
             </TabItem>
 
@@ -166,7 +127,6 @@
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
-                <!-- Se agregará más adelante -->
                 <Grid/>
             </TabItem>
 

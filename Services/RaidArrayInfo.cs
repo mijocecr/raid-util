@@ -45,7 +45,7 @@ public class RaidArrayInfo
     
     public string RebuildETA { get; set; } = "";
 
-
+    
     
 }
 

@@ -11,6 +11,7 @@ namespace RAID_Util.Models
 
         public string Icon { get; set; } = string.Empty;     // icono asignado por la GUI
 
+        public bool IsRotational { get; set; } = false;
         
         public string ArrayName { get; set; } = string.Empty;
 
