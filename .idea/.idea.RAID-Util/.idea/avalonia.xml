@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AvaloniaProject">
+    <option name="projectPerEditor">
+      <map>
+        <entry key="App.axaml" value="RAID-Util.csproj" />
+        <entry key="MainWindow.axaml" value="RAID-Util.csproj" />
+        <entry key="Styles/BMWColors.axaml" value="RAID-Util.csproj" />
+        <entry key="Styles/BMWStyles.axaml" value="RAID-Util.csproj" />
+        <entry key="Styles/BMWTheme.axaml" value="RAID-Util.csproj" />
+        <entry key="Styles/GitHubColors.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/ArrayConfigWindow.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/ConfigWindow.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/ConfirmDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/IncorrectPasswordDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/LoadingDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/LogsView.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/MainWindow.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/PasswordDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/RaidView.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/RaidsView.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/StatusView.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/TabStatus.axaml" value="RAID-Util.csproj" />
+      </map>
+    </option>
+  </component>
+</project>
