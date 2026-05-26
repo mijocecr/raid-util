@@ -22,8 +22,10 @@ public partial class RaidView : UserControl
     private List<RaidArrayInfo> _arrays = new();
 
     // ⭐ Flag para forzar fake data si quieres probar la UI sin backend
-    private const bool FORCE_FAKE_DATA = false;
+    private const bool FORCE_FAKE_DATA = true;
 
+    public bool IsFakeMode => FORCE_FAKE_DATA;
+    
     public RaidView()
     {
         InitializeComponent();
@@ -31,6 +33,9 @@ public partial class RaidView : UserControl
         BtnDeleteArray.Click += OnDeleteArrayClicked;
         BtnRefreshArrays.Click += OnRefreshArraysClicked;
         BtnConfigArrays.Click += OnConfigArraysClicked;
+        BtnDeleteArray.IsEnabled = false;
+        BtnConfigArrays.IsEnabled = false;
+
         
         Console.WriteLine("[RAIDVIEW] Constructor RaidView ejecutado.");
 
@@ -376,128 +381,240 @@ public partial class RaidView : UserControl
         Console.WriteLine("[RAIDVIEW] BuildUI() completado.");
     }
 
-    private Border BuildArrayCard(RaidArrayInfo array)
+    private RaidArrayInfo? _selectedArray = null;
+
+private Border BuildArrayCard(RaidArrayInfo array)
+{
+    var icon = LoadImage(array.StateIcon, 150);
+    icon.Margin = new Thickness(4);
+    icon.VerticalAlignment = VerticalAlignment.Center;
+
+    var name = new TextBlock
     {
-        var icon = LoadImage(array.StateIcon, 150);
-        icon.Margin = new Thickness(4);
-        icon.VerticalAlignment = VerticalAlignment.Center;
+        Text = $"{array.Name} ({array.Level})",
+        FontSize = 22,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+        FontWeight = FontWeight.Bold,
+        Margin = new Thickness(0, 0, 0, 4)
+    };
 
-        var name = new TextBlock
-        {
-            Text = $"{array.Name} ({array.Level})",
-            FontSize = 22,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
-            FontWeight = FontWeight.Bold,
-            Margin = new Thickness(0, 0, 0, 4)
-        };
+    var info = new StackPanel { Spacing = 2 };
 
-        var info = new StackPanel
-        {
-            Spacing = 2
-        };
+    info.Children.Add(name);
 
-        info.Children.Add(name);
+    info.Children.Add(new TextBlock
+    {
+        Text = $"State: {array.State}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
 
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Disks: {array.Disks.Count} ({array.Disks.Count(d => d.State == "OK")} OK, {array.Disks.Count(d => d.State == "FAULTY")} Faulty)",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Size: {array.TotalSize} (Usable {array.UsableSize}, Parity {array.ParitySize})",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Avg Temp: {array.AverageTemp}°C",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Type: {array.DiskSummary}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Uptime: {array.Uptime}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    if (array.RebuildProgress > 0)
+    {
         info.Children.Add(new TextBlock
         {
-            Text = $"State: {array.State}",
+            Text = $"Rebuild: {array.RebuildProgress}% (ETA {array.RebuildETA})",
             FontSize = 14,
             Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
         });
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Disks: {array.Disks.Count} ({array.Disks.Count(d => d.State == "OK")} OK, {array.Disks.Count(d => d.State == "FAULTY")} Faulty)",
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Size: {array.TotalSize} (Usable {array.UsableSize}, Parity {array.ParitySize})",
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Avg Temp: {array.AverageTemp}°C",
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Type: {array.DiskSummary}",
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
-
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Uptime: {array.Uptime}",
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
-
-        if (array.RebuildProgress > 0)
-        {
-            info.Children.Add(new TextBlock
-            {
-                Text = $"Rebuild: {array.RebuildProgress}% (ETA {array.RebuildETA})",
-                FontSize = 14,
-                Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-            });
-        }
-
-        var grid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Star)
-            }
-        };
-
-        grid.Children.Add(icon);
-        Grid.SetColumn(icon, 0);
-
-        grid.Children.Add(info);
-        Grid.SetColumn(info, 1);
-
-        var glowColor = GetArrayGlowColor(array.State);
-        var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
-
-        var glowBorder = new Border
-        {
-            Background = glowBrush,
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(0),
-            Margin = new Thickness(0, 0, 0, 8)
-        };
-
-        var cardBorder = new Border
-        {
-            Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-            CornerRadius = new CornerRadius(10),
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Padding = new Thickness(12),
-            Child = grid
-        };
-
-        glowBorder.Child = cardBorder;
-
-        AnimateArrayGlow(glowBorder, glowBrush);
-
-        cardBorder.PointerPressed += (_, _) =>
-        {
-            array.IsExpanded = !array.IsExpanded;
-            BuildUI();
-        };
-
-        return glowBorder;
     }
 
+    // Original grid (icon + info)
+    var grid = new Grid
+    {
+        ColumnDefinitions =
+        {
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star)
+        }
+    };
+
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
+
+    grid.Children.Add(info);
+    Grid.SetColumn(info, 1);
+
+    // ⭐ Overlay grid for checkbox + more button
+    var overlay = new Grid
+    {
+        RowDefinitions =
+        {
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Star)
+        }
+    };
+
+    // Top-right panel
+    var topRightPanel = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Spacing = 6
+    };
+
+    // ⭐ CheckBox (left of More)
+    var chkSelect = new CheckBox
+    {
+        VerticalAlignment = VerticalAlignment.Top,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        IsChecked = (_selectedArray == array)
+    };
+
+    chkSelect.Checked += (_, _) =>
+    {
+        _selectedArray = array;
+        ClearOtherSelections(array);
+        BtnDeleteArray.IsEnabled = true;
+        BtnConfigArrays.IsEnabled = true;
+        BuildUI();
+    };
+
+    chkSelect.Unchecked += (_, _) =>
+    {
+        if (_selectedArray == array)
+            _selectedArray = null;
+        BtnDeleteArray.IsEnabled = false;
+        BtnConfigArrays.IsEnabled = false;
+        BuildUI();
+    };
+
+    topRightPanel.Children.Add(chkSelect);
+
+    // ⭐ More button
+    var btnMore = new Button
+    {
+        Content = "More",
+        Classes = { "MoreButton" },
+        VerticalAlignment = VerticalAlignment.Top,
+        HorizontalAlignment = HorizontalAlignment.Right
+    };
+
+    // ⭐ Create menu
+    var menu = new ContextMenu
+    {
+        Items =
+        {
+            new MenuItem { Header = "Details", Tag = "details" },
+            new MenuItem { Header = "Start array", Tag = "start" },
+            new MenuItem { Header = "Stop array", Tag = "stop" },
+            new MenuItem { Header = "Add disk", Tag = "add" },
+            new MenuItem { Header = "Remove disk", Tag = "remove" },
+            new MenuItem { Header = "Mark disk faulty", Tag = "faulty" },
+            new MenuItem { Header = "Replace disk", Tag = "replace" },
+            new MenuItem { Header = "Force check or resync", Tag = "check" },
+            new MenuItem { Header = "View logs", Tag = "logs" }
+        }
+    };
+
+// ⭐ Open menu on click
+    btnMore.Click += (_, _) =>
+    {
+        menu.PlacementTarget = btnMore;
+        menu.Open(btnMore);  
+    };
+
+
+// ⭐ Menu item handlers
+    foreach (var item in menu.Items.OfType<MenuItem>())
+        item.Click += (_, _) => OnMoreMenuClick(array, item.Tag?.ToString());
+
+    
+    topRightPanel.Children.Add(btnMore);
+
+    // Add top-right panel
+    overlay.Children.Add(topRightPanel);
+    Grid.SetRow(topRightPanel, 0);
+
+    // Add original content
+    overlay.Children.Add(grid);
+    Grid.SetRow(grid, 1);
+
+    // Glow + card border
+    var glowColor = GetArrayGlowColor(array.State);
+    var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
+
+    var glowBorder = new Border
+    {
+        Background = glowBrush,
+        CornerRadius = new CornerRadius(14),
+        Padding = new Thickness(0),
+        Margin = new Thickness(0, 0, 0, 8)
+    };
+
+    var cardBorder = new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        CornerRadius = new CornerRadius(10),
+        Cursor = new Cursor(StandardCursorType.Hand),
+        Padding = new Thickness(12),
+        Child = overlay
+    };
+
+    glowBorder.Child = cardBorder;
+
+    AnimateArrayGlow(glowBorder, glowBrush);
+
+    cardBorder.PointerPressed += (_, _) =>
+    {
+        array.IsExpanded = !array.IsExpanded;
+        BuildUI();
+    };
+
+    return glowBorder;
+}
+
+// ⭐ Selección única
+
+    private void ClearOtherSelections(RaidArrayInfo selected)
+    {
+        foreach (var arr in _arrays)
+        {
+            if (arr != selected)
+                arr.IsSelected = false;
+        }
+
+        BtnDeleteArray.IsEnabled = _selectedArray != null;
+    }
+
+
+  
     private Border BuildExpandedCard(RaidArrayInfo array)
     {
         var panel = new StackPanel { Spacing = 10 };
@@ -641,12 +758,13 @@ public partial class RaidView : UserControl
 
         var manageButton = new Button
         {
-            Content = "⋮",
-            Width = 32,
+            Content = "More",
+            Width = 80,
+            
             Height = 32,
             Classes = { "IconButton" },
             HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
+            VerticalContentAlignment = VerticalAlignment.Top
         };
 
         manageButton.Click += (_, _) =>
@@ -936,12 +1054,66 @@ public partial class RaidView : UserControl
         OpenCreateArrayWindow();
     }
 
-    private void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
+  
+    private async void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
     {
-        Console.WriteLine("Delete Array button clicked.");
-        OpenDeleteArrayWindow();
+        if (_selectedArray == null)
+        {
+            Console.WriteLine("[DELETE] No array selected.");
+            return;
+        }
+
+        var array = _selectedArray;
+
+        // Confirmación
+        var dialog = new ConfirmDialog($"Delete array {array.Name}?", "This action cannot be undone.");
+        var result = await dialog.ShowDialog<bool>(GetWindow());
+
+        if (!result)
+        {
+            Console.WriteLine("[DELETE] Cancelled.");
+            return;
+        }
+
+        Console.WriteLine($"[DELETE] REAL delete for {array.Name}");
+
+        // FakeData → solo eliminar de la lista
+        if (IsFakeMode)
+        {
+            _arrays.Remove(array);
+            _selectedArray = null;
+            BuildUI();
+            return;
+        }
+
+        // Modo real
+        using (LoadingService.Show("Deleting array..."))
+        {
+            var service = new RaidService();
+            bool ok = await Task.Run(() => service.DeleteArrayAsync(array));
+
+            if (!ok)
+            {
+                Console.WriteLine("[DELETE] ERROR deleting array.");
+                return;
+            }
+        }
+
+        // Actualizar UI
+        _arrays.Remove(array);
+        _selectedArray = null;
+        BuildUI();
     }
 
+    
+    
+private Window GetWindow()
+{
+    return (Window)VisualRoot!;
+}
+
+   
+    
     private async void OnRefreshArraysClicked(object? sender, RoutedEventArgs e)
     {
         Console.WriteLine("Refresh button clicked.");
@@ -955,13 +1127,30 @@ public partial class RaidView : UserControl
         OpenRaidConfigWindow();
     }
 
-   private async Task LoadRaidAsync()
+  private async Task LoadRaidAsync()
 {
     LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
     LogService.Debug("[RAIDVIEW] LoadRaidAsync() ENTER");
 
     try
     {
+        // ⭐ FAKE DATA MODE → NO BACKEND
+        if (IsFakeMode)
+        {
+            LogService.Write("[RAIDVIEW] Fake mode enabled → loading fake arrays.");
+            LoadFakeData();
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop1)
+            {
+                var main1 = desktop1.MainWindow as MainWindow;
+                main1?.UpdateStatus("Fake RAID data loaded.");
+            }
+
+            LogService.Write("[RAIDVIEW] ================= RAID LOAD END (FAKE) =================");
+            return;
+        }
+
+        // ⭐ REAL MODE → BACKEND
         using (LoadingService.Show("Loading RAID arrays..."))
         {
             var service = new RaidService();
@@ -998,7 +1187,6 @@ public partial class RaidView : UserControl
         LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
         LogService.Error(ex.ToString());
 
-        // Update MainWindow status bar
         if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var main = desktop.MainWindow as MainWindow;
@@ -1013,5 +1201,61 @@ public partial class RaidView : UserControl
     }
 }
 
+    
+   //-------------Boton More------------------//
+   
+   private void OnMoreMenuClick(RaidArrayInfo array, string? action)
+   {
+       if (action == null)
+           return;
+
+       Console.WriteLine($"[MORE] Action '{action}' on array {array.Name}");
+
+       switch (action)
+       {
+           case "details":
+               ShowArrayDetails(array);
+               break;
+
+           case "start":
+               RunArrayCheck(array);   // placeholder
+               break;
+
+           case "stop":
+               RunArrayRepair(array);  // placeholder
+               break;
+
+           case "add":
+               AddSpareToArray(array); // placeholder
+               break;
+
+           case "remove":
+               RemoveArray(array);     // placeholder
+               break;
+
+           case "faulty":
+               Console.WriteLine($"[MORE] Marking array {array.Name} as faulty (UI only)");
+               break;
+
+           case "replace":
+               Console.WriteLine($"[MORE] Replacing disk in {array.Name} (UI only)");
+               break;
+
+           case "check":
+               RunArrayCheck(array);   // placeholder
+               break;
+
+           case "logs":
+               Console.WriteLine($"[MORE] Viewing logs for {array.Name}");
+               break;
+
+           default:
+               Console.WriteLine($"[MORE] Unknown action: {action}");
+               break;
+       }
+   }
+
+   
+   //-------------Boton More-----------------//
     
 }//Fin de Clase

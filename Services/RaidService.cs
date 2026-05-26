@@ -473,6 +473,55 @@ namespace RAID_Util.Services
             return string.Empty;
         }
 
+        
+        public async Task<bool> DeleteArrayAsync(RaidArrayInfo array)
+        {
+            try
+            {
+                string name = array.Name;
+
+                LogService.Write($"[RAID] DELETE START → {name}");
+
+                // 1. Unmount if mounted
+                if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+                {
+                    LogService.Write($"[RAID] Unmounting {array.MountPath}");
+                    ShellHelper.EjecutarComoRoot($"umount {array.MountPath}");
+                }
+
+                // 2. Stop array
+                LogService.Write($"[RAID] Stopping array {name}");
+                ShellHelper.EjecutarComoRoot($"mdadm --stop /dev/{name}");
+
+                // 3. Remove array
+                LogService.Write($"[RAID] Removing array {name}");
+                ShellHelper.EjecutarComoRoot($"mdadm --remove /dev/{name}");
+
+                // 4. Wipe superblocks
+                foreach (var d in array.Disks)
+                {
+                    LogService.Write($"[RAID] Wiping superblock on {d.Name}");
+                    ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
+                }
+
+                // 5. Update mdadm.conf
+                LogService.Write("[RAID] Updating mdadm.conf");
+                ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
+
+                LogService.Write($"[RAID] DELETE OK → {name}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error("[RAID] DELETE FAILED:");
+                LogService.Error(ex.ToString());
+                return false;
+            }
+        }
+
+        
+        
+        
         public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string? existingDetail = null)
         {
             var result = new List<string>();

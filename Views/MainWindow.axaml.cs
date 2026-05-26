@@ -39,93 +39,105 @@ public partial class MainWindow : Window
         MainTabs.SelectionChanged += OnTabChanged;
     }
 
-    protected override async void OnOpened(EventArgs e)
+   protected override async void OnOpened(EventArgs e)
+{
+    base.OnOpened(e);
+
+    LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
+
+    // ⭐ FIX: If FakeData is active, skip all backend initialization
+    if (RaidViewControl != null && RaidViewControl.IsFakeMode)
     {
-        base.OnOpened(e);
+        LogService.Write("[MAIN] FakeData mode detected → skipping sudo, mdadm and backend initialization.");
+        StatusBarText.Text = "Fake data mode.";
+        _sudoReady = true;
+        _raidLoaded = true;
+        return;
+    }
 
-        LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
+    _config = ConfigManager.Load();
+    LogService.Debug("[MAIN] Configuration loaded.");
 
-        _config = ConfigManager.Load();
-        LogService.Debug("[MAIN] Configuration loaded.");
+    StatusBarText.Text = "Initializing...";
+    await Task.Delay(120);
 
-        StatusBarText.Text = "Initializing...";
-        await Task.Delay(120);
+    const int maxAttempts = 2;
+    int attempts = 0;
 
-        const int maxAttempts = 2;
-        int attempts = 0;
+    while (true)
+    {
+        attempts++;
 
-        while (true)
+        LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
+        await SolicitarPassword();
+
+        if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
         {
-            attempts++;
-
-            LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
-            await SolicitarPassword();
-
-            if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
-            {
-                StatusBarText.Text = "Initialization aborted.";
-                LogService.Error("[MAIN] Initialization aborted: no password provided.");
-                return;
-            }
-
-            StatusBarText.Text = "Validating password...";
-            LogService.Debug("[MAIN] Validating admin password...");
-
-            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
-
-            LogService.Debug($"[MAIN] sudo test exit={exit}");
-            LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
-            if (!string.IsNullOrWhiteSpace(stderr))
-                LogService.Debug($"[MAIN] sudo test stderr='{stderr.Trim()}'");
-
-            if (exit == 0)
-            {
-                LogService.Write("[MAIN] Password validated successfully.");
-                _sudoReady = true;
-                break;
-            }
-
-            var dlg = new IncorrectPasswordDialog();
-            await dlg.ShowDialog(this);
-
-            if (attempts >= maxAttempts)
-            {
-                StatusBarText.Text = "Too many failed attempts.";
-                Close();
-                return;
-            }
-        }
-
-        StatusBarText.Text = "Checking RAID subsystem...";
-        var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
-
-        LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
-
-        if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
-        {
-            StatusBarText.Text = "RAID subsystem unavailable.";
-            LogService.Error("[MAIN] RAID subsystem unavailable (mdadm not found).");
+            StatusBarText.Text = "Initialization aborted.";
+            LogService.Error("[MAIN] Initialization aborted: no password provided.");
             return;
         }
 
-        await Task.Delay(120);
+        StatusBarText.Text = "Validating password...";
+        LogService.Debug("[MAIN] Validating admin password...");
 
-        StatusBarText.Text = "System ready.";
+        var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
 
-        _timerManager = new TimerManager(
-            statusView: StatusViewControl,
-            logsView: LogsViewControl,
-            generalRefreshMs: _config.GeneralRefreshMs,
-            rebuildRefreshMs: _config.RebuildRefreshMs,
-            hotplugRefreshMs: _config.HotplugRefreshMs
-        );
+        LogService.Debug($"[MAIN] sudo test exit={exit}");
+        LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
+        if (!string.IsNullOrWhiteSpace(stderr))
+            LogService.Debug($"[MAIN] sudo test stderr='{stderr.Trim()}'");
 
-        _timerManager.StartAll();
+        if (exit == 0)
+        {
+            LogService.Write("[MAIN] Password validated successfully.");
+            _sudoReady = true;
+            break;
+        }
 
-        LogService.Debug($"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
-        StatusBarText.Text = "Ready.";
+        var dlg = new IncorrectPasswordDialog();
+        await dlg.ShowDialog(this);
+
+        if (attempts >= maxAttempts)
+        {
+            StatusBarText.Text = "Too many failed attempts.";
+            Close();
+            return;
+        }
     }
 
+    StatusBarText.Text = "Checking RAID subsystem...";
+    var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
+
+    LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
+
+    if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
+    {
+        StatusBarText.Text = "RAID subsystem unavailable.";
+        LogService.Error("[MAIN] RAID subsystem unavailable (mdadm not found).");
+        return;
+    }
+
+    await Task.Delay(120);
+
+    StatusBarText.Text = "System ready.";
+
+    _timerManager = new TimerManager(
+        statusView: StatusViewControl,
+        logsView: LogsViewControl,
+        generalRefreshMs: _config.GeneralRefreshMs,
+        rebuildRefreshMs: _config.RebuildRefreshMs,
+        hotplugRefreshMs: _config.HotplugRefreshMs
+    );
+
+    _timerManager.StartAll();
+
+    LogService.Debug($"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
+    StatusBarText.Text = "Ready.";
+}
+
+    
+    
     private async Task SolicitarPassword()
     {
         var dialog = new PasswordDialog();

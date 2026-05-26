@@ -23,11 +23,6 @@
                     <Button Content="Create Array"
                             x:Name="BtnCreateArray"
                             Classes="HeaderButton"/>
-
-                    <Button Content="Delete Array"
-                            x:Name="BtnDeleteArray"
-                            Classes="HeaderButton"/>
-
                     <Button Content="Refresh"
                             x:Name="BtnRefreshArrays"
                             Classes="HeaderButton"/>
@@ -35,6 +30,14 @@
                     <Button Content="Config"
                             x:Name="BtnConfigArrays"
                             Classes="HeaderButton"/>
+
+                    <Button Content="Delete Array"
+                            x:Name="BtnDeleteArray"
+                            Background="Red"
+                            Foreground="WhiteSmoke"
+                            Classes="HeaderButton"/>
+
+                   
 
                 </StackPanel>
             </Border>
