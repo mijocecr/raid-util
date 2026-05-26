@@ -45,6 +45,8 @@ public class RaidArrayInfo
     
     public string RebuildETA { get; set; } = "";
 
+    public string Path { get; set; }   // ej: /dev/md0
+
     public bool IsSelected { get; set; } = false;
     
 }

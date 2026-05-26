@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -22,7 +23,7 @@ public partial class RaidView : UserControl
     private List<RaidArrayInfo> _arrays = new();
 
     // ⭐ Flag para forzar fake data si quieres probar la UI sin backend
-    private const bool FORCE_FAKE_DATA = true;
+    private const bool FORCE_FAKE_DATA = false;
 
     public bool IsFakeMode => FORCE_FAKE_DATA;
     
@@ -103,7 +104,8 @@ public partial class RaidView : UserControl
     }
 
     // Si algún día quieres volver a cargar real desde aquí, lo tienes:
-    private async void LoadRealData()
+    private async Task LoadRealData()
+
     {
         Console.WriteLine("[RAIDVIEW] LoadRealData() iniciado.");
 
@@ -531,6 +533,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
     {
         Items =
         {
+            new MenuItem { Header = "Format Array", Tag = "format" },
             new MenuItem { Header = "Details", Tag = "details" },
             new MenuItem { Header = "Start array", Tag = "start" },
             new MenuItem { Header = "Stop array", Tag = "stop" },
@@ -773,6 +776,13 @@ private Border BuildArrayCard(RaidArrayInfo array)
             {
                 Items =
                 {
+                    
+                    new MenuItem
+                    {
+                        Header = "Format",
+                        Command = new LambdaCommand(() => ShowDiskDetails(disk))
+                    },
+                    
                     new MenuItem
                     {
                         Header = "Details",
@@ -1042,19 +1052,223 @@ private Border BuildArrayCard(RaidArrayInfo array)
         // Opens the Delete Array window.
     }
 
-    private void OpenRaidConfigWindow()
+    private void OpenArrayConfigWindow()
     {
-        // Opens the global RAID configuration window.
+        if (_selectedArray == null)
+        {
+            Console.WriteLine("[RAIDVIEW] No array selected → cannot open config window.");
+            return;
+        }
+
+        Console.WriteLine($"[RAIDVIEW] Opening ArrayConfigWindow for {_selectedArray.Name}");
+
+        var win = new ArrayConfigWindow(_selectedArray.Name);
+        win.ShowDialog(GetWindow());
+    }
+
+
+    private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+    {
+        var parent = GetWindow();
+        var service = new RaidService();
+
+        // Obtener discos reales
+        var allDisks = await service.GetAllDisksAsync();
+
+        var freeDisks = allDisks
+            .Where(d => d.State == "Free")
+            .Where(d => !IsDiskMounted(d.Name))
+            .ToList();
+
+        if (freeDisks.Count == 0)
+        {
+            new ConfirmDialog("No disks", "No free disks available to create a RAID array.")
+                .ShowDialog(parent);
+            return;
+        }
+
+        // Diálogo de creación
+        var dialog = new CreateArrayDialog(freeDisks);
+        var result = await dialog.ShowDialog<CreateArrayResult?>(parent);
+
+        if (result == null)
+            return;
+
+        // Mostrar diálogo de carga (UI thread)
+        var loading = new LoadingDialog("Creating RAID array...");
+        loading.Show(parent);
+
+        await Task.Delay(50); // permite renderizar
+
+        bool ok;
+
+        if (IsFakeMode)
+        {
+            // Fake mode: solo ejecutar
+            ok = await Task.Run(() => { CreateFakeArray(result); return true; });
+        }
+        else
+        {
+            // Real mode: CreateRealArray ahora es async
+            ok = await CreateRealArray(result);
+        }
+
+        loading.Close();
+
+        if (!ok)
+        {
+            new ConfirmDialog("Error", "Failed to create RAID array.")
+                .ShowDialog(parent);
+            return;
+        }
+
+        // Recargar arrays reales
+        await LoadRealData();
+    }
+
+
+    
+    
+    private bool IsDiskMounted(string diskName)
+    {
+        try
+        {
+            string mounts = File.ReadAllText("/proc/mounts");
+
+            // Si el disco tiene particiones, lsblk las mostrará como sdc1, sdc2...
+            // pero sdc sin particiones no aparecerá en mounts → OK
+            return mounts.Contains($"/dev/{diskName}");
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     
-    private void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+  
+    private void CreateFakeArray(CreateArrayResult result)
     {
-        Console.WriteLine("Create Array button clicked.");
-        OpenCreateArrayWindow();
+        // Crear un array RAID falso para pruebas
+        var fakeArray = new RaidArrayInfo
+        {
+            Name = result.FriendlyName,
+            Level = result.Level,
+            State = "Healthy",
+            StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
+
+            Disks = result.Disks,
+
+            DiskSummary = $"{result.Disks.Count}× Disk",
+            TotalSize = $"{result.Disks.Count * 100} GB",
+            UsableSize = EstimateFakeUsableSize(result.Level, result.Disks.Count),
+            ParitySize = EstimateFakeParity(result.Level, result.Disks.Count),
+
+            Uptime = "0 min"
+        };
+
+        _arrays.Add(fakeArray);
+
+        BuildUI();
     }
 
-  
+    
+    private string EstimateFakeUsableSize(string level, int count)
+    {
+        return level switch
+        {
+            "RAID1" => "100 GB",
+            "RAID5" => $"{(count - 1) * 100} GB",
+            "RAID6" => $"{(count - 2) * 100} GB",
+            "RAID10" => $"{(count / 2) * 100} GB",
+            _ => $"{count * 100} GB"
+        };
+    }
+
+    private string EstimateFakeParity(string level, int count)
+    {
+        return level switch
+        {
+            "RAID5" => "100 GB",
+            "RAID6" => "200 GB",
+            "RAID10" => $"{(count / 2) * 100} GB (mirrored)",
+            _ => "0 GB"
+        };
+    }
+
+    private async Task<bool> CreateRealArray(CreateArrayResult result)
+    {
+        var service = new RaidService();
+
+        // 1) Crear array en background
+        bool ok = await Task.Run(() =>
+            service.CreateArray(result.Level, result.Disks, result.FriendlyName)
+        );
+
+        if (!ok)
+            return false;
+
+        // 2) Esperar a que /dev/mdX exista realmente
+        bool ready = await Task.Run(() =>
+            service.WaitForArray(service.LastCreatedMdName)
+        );
+
+        if (!ready)
+        {
+            new ConfirmDialog("Warning",
+                    $"Array created, but /dev/{service.LastCreatedMdName} did not appear in time.")
+                .ShowDialog(GetWindow());
+            return false;
+        }
+
+        // 3) Persistir en mdadm.conf
+        bool persisted = await Task.Run(() =>
+            service.PersistArrayToMdadmConf()
+        );
+
+        if (!persisted)
+        {
+            new ConfirmDialog("Warning",
+                    "Array created, but could not update mdadm.conf. Check logs.")
+                .ShowDialog(GetWindow());
+        }
+
+        // 4) Recargar arrays reales
+        await LoadRaidAsync();
+
+        return true;
+    }
+
+
+
+    private async void OpenFormatArrayDialog(RaidArrayInfo array)
+    {
+        var dialog = new FormatArrayDialog(array.Name);
+        var result = await dialog.ShowDialog<FormatArrayResult?>(GetWindow());
+
+        if (result == null)
+            return;
+
+        using (LoadingService.Show("Formatting array..."))
+        {
+            var service = new RaidService();
+
+            bool ok = service.FormatArray(array.Name, result.Filesystem, result.Label);
+
+            if (!ok)
+            {
+                new ConfirmDialog("Error", "Failed to format array. Check logs.")
+                    .ShowDialog(GetWindow());
+                return;
+            }
+
+            _ = LoadRaidAsync();
+        }
+    }
+
+    
+    
+    
     private async void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
     {
         if (_selectedArray == null)
@@ -1124,17 +1338,16 @@ private Window GetWindow()
     private void OnConfigArraysClicked(object? sender, RoutedEventArgs e)
     {
         Console.WriteLine("Config button clicked.");
-        OpenRaidConfigWindow();
+        OpenArrayConfigWindow();
     }
 
-  private async Task LoadRaidAsync()
+  private async Task LoadRaidAsync(bool afterCreate = false)
 {
     LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
     LogService.Debug("[RAIDVIEW] LoadRaidAsync() ENTER");
 
     try
     {
-        // ⭐ FAKE DATA MODE → NO BACKEND
         if (IsFakeMode)
         {
             LogService.Write("[RAIDVIEW] Fake mode enabled → loading fake arrays.");
@@ -1150,29 +1363,40 @@ private Window GetWindow()
             return;
         }
 
-        // ⭐ REAL MODE → BACKEND
         using (LoadingService.Show("Loading RAID arrays..."))
         {
             var service = new RaidService();
 
-            LogService.Debug("[RAIDVIEW] Calling RaidService.GetArraysAsync()...");
-            var arrays = await service.GetArraysAsync();
+            // ⭐ Esperar un poco si venimos de crear un array
+            if (afterCreate)
+                await Task.Delay(150);
+
+            // ⭐ Ejecutar en paralelo
+            var arraysTask = service.GetArraysAsync();
+            var disksTask = service.GetAllDisksAsync();
+
+            await Task.WhenAll(arraysTask, disksTask);
+
+            var arrays = arraysTask.Result;
+            var disks = disksTask.Result;
+
+            if (arrays == null)
+            {
+                LogService.Error("[RAIDVIEW] GetArraysAsync returned null.");
+                return;
+            }
 
             LogService.Debug($"[RAIDVIEW] Arrays returned: {arrays.Count}");
             foreach (var a in arrays)
                 LogService.Debug($"[RAIDVIEW] ARRAY → {a.Name} | Level={a.Level} | State={a.State} | Disks={a.Disks.Count}");
 
-            LogService.Debug("[RAIDVIEW] Calling RaidService.GetAllDisksAsync()...");
-            var disks = await service.GetAllDisksAsync();
-
             LogService.Debug($"[RAIDVIEW] Disks returned: {disks.Count}");
             foreach (var d in disks)
                 LogService.Debug($"[RAIDVIEW] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
 
-            LogService.Debug("[RAIDVIEW] Sending arrays to SetArrays()...");
             SetArrays(arrays);
+            
 
-            // Update MainWindow status bar
             if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
                 var main = desktop.MainWindow as MainWindow;
@@ -1201,6 +1425,7 @@ private Window GetWindow()
     }
 }
 
+
     
    //-------------Boton More------------------//
    
@@ -1213,6 +1438,10 @@ private Window GetWindow()
 
        switch (action)
        {
+           case "format":
+              OpenFormatArrayDialog(array);
+               break;
+           
            case "details":
                ShowArrayDetails(array);
                break;
@@ -1258,4 +1487,24 @@ private Window GetWindow()
    
    //-------------Boton More-----------------//
     
+   
+   private List<RaidDiskInfo> GetSafeDisks()
+   {
+       return _arrays
+           .SelectMany(a => a.Disks)
+           .Where(d =>
+                   !d.IsSystemDisk &&          // marcado por el backend
+                   !d.IsMounted &&             // no montado
+                   !d.IsBoot &&                // no contiene /boot o EFI
+                   !d.IsRoot &&                // no contiene /
+                   !d.IsHome &&                // no contiene /home
+                   !d.IsSwap &&                // no contiene swap
+                   !d.IsUsedByRaid &&          // no pertenece a otro array
+                   !d.IsUsbSystemSource        // si RAID-util corre desde USB
+           )
+           .ToList();
+   }
+
+   
+   
 }//Fin de Clase

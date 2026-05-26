@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using RAID_Util.Helpers;
@@ -163,92 +167,104 @@ namespace RAID_Util.Services
         // ============================================================
 
         public async Task<List<RaidArrayInfo>> GetArraysAsync()
+{
+    var arrays = new List<RaidArrayInfo>();
+
+    var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+    string scan = (stdout + "\n" + stderr).Trim();
+
+    Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
+    Console.WriteLine(scan);
+
+    if (string.IsNullOrWhiteSpace(scan))
+        return arrays;
+
+    foreach (var raw in scan.Split('\n'))
+    {
+        string line = raw.Trim();
+        if (!line.StartsWith("ARRAY"))
+            continue;
+
+        string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+            continue;
+
+        // ⭐ Path real del array (ej: /dev/md0)
+        string arrayPath = parts[1];
+
+        // ⭐ Nombre amigable (ej: md0 o miguelito)
+        string arrayName = arrayPath.Split('/').Last();
+
+        // Obtener detalle real del array
+        string detail = await RunMdadmAsync($"--detail {arrayPath}");
+
+        Console.WriteLine("=== DETAIL OUTPUT ===");
+        Console.WriteLine(detail);
+        Console.WriteLine("=====================");
+
+        if (string.IsNullOrWhiteSpace(detail))
+            continue;
+
+        string state = ParseArrayState(detail);
+
+        // ⭐ Obtener discos normalizados (sdc, sdd, etc.)
+        var diskNames = await GetDisksInArrayAsync(arrayName, detail);
+
+        var info = new RaidArrayInfo
         {
-            var arrays = new List<RaidArrayInfo>();
+            Name = arrayName,
+            Path = arrayPath,          // ⭐ CRÍTICO para DeleteArrayAsync
+            Level = ParseLevel(detail),
+            State = state,
+            StateIcon = GetStateIcon(state),
+            Disks = new List<RaidDiskInfo>(),
 
-            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
-            string scan = (stdout + "\n" + stderr).Trim();
+            TotalSize = ParseTotalSize(detail),
+            UsableSize = ParseTotalSize(detail),
+            ParitySize = "N/A",
+            AverageTemp = 0,
+            DiskSummary = $"{diskNames.Count}× Disk",
+            Uptime = ParseUptime(detail),
+            RebuildProgress = ParseRebuildProgress(detail),
+            RebuildETA = ParseRebuildEta(detail)
+        };
 
-            Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
-            Console.WriteLine(scan);
+        // ⭐ Normalizar nombres de discos y obtener info real
+        foreach (var dev in diskNames)
+        {
+            string devName = dev.Split('/').Last(); // por si acaso
 
-            if (string.IsNullOrWhiteSpace(scan))
-                return arrays;
+            RaidDiskInfo diskInfo = await GetDiskInfo(devName);
 
-            foreach (var raw in scan.Split('\n'))
-            {
-                string line = raw.Trim();
-                if (!line.StartsWith("ARRAY"))
-                    continue;
+            diskInfo.Role = ParseDiskRole(detail, devName);
+            diskInfo.State = ParseDiskState(detail, devName);
+            diskInfo.ArrayName = arrayName;
 
-                string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 2)
-                    continue;
-
-                string arrayPath = parts[1];
-                string arrayName = arrayPath.Replace("/dev/", "");
-
-                string detail = await RunMdadmAsync($"--detail {arrayPath}");
-
-                Console.WriteLine("=== DETAIL OUTPUT ===");
-                Console.WriteLine(detail);
-                Console.WriteLine("=====================");
-
-                if (string.IsNullOrWhiteSpace(detail))
-                    continue;
-
-                string state = ParseArrayState(detail);
-                var diskNames = await GetDisksInArrayAsync(arrayName, detail);
-
-                var info = new RaidArrayInfo
-                {
-                    Name = arrayName,
-                    Level = ParseLevel(detail),
-                    State = state,
-                    StateIcon = GetStateIcon(state),
-                    Disks = new List<RaidDiskInfo>(),
-
-                    TotalSize = ParseTotalSize(detail),
-                    UsableSize = ParseTotalSize(detail),
-                    ParitySize = "N/A",
-                    AverageTemp = 0,
-                    DiskSummary = $"{diskNames.Count}× Disk",
-                    Uptime = ParseUptime(detail),
-                    RebuildProgress = ParseRebuildProgress(detail),
-                    RebuildETA = ParseRebuildEta(detail)
-                };
-
-                foreach (var dev in diskNames)
-                {
-                    RaidDiskInfo diskInfo = await GetDiskInfo(dev);
-
-                    diskInfo.Role = ParseDiskRole(detail, dev);
-                    diskInfo.State = ParseDiskState(detail, dev);
-                    diskInfo.ArrayName = arrayName;
-
-                    info.Disks.Add(diskInfo);
-                }
-
-                arrays.Add(info);
-            }
-
-            Console.WriteLine("=== ARRAYS DETECTADOS ===");
-            foreach (var arr in arrays)
-            {
-                Console.WriteLine($"ARRAY: {arr.Name}  Level={arr.Level}  State={arr.State}");
-                Console.WriteLine($"  Discos detectados: {arr.Disks.Count}");
-
-                foreach (var d in arr.Disks)
-                {
-                    Console.WriteLine($"    - {d.Name}  Role={d.Role}  State={d.State}  Size={d.Size}  Model={d.Model}");
-                }
-            }
-            Console.WriteLine("=========================");
-
-            Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
-
-            return arrays;
+            info.Disks.Add(diskInfo);
         }
+
+        arrays.Add(info);
+    }
+
+    Console.WriteLine("=== ARRAYS DETECTADOS ===");
+    foreach (var arr in arrays)
+    {
+        Console.WriteLine($"ARRAY: {arr.Name}  Level={arr.Level}  State={arr.State}");
+        Console.WriteLine($"  Discos detectados: {arr.Disks.Count}");
+
+        foreach (var d in arr.Disks)
+        {
+            Console.WriteLine($"    - {d.Name}  Role={d.Role}  State={d.State}  Size={d.Size}  Model={d.Model}");
+        }
+    }
+    Console.WriteLine("=========================");
+
+    Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
+
+    return arrays;
+}
+
+
 
         // ============================================================
         //  PARSERS (SIN CAMBIOS)
@@ -301,57 +317,88 @@ namespace RAID_Util.Services
 
         private string ParseDiskRole(string detail, string device)
         {
+            string dev = device.Replace("/dev/", "").Trim();
+
             foreach (var raw in detail.Split('\n'))
             {
                 string line = raw.Trim();
 
-                if (!line.Contains(device, StringComparison.Ordinal))
+                // ⭐ Solo líneas que terminan en /dev/sdX o /dev/nvmeXnY
+                if (!line.EndsWith(dev) && !line.Contains($"/dev/{dev}"))
+                    continue;
+
+                // ⭐ Evitar líneas que no son discos (UUID, metadata, etc.)
+                if (!System.Text.RegularExpressions.Regex.IsMatch(line, @"[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+\s+"))
                     continue;
 
                 string lower = line.ToLowerInvariant();
 
-                if (lower.Contains("active") || lower.Contains("sync"))
-                    return "active";
+                // ⭐ Orden correcto de prioridad
+                if (lower.Contains("faulty"))
+                    return "faulty";
+
+                if (lower.Contains("removed"))
+                    return "removed";
+
+                if (lower.Contains("rebuild") || lower.Contains("recover"))
+                    return "rebuilding";
 
                 if (lower.Contains("spare"))
                     return "spare";
 
-                if (lower.Contains("faulty"))
-                    return "faulty";
+                if (lower.Contains("write-mostly"))
+                    return "write-mostly";
 
-                if (lower.Contains("rebuild") || lower.Contains("recover"))
-                    return "rebuilding";
+                if (lower.Contains("active") || lower.Contains("sync"))
+                    return "active";
             }
 
             return "unknown";
         }
 
+
         private string ParseDiskState(string detail, string device)
         {
+            string dev = device.Replace("/dev/", "").Trim();
+
             foreach (var raw in detail.Split('\n'))
             {
                 string line = raw.Trim();
 
-                if (!line.Contains(device, StringComparison.Ordinal))
+                // ⭐ Solo líneas que realmente representan discos RAID
+                if (!line.EndsWith(dev) && !line.Contains($"/dev/{dev}"))
+                    continue;
+
+                // ⭐ Evitar líneas que no son discos (UUID, metadata, etc.)
+                if (!System.Text.RegularExpressions.Regex.IsMatch(line, @"[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+\s+"))
                     continue;
 
                 string lower = line.ToLowerInvariant();
 
+                // ⭐ Orden correcto de prioridad
                 if (lower.Contains("faulty"))
                     return "FAULTY";
+
+                if (lower.Contains("removed"))
+                    return "OFFLINE";
 
                 if (lower.Contains("rebuild") || lower.Contains("recover"))
                     return "WARN";
 
-                if (lower.Contains("active") || lower.Contains("sync"))
-                    return "OK";
+                if (lower.Contains("write-mostly"))
+                    return "WARN";
 
                 if (lower.Contains("spare"))
+                    return "OK";
+
+                if (lower.Contains("active") || lower.Contains("sync"))
                     return "OK";
             }
 
             return "UNKNOWN";
         }
+
+        
 
         private string ParseTotalSize(string detail)
         {
@@ -381,26 +428,24 @@ namespace RAID_Util.Services
         //  HELPERS
         // ============================================================
 
-        private async Task<RaidDiskInfo> GetDiskInfo(string devicePath)
+        private async Task<RaidDiskInfo> GetDiskInfo(string device)
         {
-            string raw = devicePath.Trim().TrimEnd(':');
-            string name = raw.Replace("/dev/", "");
+            // Normalizar nombre
+            string name = device.Replace("/dev/", "").Trim();
+
+            // ⭐ Si es partición (sdc1, nvme0n1p1), obtener el disco padre
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
+                name = name.Substring(0, 3); // sdc1 → sdc
+
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
+                name = name.Split('p')[0]; // nvme0n1p1 → nvme0n1
 
             string json = await ShellHelper.RunCleanAsync(
                 $"lsblk -J -o NAME,MODEL,SIZE,ROTA,TYPE /dev/{name}"
             );
 
             if (string.IsNullOrWhiteSpace(json))
-            {
-                return new RaidDiskInfo
-                {
-                    Name = name,
-                    Model = "Unknown",
-                    Size = "Unknown",
-                    Icon = "",
-                    ArrayName = ""
-                };
-            }
+                return CreateUnknownDisk(name);
 
             dynamic data;
             try
@@ -409,27 +454,45 @@ namespace RAID_Util.Services
             }
             catch
             {
-                return new RaidDiskInfo
-                {
-                    Name = name,
-                    Model = "Unknown",
-                    Size = "Unknown",
-                    Icon = "",
-                    ArrayName = ""
-                };
+                return CreateUnknownDisk(name);
             }
 
+            if (data.blockdevices == null || data.blockdevices.Count == 0)
+                return CreateUnknownDisk(name);
+
             var dev = data.blockdevices[0];
+
+            string model = dev.model ?? "Unknown";
+            string size = dev.size ?? "Unknown";
+            bool isRotational = dev.rota == 1;
+            string type = dev.type ?? "disk";
+
+            // ⭐ Elegir icono según tipo
+            string icon = isRotational ? "hdd" : "ssd";
 
             return new RaidDiskInfo
             {
                 Name = name,
-                Model = dev.model ?? "Unknown",
-                Size = dev.size ?? "Unknown",
-                Icon = "",
+                Model = model,
+                Size = size,
+                Icon = icon,
                 ArrayName = ""
             };
         }
+
+        private RaidDiskInfo CreateUnknownDisk(string name)
+        {
+            return new RaidDiskInfo
+            {
+                Name = name,
+                Model = "Unknown",
+                Size = "Unknown",
+                Icon = "unknown",
+                ArrayName = ""
+            };
+        }
+
+        
 
         private string GetStateIcon(string state)
         {
@@ -474,54 +537,469 @@ namespace RAID_Util.Services
         }
 
         
-        public async Task<bool> DeleteArrayAsync(RaidArrayInfo array)
+     public async Task<bool> DeleteArrayAsync(RaidArrayInfo array)
+{
+    try
+    {
+        string arrayPath = array.Path;   // ej: /dev/md0
+        string name = array.Name;
+
+        LogService.Write($"[RAID] DELETE START → {name} ({arrayPath})");
+
+        // 1. Unmount if mounted
+        if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+        {
+            LogService.Write($"[RAID] Unmounting {array.MountPath}");
+            ShellHelper.EjecutarComoRoot($"umount {array.MountPath}");
+        }
+
+        // 1.5 Remove from fstab (usar path real)
+        RemoveArrayFromFstab(arrayPath);
+
+        // 2. Stop array
+        LogService.Write($"[RAID] Stopping array {arrayPath}");
+        var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
+        if (stop.ExitCode != 0)
+        {
+            LogService.Error($"[RAID] STOP FAILED: {stop.Stderr}");
+        }
+
+        // 3. Remove array
+        LogService.Write($"[RAID] Removing array {arrayPath}");
+        var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
+        if (remove.ExitCode != 0)
+        {
+            LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
+        }
+
+        // 4. Wipe superblocks
+        foreach (var d in array.Disks)
+        {
+            LogService.Write($"[RAID] Wiping superblock on {d.Name}");
+            var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
+
+            if (wipe.ExitCode != 0)
+                LogService.Error($"[RAID] ZERO-SB FAILED on {d.Name}: {wipe.Stderr}");
+        }
+
+        // 5. Update mdadm.conf
+        LogService.Write("[RAID] Updating mdadm.conf");
+        ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
+
+        // 6. Sync filesystem
+        ShellHelper.EjecutarComoRoot("sync");
+
+        LogService.Write($"[RAID] DELETE OK → {name}");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[RAID] DELETE FAILED:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
+public string LastCreatedMdName { get; private set; } = "";
+
+public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
+{
+    try
+    {
+        // ⭐ 1. Detectar automáticamente el siguiente mdX libre
+        string mdName = GetNextFreeMdName();     // ej: md2
+        string arrayPath = $"/dev/{mdName}";
+
+        // Guardar para CreateRealArray
+        LastCreatedMdName = mdName;
+
+        // ⭐ 2. Normalizar nivel RAID (RAID1 → 1)
+        string levelNum = level.Replace("RAID", "").Trim();
+
+        // ⭐ 3. Lista de discos
+        string deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
+
+        // ⭐ 4. Nombre amigable opcional
+        string nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
+            ? mdName
+            : friendlyName.Trim();
+
+        // ⭐ 5. Comando mdadm robusto y moderno
+        string cmd =
+            $"/usr/sbin/mdadm --create {arrayPath} " +
+            $"--verbose " +
+            $"--metadata=1.2 " +
+            $"--name={nameForMdadm} " +
+            $"--level={levelNum} " +
+            $"--raid-devices={disks.Count} " +
+            $"{deviceList} --force --run";
+
+        LogService.Write($"[CREATE] Ejecutando: {cmd}");
+
+        var result = ShellHelper.EjecutarComoRoot(cmd);
+
+        if (result.ExitCode != 0)
+        {
+            LogService.Error("[CREATE] mdadm falló:");
+            LogService.Error(result.Stderr);
+            return false;
+        }
+
+        // ⭐ 6. Esperar a que udev cree /dev/mdX
+        ShellHelper.EjecutarComoRoot("udevadm settle");
+
+        LogService.Write($"[CREATE] Array creado correctamente → {arrayPath}");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[CREATE] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
+
+
+public string GetNextFreeMdName()
+{
+    // md0 hasta md127 (límite estándar del kernel)
+    for (int i = 0; i < 128; i++)
+    {
+        string md = $"md{i}";
+        string path = $"/dev/{md}";
+
+        // Si NO existe el dispositivo → está libre
+        if (!File.Exists(path))
+            return md;
+
+        // Si existe pero mdadm dice que NO es un array → también está libre
+        var result = ShellHelper.EjecutarComoRoot($"mdadm --detail {path}");
+        if (result.ExitCode != 0)
+            return md;
+    }
+
+    // Si llegamos aquí, no hay mdX libres (muy improbable)
+    throw new Exception("No hay dispositivos mdX libres disponibles.");
+}
+
+
+        
+        
+/*
+        public bool CreateArray(string name, string level, List<RaidDiskInfo> disks)
         {
             try
             {
-                string name = array.Name;
+                string levelNum = level.Replace("RAID", "");
+                string deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
 
-                LogService.Write($"[RAID] DELETE START → {name}");
+                // Ruta correcta para arrays mdadm modernos
+                string arrayPath = $"/dev/md/{name}";
 
-                // 1. Unmount if mounted
-                if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+                string cmd =
+                    $"/usr/sbin/mdadm --create {arrayPath} " +
+                    $"--level={levelNum} " +
+                    $"--raid-devices={disks.Count} " +
+                    $"{deviceList} --force --run";
+
+                LogService.Write($"[CREATE] Ejecutando: {cmd}");
+
+                var result = ShellHelper.EjecutarComoRoot(cmd);
+
+                if (result.ExitCode != 0)
                 {
-                    LogService.Write($"[RAID] Unmounting {array.MountPath}");
-                    ShellHelper.EjecutarComoRoot($"umount {array.MountPath}");
+                    LogService.Error("[CREATE] mdadm falló:");
+                    LogService.Error(result.Stderr);
+                    return false;
                 }
 
-                // 2. Stop array
-                LogService.Write($"[RAID] Stopping array {name}");
-                ShellHelper.EjecutarComoRoot($"mdadm --stop /dev/{name}");
-
-                // 3. Remove array
-                LogService.Write($"[RAID] Removing array {name}");
-                ShellHelper.EjecutarComoRoot($"mdadm --remove /dev/{name}");
-
-                // 4. Wipe superblocks
-                foreach (var d in array.Disks)
-                {
-                    LogService.Write($"[RAID] Wiping superblock on {d.Name}");
-                    ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
-                }
-
-                // 5. Update mdadm.conf
-                LogService.Write("[RAID] Updating mdadm.conf");
-                ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
-
-                LogService.Write($"[RAID] DELETE OK → {name}");
+                LogService.Write("[CREATE] Array creado correctamente.");
                 return true;
             }
             catch (Exception ex)
             {
-                LogService.Error("[RAID] DELETE FAILED:");
+                LogService.Error("[CREATE] EXCEPCIÓN:");
+                LogService.Error(ex.ToString());
+                return false;
+            }
+        }
+*/
+        
+       
+        
+       public bool PersistArrayToMdadmConf()
+{
+    try
+    {
+        LogService.Write("========== MDADM PERSIST START ==========");
+
+        // 1. Ejecutar mdadm --detail --scan
+        var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+
+        LogService.Write($"[MDADM] exit={exit}");
+        LogService.Write("[MDADM] STDOUT:");
+        LogService.Write(stdout ?? "<null>");
+        LogService.Write("[MDADM] STDERR:");
+        LogService.Write(stderr ?? "<null>");
+
+        if (exit != 0 || string.IsNullOrWhiteSpace(stdout))
+        {
+            LogService.Error("[MDADM] No se pudo obtener la salida de mdadm --detail --scan.");
+            return false;
+        }
+
+        // 2. Filtrar líneas ARRAY
+        var arrayLines = stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("ARRAY"))
+            .ToList();
+
+        LogService.Write($"[MDADM] Líneas ARRAY detectadas: {arrayLines.Count}");
+
+        if (arrayLines.Count == 0)
+        {
+            LogService.Error("[MDADM] No se detectaron líneas ARRAY.");
+            return false;
+        }
+
+        // 3. Seleccionar el mdX más alto (el recién creado)
+        var newest = arrayLines
+            .OrderByDescending(l =>
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(l, @"md(\d+)");
+                return match.Success ? int.Parse(match.Groups[1].Value) : -1;
+            })
+            .First();
+
+        LogService.Write("[MDADM] Línea seleccionada:");
+        LogService.Write(newest);
+
+        // 4. Rutas posibles según distro
+        string[] possiblePaths =
+        {
+            "/etc/mdadm/mdadm.conf",   // Debian/Ubuntu
+            "/etc/mdadm.conf"          // Arch/Manjaro
+        };
+
+        // 5. Elegir la ruta correcta
+        string confPath = possiblePaths.FirstOrDefault(File.Exists)
+                          ?? possiblePaths[0]; // Si no existe ninguna, usar Debian-style
+
+        LogService.Write($"[MDADM] Usando ruta de configuración: {confPath}");
+
+        // 6. Crear archivo si no existe
+        if (!File.Exists(confPath))
+        {
+            LogService.Write("[MDADM] Archivo no existe. Creándolo...");
+            File.WriteAllText(confPath,
+                "DEVICE partitions\n" +
+                "MAILADDR root\n\n"
+            );
+        }
+
+        // 7. Leer contenido actual
+        string existing = File.ReadAllText(confPath);
+
+        // 8. Evitar duplicados
+        if (existing.Contains(newest))
+        {
+            LogService.Write("[MDADM] La entrada ya existe en mdadm.conf");
+            return true;
+        }
+
+        // 9. Escribir entrada nueva
+        string tempFile = "/tmp/mdadm.conf.append";
+        File.WriteAllText(tempFile, newest + Environment.NewLine);
+
+        var append = ShellHelper.EjecutarComoRoot($"cat {tempFile} >> {confPath}");
+
+        LogService.Write($"[MDADM] append exit={append.ExitCode}");
+        LogService.Write("[MDADM] append STDERR:");
+        LogService.Write(append.Stderr ?? "<null>");
+
+        if (append.ExitCode != 0)
+        {
+            LogService.Error("[MDADM] Error al escribir en mdadm.conf:");
+            LogService.Error(append.Stderr);
+            return false;
+        }
+
+        LogService.Write("[MDADM] Entrada agregada correctamente a mdadm.conf");
+        LogService.Write("========== MDADM PERSIST END (OK) ==========");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[MDADM] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        LogService.Write("========== MDADM PERSIST END (EXCEPTION) ==========");
+        return false;
+    }
+}
+
+
+        
+        public bool WaitForArray(string mdName, int timeoutMs = 5000)
+        {
+            var sw = Stopwatch.StartNew();
+
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                var result = ShellHelper.EjecutarComoRoot($"ls /dev/{mdName}");
+
+                if (result.ExitCode == 0)
+                    return true;
+
+                Thread.Sleep(100);
+            }
+
+            return false;
+        }
+
+
+        public string GetMdadmScan()
+        {
+            var result = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+
+            if (result.ExitCode != 0)
+                return "";
+
+            return result.Stdout.Trim();
+        }
+
+
+        public bool FormatArray(string arrayName, string fs, string label)
+        {
+            try
+            {
+                string cmd = fs switch
+                {
+                    "ext4" => string.IsNullOrWhiteSpace(label)
+                        ? $"/usr/sbin/mkfs.ext4 -F /dev/{arrayName}"
+                        : $"/usr/sbin/mkfs.ext4 -F -L \"{label}\" /dev/{arrayName}",
+
+                    "xfs" => string.IsNullOrWhiteSpace(label)
+                        ? $"/usr/sbin/mkfs.xfs -f /dev/{arrayName}"
+                        : $"/usr/sbin/mkfs.xfs -f -L \"{label}\" /dev/{arrayName}",
+
+                    "btrfs" => string.IsNullOrWhiteSpace(label)
+                        ? $"/usr/sbin/mkfs.btrfs -f /dev/{arrayName}"
+                        : $"/usr/sbin/mkfs.btrfs -f -L \"{label}\" /dev/{arrayName}",
+
+                    _ => throw new Exception("Unknown filesystem")
+                };
+
+                LogService.Write($"[FORMAT] Ejecutando: {cmd}");
+
+                var result = ShellHelper.EjecutarComoRoot(cmd);
+
+                if (result.ExitCode != 0)
+                {
+                    LogService.Error("[FORMAT] Error:");
+                    LogService.Error(result.Stderr);
+                    return false;
+                }
+
+                LogService.Write("[FORMAT] Formateo completado.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error("[FORMAT] EXCEPCIÓN:");
                 LogService.Error(ex.ToString());
                 return false;
             }
         }
 
-        
-        
-        
+        public bool RemoveArrayFromFstab(string arrayPath)
+{
+    try
+    {
+        string fstab = "/etc/fstab";
+
+        if (!File.Exists(fstab))
+        {
+            LogService.Write("[FSTAB] No existe /etc/fstab, nada que limpiar.");
+            return true;
+        }
+
+        string[] lines = File.ReadAllLines(fstab);
+
+        string dev = arrayPath.Trim();               // /dev/md0
+        string name = dev.Split('/').Last();         // md0
+        string nameOnly = name.Replace("md", "");    // 0 (por si acaso)
+
+        // ⭐ Patrones que deben eliminarse
+        string[] patterns =
+        {
+            dev,                                     // /dev/md0
+            $"/dev/{name}",                           // /dev/md0
+            $"/dev/md/{name}",                        // /dev/md/md0
+            name,                                     // md0
+            $"md{nameOnly}",                          // md0
+            $"md/{name}",                             // md/md0
+            $"md/{nameOnly}",                         // md/0
+        };
+
+        var newLines = new List<string>();
+
+        foreach (var line in lines)
+        {
+            string trimmed = line.Trim();
+
+            bool match = patterns.Any(p => trimmed.StartsWith(p, StringComparison.Ordinal));
+
+            // ⭐ También eliminar entradas por UUID
+            if (trimmed.StartsWith("UUID=", StringComparison.Ordinal) &&
+                trimmed.Contains(name, StringComparison.Ordinal))
+            {
+                match = true;
+            }
+
+            // ⭐ También eliminar symlinks de mdadm
+            if (trimmed.Contains("md-name", StringComparison.Ordinal) ||
+                trimmed.Contains("md-uuid", StringComparison.Ordinal))
+            {
+                if (trimmed.Contains(name, StringComparison.Ordinal))
+                    match = true;
+            }
+
+            if (!match)
+                newLines.Add(line);
+        }
+
+        if (newLines.Count == lines.Length)
+        {
+            LogService.Write("[FSTAB] No había entrada para este array.");
+            return true;
+        }
+
+        string tempFile = "/tmp/fstab.cleaned";
+        File.WriteAllLines(tempFile, newLines);
+
+        var result = ShellHelper.EjecutarComoRoot($"cp {tempFile} {fstab}");
+
+        if (result.ExitCode != 0)
+        {
+            LogService.Error("[FSTAB] Error al actualizar /etc/fstab:");
+            LogService.Error(result.Stderr);
+            return false;
+        }
+
+        LogService.Write("[FSTAB] Entrada eliminada correctamente.");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[FSTAB] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
+
         public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string? existingDetail = null)
         {
             var result = new List<string>();
@@ -537,7 +1015,14 @@ namespace RAID_Util.Services
             {
                 string line = raw.Trim();
 
+                // ⭐ Solo líneas que terminan en /dev/sdX o /dev/nvmeXnY
                 if (!line.Contains("/dev/"))
+                    continue;
+
+                // ⭐ Evitar líneas que NO son discos (UUID, metadata, etc.)
+                if (!line.EndsWith("/dev/sd") &&
+                    !line.Contains("/dev/sd") &&
+                    !line.Contains("/dev/nvme"))
                     continue;
 
                 string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -547,10 +1032,16 @@ namespace RAID_Util.Services
                 string dev = parts[^1];
 
                 if (dev.StartsWith("/dev/"))
-                    result.Add(dev);
+                {
+                    string devName = dev.Split('/').Last();
+                    result.Add(devName);
+                }
             }
 
             return result;
         }
+
+        
+        
     }
 }
