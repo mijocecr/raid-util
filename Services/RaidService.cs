@@ -347,7 +347,7 @@ namespace RAID_Util.Services
 
         Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
 
-        // ⭐ 3) SI ESTÁ MONTADO → DESMONTAR ANTES DE FORMATEAR
+        // 3) Si está montado → desmontar antes de formatear
         var checkMount = ShellHelper.EjecutarComoRoot($"mount | grep -w {devPath}");
         if (checkMount.ExitCode == 0)
         {
@@ -360,7 +360,7 @@ namespace RAID_Util.Services
                 return false;
             }
 
-            // ⭐ Limpiar entrada previa en fstab
+            // Limpiar entrada previa en fstab
             ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
         }
 
@@ -407,8 +407,7 @@ namespace RAID_Util.Services
         // 9) Construir opciones de montaje desde JSON
         List<string> opts = new();
 
-        // ⭐ Permitir desmontar sin sudo
-        opts.Add("users");
+        opts.Add("users"); // permitir desmontar sin sudo
 
         if (cfg.Mount_NoAtime) opts.Add("noatime");
         if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
@@ -416,31 +415,37 @@ namespace RAID_Util.Services
         if (cfg.Mount_Sync) opts.Add("sync");
         if (cfg.Mount_ReadOnly) opts.Add("ro");
 
-        if (opts.Count == 1) // solo "users"
+        if (opts.Count == 1)
             opts.Add("defaults");
 
         string mountOpts = string.Join(",", opts);
 
-        // 10) Montar con opciones
-        var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
-        if (mount.ExitCode != 0)
+        // ⭐ 10) Montar SOLO si PersistMount = true
+        if (cfg.PersistMount)
         {
-            Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
-            return false;
-        }
+            var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
+            if (mount.ExitCode != 0)
+            {
+                Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
+                return false;
+            }
 
-        // ⭐ 11) Aplicar permisos configurables desde JSON
-        string perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
-            ? "777"
-            : cfg.MountPermissions;
+            // Aplicar permisos
+            string perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
+                ? "755"
+                : cfg.MountPermissions;
 
-        ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
+            ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
 
-        // 12) Si AutoMount = true → escribir en fstab
-        if (cfg.AutoMount)
-        {
-            string fstabEntry = $"{devPath} {mountPath} {NormalizeFs(fsType)} {mountOpts} 0 0";
-            ShellHelper.EjecutarComoRoot($"bash -c \"echo '{fstabEntry}' >> /etc/fstab\"");
+            // ⭐ 11) Escribir entrada en fstab
+            string fs = NormalizeFs(fsType);
+            string entry = $"{devPath} {mountPath} {fs} {mountOpts} 0 0";
+
+            // eliminar entradas previas
+            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab'");
+
+            // añadir entrada nueva
+            ShellHelper.EjecutarComoRoot($"bash -c \"echo '{entry}' >> /etc/fstab\"");
         }
 
         return true;
@@ -453,16 +458,39 @@ namespace RAID_Util.Services
 }
 
 
-        
 
+        
 private string NormalizeFs(string fs)
 {
+    if (string.IsNullOrWhiteSpace(fs))
+        return "auto";
+
+    fs = fs.Trim().ToLowerInvariant();
+
     return fs switch
     {
-        "vfat (FAT32)" => "vfat",
-        _ => fs
+        "ext4"              => "ext4",
+        "xfs"               => "xfs",
+        "btrfs"             => "btrfs",
+        "f2fs"              => "f2fs",
+
+        // UI-friendly names → real FS
+        "vfat (fat32)"      => "vfat",
+        "fat32"             => "vfat",
+        "vfat"              => "vfat",
+
+        "exfat"             => "exfat",
+
+        "ntfs"              => "ntfs",
+        "ntfs (windows)"    => "ntfs",
+
+        "swap"              => "swap",
+
+        _                   => "auto"
     };
 }
+
+
 
 
         

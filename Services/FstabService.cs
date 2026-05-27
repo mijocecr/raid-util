@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Collections.Generic;
 using RAID_Util.Helpers;
 
 namespace RAID_Util.Services
@@ -19,8 +20,7 @@ namespace RAID_Util.Services
             {
                 if (File.Exists(FstabPath))
                 {
-                    // Copia con permisos root
-                    ShellHelper.EjecutarComoRoot($"cp {FstabPath} {BackupPath}");
+                    ShellHelper.EjecutarComoRoot($"cp \"{FstabPath}\" \"{BackupPath}\"");
                 }
             }
             catch
@@ -37,12 +37,16 @@ namespace RAID_Util.Services
             try
             {
                 var result = ShellHelper.EjecutarComoRoot($"blkid {device}");
-
                 string output = result.Stdout + result.Stderr;
 
                 if (output.Contains("TYPE=\"ext4\"")) return "ext4";
                 if (output.Contains("TYPE=\"xfs\"")) return "xfs";
                 if (output.Contains("TYPE=\"btrfs\"")) return "btrfs";
+                if (output.Contains("TYPE=\"f2fs\"")) return "f2fs";
+                if (output.Contains("TYPE=\"vfat\"")) return "vfat";
+                if (output.Contains("TYPE=\"exfat\"")) return "exfat";
+                if (output.Contains("TYPE=\"ntfs\"")) return "ntfs";
+                if (output.Contains("TYPE=\"swap\"")) return "swap";
             }
             catch { }
 
@@ -56,25 +60,60 @@ namespace RAID_Util.Services
         {
             Backup();
 
-            // Leer fstab como usuario normal (solo lectura)
+            if (!File.Exists(FstabPath))
+                ShellHelper.EjecutarComoRoot($"touch \"{FstabPath}\"");
+
             var lines = File.ReadAllLines(FstabPath).ToList();
 
-            string prefix = device + " ";
+            // Normalizar espacios
+            List<string> cleaned = new();
 
-            // Eliminar entradas previas del mismo dispositivo
-            lines.RemoveAll(l => l.TrimStart().StartsWith(prefix));
+            foreach (var line in lines)
+            {
+                string trimmed = line.Trim();
+
+                // Saltar comentarios
+                if (trimmed.StartsWith("#"))
+                {
+                    cleaned.Add(line);
+                    continue;
+                }
+
+                // Saltar líneas vacías
+                if (string.IsNullOrWhiteSpace(trimmed))
+                {
+                    cleaned.Add(line);
+                    continue;
+                }
+
+                // Parsear columnas
+                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                if (parts.Length >= 2)
+                {
+                    string dev = parts[0];
+                    string mp = parts[1];
+
+                    // Eliminar entradas previas del mismo dispositivo o mismo mountpoint
+                    if (dev == device || mp == mountPoint)
+                        continue;
+                }
+
+                cleaned.Add(line);
+            }
 
             // Construir entrada nueva
             string entry = $"{device} {mountPoint} {fs} {options} 0 0";
 
-            lines.Add(entry);
+            cleaned.Add(entry);
 
             // Guardar en archivo temporal
             string temp = Path.GetTempFileName();
-            File.WriteAllLines(temp, lines);
+            File.WriteAllLines(temp, cleaned);
 
             // Copiar con permisos root
-            ShellHelper.EjecutarComoRoot($"cp {temp} {FstabPath}");
+            ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
+            ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
         }
 
         // ============================================================
@@ -84,16 +123,41 @@ namespace RAID_Util.Services
         {
             Backup();
 
+            if (!File.Exists(FstabPath))
+                return;
+
             var lines = File.ReadAllLines(FstabPath).ToList();
+            List<string> cleaned = new();
 
-            string prefix = device + " ";
+            foreach (var line in lines)
+            {
+                string trimmed = line.Trim();
 
-            lines.RemoveAll(l => l.TrimStart().StartsWith(prefix));
+                if (trimmed.StartsWith("#") || string.IsNullOrWhiteSpace(trimmed))
+                {
+                    cleaned.Add(line);
+                    continue;
+                }
+
+                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                if (parts.Length >= 1)
+                {
+                    string dev = parts[0];
+
+                    // Eliminar solo si coincide EXACTAMENTE
+                    if (dev == device)
+                        continue;
+                }
+
+                cleaned.Add(line);
+            }
 
             string temp = Path.GetTempFileName();
-            File.WriteAllLines(temp, lines);
+            File.WriteAllLines(temp, cleaned);
 
-            ShellHelper.EjecutarComoRoot($"cp {temp} {FstabPath}");
+            ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
+            ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
         }
     }
 }

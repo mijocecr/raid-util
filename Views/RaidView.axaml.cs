@@ -761,28 +761,47 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     private Border BuildExpandedCard(RaidArrayInfo array)
     {
-        var panel = new StackPanel { Spacing = 10 };
+        var panel = new StackPanel { Spacing = 14 };
 
-        // Título del array
+        // ============================================================
+        // 1) TÍTULO DEL ARRAY
+        // ============================================================
         panel.Children.Add(new TextBlock
         {
-            Text = array.Name,
+            Text = $"{array.Name}  •  {array.Level}",
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             FontSize = 20,
             FontWeight = FontWeight.Bold,
             Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+            Margin = new Thickness(0, 0, 0, 4)
+        });
+
+        // Estado
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"State: {array.State}",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            FontSize = 13,
+            Foreground = (IBrush)Application.Current!.FindResource("BMWAccentBrush")!,
             Margin = new Thickness(0, 0, 0, 8)
         });
 
-        // Opciones de montaje
+        // ============================================================
+        // 2) OPCIONES DE MONTAJE (PersistMount + botones)
+        // ============================================================
         panel.Children.Add(BuildMountOptions(array));
 
-        // Tarjetas de discos
+        // ============================================================
+        // 3) TARJETAS DE DISCOS
+        // ============================================================
         foreach (var disk in array.Disks)
             panel.Children.Add(BuildDiskCard(disk));
 
-        // Tarjeta expandida final
+        // ============================================================
+        // 4) TARJETA FINAL
+        // ============================================================
         return new Border
         {
             Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
@@ -793,9 +812,18 @@ private Border BuildArrayCard(RaidArrayInfo array)
         };
     }
 
+
   
    private Control BuildMountOptions(RaidArrayInfo array)
 {
+    var cfg = ArrayConfigService.Load(array.Name);
+
+    string mountPoint = string.IsNullOrWhiteSpace(cfg.MountPoint)
+        ? $"/mnt/{array.Name}"
+        : cfg.MountPoint;
+
+    bool isMounted = MountService.IsMounted(mountPoint);
+
     var panel = new StackPanel
     {
         Spacing = 12,
@@ -813,7 +841,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
     // Botón Mount / Unmount
     var btnMount = new Button
     {
-        Content = array.IsMounted ? "Unmount" : "Mount",
+        Content = isMounted ? "Unmount" : "Mount",
         HorizontalContentAlignment = HorizontalAlignment.Center,
         VerticalContentAlignment = VerticalAlignment.Center,
         Classes = { "PrimaryButton" },
@@ -822,8 +850,33 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     btnMount.Click += (_, _) =>
     {
-        array.IsMounted = !array.IsMounted;
-        BuildUI();
+        if (MountService.IsMounted(mountPoint))
+        {
+            MountService.Unmount(mountPoint);
+        }
+        else
+        {
+            // Construir opciones de montaje (igual que en ConfigWindow)
+            var opts = new List<string> { "users" };
+
+            if (cfg.Mount_NoAtime) opts.Add("noatime");
+            if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
+            if (cfg.Mount_Discard) opts.Add("discard");
+            if (cfg.Mount_Sync) opts.Add("sync");
+            if (cfg.Mount_ReadOnly) opts.Add("ro");
+
+            if (opts.Count == 1)
+                opts.Add("defaults");
+
+            string mountOpts = string.Join(",", opts);
+
+            MountService.Mount($"/dev/{array.Name}", mountPoint, mountOpts);
+
+            // Aplicar permisos
+            ShellHelper.EjecutarComoRoot($"chmod {cfg.MountPermissions} \"{mountPoint}\"");
+        }
+
+        BuildUI(); // refrescar tarjeta
     };
 
     // Botón Open
@@ -833,40 +886,28 @@ private Border BuildArrayCard(RaidArrayInfo array)
         HorizontalContentAlignment = HorizontalAlignment.Center,
         VerticalContentAlignment = VerticalAlignment.Center,
         Classes = { "SecondaryButton" },
-        Width = 90
+        Width = 90,
+        IsEnabled = isMounted
     };
+
+    btnOpen.Click += (_, _) =>
+    {
+        if (MountService.IsMounted(mountPoint))
+            DesktopHelper.OpenPath(mountPoint);
+    };
+
+
+
 
     buttonsRow.Children.Add(btnMount);
     buttonsRow.Children.Add(btnOpen);
 
     panel.Children.Add(buttonsRow);
 
-    // Persist Mount
-    var togglesRow = new StackPanel
-    {
-        Orientation = Orientation.Horizontal,
-        Spacing = 30,
-        HorizontalAlignment = HorizontalAlignment.Left
-    };
-
-    var chkPersist = new CheckBox
-    {
-        Content = "Persist Mount",
-        IsChecked = array.PersistMount,
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
-    };
-
-    chkPersist.Checked += (_, _) => array.PersistMount = true;
-    chkPersist.Unchecked += (_, _) => array.PersistMount = false;
-
-    togglesRow.Children.Add(chkPersist);
-
-    panel.Children.Add(togglesRow);
-
     // Ruta de montaje
     panel.Children.Add(new TextBlock
     {
-        Text = $"Mount Path: {array.MountPath ?? "/mnt/" + array.Name}",
+        Text = $"Mount Path: {mountPoint}",
         FontSize = 14,
         HorizontalAlignment = HorizontalAlignment.Left,
         Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
@@ -874,6 +915,8 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     return panel;
 }
+
+
 
    
 private async void AnimateSmartDot(Border glow, Border dot, string state)
@@ -1030,7 +1073,7 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
                 new MenuItem { Header = "Mark as Faulty", Tag = "faulty" },
                 new MenuItem { Header = "Set as Spare", Tag = "spare" },
                 new MenuItem { Header = "Remove from Array", Tag = "remove" },
-                new MenuItem { Header = "Initialize Disk", Tag = "init" }
+                
             }
         };
 
@@ -1079,36 +1122,174 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
 }
 
    
-private async void OnDiskMenuClick(RaidDiskInfo disk, string? action)
+   private async void OnDiskMenuClick(RaidDiskInfo disk, string? action)
 {
     var service = new RaidService();
 
+    // ============================================================
+    // VALIDACIONES BÁSICAS
+    // ============================================================
+
+    if (disk == null)
+    {
+        await ShowConfirm("Error", "Disk not found.");
+        return;
+    }
+
+    if (string.IsNullOrWhiteSpace(disk.ArrayName))
+    {
+        await ShowConfirm("Error", "This disk does not belong to any array.");
+        return;
+    }
+
+    // Buscar el array al que pertenece este disco
+    var array = _arrays.FirstOrDefault(a => a.Name == disk.ArrayName);
+
+    if (array == null)
+    {
+        await ShowConfirm("Error", $"Array {disk.ArrayName} not found.");
+        return;
+    }
+
+    string level = array.Level.ToUpperInvariant();
+
+    bool IsRaid0 = level == "RAID0";
+    bool IsRaid1 = level == "RAID1";
+    bool IsRaid5 = level == "RAID5";
+    bool IsRaid6 = level == "RAID6";
+    bool IsRaid10 = level == "RAID10";
+
+    // RAID0 → no soporta ninguna acción RAID sobre discos
+    if (IsRaid0 && action != "smart" && action != "details")
+    {
+        await ShowConfirm("Error", "RAID0 does not support disk operations.");
+        return;
+    }
+
+    // No permitir acciones si el array está fallado
+    if (array.State == "Failed" && action != "smart" && action != "details")
+    {
+        await ShowConfirm("Error", "This array is FAILED. Only SMART and details are available.");
+        return;
+    }
+
+    // ============================================================
+    // ACCIONES
+    // ============================================================
+
     switch (action)
     {
+        // --------------------------------------------------------
+        // SMART INFO
+        // --------------------------------------------------------
         case "smart":
             string info = await service.GetSmartInfoAsync(disk.Name);
             ShowSmartDialog(info, disk.Name);
             break;
 
+        // --------------------------------------------------------
+        // MARK AS FAULTY
+        // --------------------------------------------------------
         case "faulty":
+
+            // No marcar faulty si ya lo está
+            if (disk.State == "FAULTY")
+            {
+                await ShowConfirm("Info", "This disk is already marked as faulty.");
+                return;
+            }
+
+            // No marcar faulty si el array está reconstruyendo
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Error", "Cannot mark disk as faulty while array is rebuilding.");
+                return;
+            }
+
+            // No marcar faulty si es el último disco activo en RAID1
+            if (IsRaid1 && array.Disks.Count(d => d.Role == "active") <= 1)
+            {
+                await ShowConfirm("Error", "Cannot mark the last active disk as faulty in RAID1.");
+                return;
+            }
+
             service.MarkDiskAsFaulty(disk.ArrayName, disk.Name);
+            await ShowConfirm("Success", $"{disk.Name} marked as faulty.");
             break;
 
+        // --------------------------------------------------------
+        // SET AS SPARE
+        // --------------------------------------------------------
         case "spare":
+
+            // No convertir en spare si ya está en el array como activo
+            if (disk.Role == "active")
+            {
+                await ShowConfirm("Error", "Active disks cannot be converted to spare.");
+                return;
+            }
+
+            // No convertir en spare si ya es spare
+            if (disk.Role == "spare")
+            {
+                await ShowConfirm("Info", "This disk is already a spare.");
+                return;
+            }
+
+            // No convertir en spare si está faulty
+            if (disk.State == "FAULTY")
+            {
+                await ShowConfirm("Error", "Faulty disks cannot be set as spare.");
+                return;
+            }
+
             service.SetDiskAsSpare(disk.ArrayName, disk.Name);
+            await ShowConfirm("Success", $"{disk.Name} added as spare.");
             break;
 
+        // --------------------------------------------------------
+        // REMOVE DISK FROM ARRAY
+        // --------------------------------------------------------
         case "remove":
+
+            // Solo se puede remover si está faulty o spare
+            if (disk.Role != "faulty" && disk.Role != "spare")
+            {
+                await ShowConfirm("Error", "Only faulty or spare disks can be removed.");
+                return;
+            }
+
+            // No remover si el array está reconstruyendo
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Error", "Cannot remove disk while array is rebuilding.");
+                return;
+            }
+
+            // No remover si es el último disco activo en RAID1
+            if (IsRaid1 && disk.Role == "active" &&
+                array.Disks.Count(d => d.Role == "active") <= 1)
+            {
+                await ShowConfirm("Error", "Cannot remove the last active disk in RAID1.");
+                return;
+            }
+
             service.RemoveDiskFromArray(disk.ArrayName, disk.Name);
+            await ShowConfirm("Success", $"{disk.Name} removed from array.");
             break;
 
-        case "init":
-            await service.InitializeDiskAsync(disk.Name);
+        // --------------------------------------------------------
+        // DEFAULT
+        // --------------------------------------------------------
+        default:
+            await ShowConfirm("Error", "Unknown action.");
             break;
     }
 
     BuildUI();
 }
+
+
 
 private void ShowSmartDialog(string text, string diskName)
 {
@@ -1659,6 +1840,12 @@ private Window GetWindow()
     
     private async void OnRefreshArraysClicked(object? sender, RoutedEventArgs e)
     {
+        
+        BtnDeleteArray.IsEnabled = false;
+        BtnConfigArrays.IsEnabled = false;
+        BtnInitialize.IsEnabled = false;
+        
+        
         Console.WriteLine("Refresh button clicked.");
         await LoadRaidAsync();
     }
@@ -1758,37 +1945,225 @@ private Window GetWindow()
     
    //-------------Boton More------------------//
    
+   
    private async void OnMoreMenuClick(RaidArrayInfo array, string? action)
-   {
-       var service = new RaidService();
+{
+    var service = new RaidService();
 
-       switch (action)
-       {
-           case "resync":
-               await service.StartArrayResyncAsync(array.Name);
-               break;
+    // ============================================================
+    // VALIDACIONES BÁSICAS
+    // ============================================================
 
-           case "check":
-               await service.ForceArrayCheckAsync(array.Name);
-               break;
+    if (array == null)
+    {
+        await ShowConfirm("Error", "Array not found.");
+        return;
+    }
 
-           case "repair":
-               await service.ForceArrayRepairAsync(array.Name);
-               break;
+    if (string.IsNullOrWhiteSpace(array.Level))
+    {
+        await ShowConfirm("Error", "Invalid RAID level.");
+        return;
+    }
 
-           case "stop":
-               await service.StopArrayAsync(array.Name);
-               break;
+    string level = array.Level.ToUpperInvariant();
 
-           case "details":
-               string detail = await service.GetArrayDetailsAsync(array.Name);
-               ShowArrayDetailsDialog(detail, array.Name);
-               break;
-       }
+    if (array.Disks == null || array.Disks.Count == 0)
+    {
+        await ShowConfirm("Error", "This array has no disks.");
+        return;
+    }
 
-       BuildUI();
-   }
+    // No permitir acciones si el array está fallado
+    if (array.State == "Failed" && action != "details")
+    {
+        await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
+        return;
+    }
 
+    // ============================================================
+    // VALIDACIONES POR TIPO DE RAID
+    // ============================================================
+
+    bool IsRaid0 = level == "RAID0";
+    bool IsRaid1 = level == "RAID1";
+    bool IsRaid5 = level == "RAID5";
+    bool IsRaid6 = level == "RAID6";
+    bool IsRaid10 = level == "RAID10";
+
+    // RAID0 → solo permite stop y details
+    if (IsRaid0)
+    {
+        if (action != "stop" && action != "details")
+        {
+            await ShowConfirm("Error", "This RAID level (RAID0) does not support this action.");
+            return;
+        }
+    }
+
+    // ============================================================
+    // VALIDACIÓN DE MONTAJE READ-ONLY (REAL)
+    // ============================================================
+
+    bool IsMountedReadOnly = false;
+
+    if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+    {
+        var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
+
+        if (mountInfo.ExitCode == 0)
+        {
+            string line = mountInfo.Stdout.ToLowerInvariant();
+            if (line.Contains("(ro,") || line.Contains(" ro,"))
+                IsMountedReadOnly = true;
+        }
+    }
+
+    // ============================================================
+    // ACCIONES
+    // ============================================================
+
+    switch (action)
+    {
+        // --------------------------------------------------------
+        // RESYNC / REBUILD
+        // --------------------------------------------------------
+        case "resync":
+
+            if (IsRaid0)
+            {
+                await ShowConfirm("Error", "RAID0 cannot be rebuilt.");
+                return;
+            }
+
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Info", "This array is already rebuilding.");
+                return;
+            }
+
+            if (array.State == "Degraded" &&
+                !array.Disks.Any(d => d.Role == "spare"))
+            {
+                await ShowConfirm("Error", "Cannot rebuild: no spare disk available.");
+                return;
+            }
+
+            if (IsMountedReadOnly)
+            {
+                await ShowConfirm("Error", "Array is mounted read-only. Cannot start resync.");
+                return;
+            }
+
+            await service.StartArrayResyncAsync(array.Name);
+            await ShowConfirm("Success", "Resync started.");
+            break;
+
+        // --------------------------------------------------------
+        // FORCE CHECK
+        // --------------------------------------------------------
+        case "check":
+
+            if (IsRaid0)
+            {
+                await ShowConfirm("Error", "RAID0 does not support consistency checks.");
+                return;
+            }
+
+            if (!array.IsMounted)
+            {
+                await ShowConfirm("Error", "Array must be mounted to perform a check.");
+                return;
+            }
+
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Error", "Cannot check while rebuilding.");
+                return;
+            }
+
+            await service.ForceArrayCheckAsync(array.Name);
+            await ShowConfirm("Success", "Check started.");
+            break;
+
+        // --------------------------------------------------------
+        // FORCE REPAIR
+        // --------------------------------------------------------
+        case "repair":
+
+            if (IsRaid0)
+            {
+                await ShowConfirm("Error", "RAID0 cannot be repaired.");
+                return;
+            }
+
+            if (array.State != "Degraded")
+            {
+                await ShowConfirm("Error", "Repair is only available for degraded arrays.");
+                return;
+            }
+
+            if (!array.Disks.Any(d => d.Role == "spare"))
+            {
+                await ShowConfirm("Error", "No spare disk available for repair.");
+                return;
+            }
+
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Error", "Cannot repair while rebuilding.");
+                return;
+            }
+
+            await service.ForceArrayRepairAsync(array.Name);
+            await ShowConfirm("Success", "Repair started.");
+            break;
+
+        // --------------------------------------------------------
+        // STOP ARRAY
+        // --------------------------------------------------------
+        case "stop":
+
+            if (array.IsMounted)
+            {
+                await ShowConfirm("Error", "Unmount the array before stopping it.");
+                return;
+            }
+
+            if (array.State == "Rebuilding")
+            {
+                await ShowConfirm("Error", "Cannot stop array while rebuilding.");
+                return;
+            }
+
+            if (array.MountPath == "/" || array.MountPath == "/root")
+            {
+                await ShowConfirm("Error", "This array contains the root filesystem. Cannot stop.");
+                return;
+            }
+
+            await service.StopArrayAsync(array.Name);
+            await ShowConfirm("Success", "Array stopped.");
+            break;
+
+        // --------------------------------------------------------
+        // DETAILS
+        // --------------------------------------------------------
+        case "details":
+            string detail = await service.GetArrayDetailsAsync(array.Name);
+            ShowArrayDetailsDialog(detail, array.Name);
+            break;
+
+        default:
+            await ShowConfirm("Error", "Unknown action.");
+            break;
+    }
+
+    BuildUI();
+}
+
+   
+  //--------------Boton More------------------//
    
    private void ShowArrayDetailsDialog(string text, string arrayName)
    {

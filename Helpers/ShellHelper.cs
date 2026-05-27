@@ -18,6 +18,58 @@ namespace RAID_Util.Helpers
 
             return cmd;
         }
+        
+        public static (int ExitCode, string Stdout, string Stderr) EjecutarSinRoot(string command)
+        {
+            var callId = ++_callCount;
+            var sw = Stopwatch.StartNew();
+
+            Console.WriteLine($"[SHELL] #{callId} EjecutarSinRoot: {command}");
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "/bin/bash",
+                    Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = psi };
+                process.Start();
+
+                const int timeoutMs = 15000;
+
+                if (!process.WaitForExit(timeoutMs))
+                {
+                    try { process.Kill(); } catch { }
+                    Console.WriteLine($"[SHELL] #{callId} TIMEOUT ejecutando '{command}'");
+                    return (1, "", "Timeout");
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+
+                sw.Stop();
+
+                Console.WriteLine($"[SHELL] #{callId} EXIT={process.ExitCode} ({sw.ElapsedMilliseconds} ms)");
+                Console.WriteLine($"[SHELL] #{callId} STDOUT:\n{stdout}");
+                Console.WriteLine($"[SHELL] #{callId} STDERR:\n{stderr}");
+
+                return (process.ExitCode, stdout, stderr);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SHELL] #{callId} EXCEPTION: {ex}");
+                return (1, "", ex.Message);
+            }
+        }
+
+        
+        
 
         public static (int ExitCode, string Stdout, string Stderr) EjecutarComoRoot(string command)
         {

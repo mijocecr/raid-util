@@ -72,7 +72,10 @@
                             <TextBox x:Name="TxtMountPoint"
                                      Height="28"
                                      Width="260"
-                                     IsReadOnly="True"/>
+                                     IsReadOnly="True"
+                                     Background="{DynamicResource BMWInputBrush}"
+                                     Foreground="{DynamicResource BMWTextBrush}"
+                                     BorderBrush="{DynamicResource BMWBorderBrush}"/>
 
                             <Button x:Name="BtnPickMountPoint"
                                     Content="Browse"
@@ -118,14 +121,18 @@
                         <TextBox x:Name="TxtMountPermissions"
                                  Height="28"
                                  Width="120"
-                                 Watermark="777"
+                                 Watermark="755"
                                  Background="{DynamicResource BMWInputBrush}"
                                  Foreground="{DynamicResource BMWTextBrush}"
-                                 BorderBrush="{DynamicResource BMWBorderBrush}"/>
+                                 BorderBrush="{DynamicResource BMWBorderBrush}"
+                                 HorizontalAlignment="Left"
+                                 TextAlignment="Center"
+                                 MaxLength="3"/>
                     </StackPanel>
 
-                    <ToggleSwitch x:Name="TgAutoMount"
-                                  Content="Auto-mount on startup"
+                    <!-- ⭐ PERSISTENCIA REAL -->
+                    <ToggleSwitch x:Name="TgPersistMount"
+                                  Content="Persist mount in /etc/fstab"
                                   Margin="0 4 0 0"/>
                 </StackPanel>
 

@@ -52,6 +52,12 @@ namespace RAID_Util.Services
                     return new ArrayConfig();
                 }
 
+                // ⭐ Compatibilidad con versiones antiguas
+                // Si el JSON viejo tenía AutoMount, lo ignoramos.
+                // PersistMount ya viene en el nuevo modelo.
+                if (cfg.MountPermissions is null)
+                    cfg.MountPermissions = "755";
+
                 return cfg;
             }
             catch (Exception ex)

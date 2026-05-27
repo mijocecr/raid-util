@@ -43,7 +43,8 @@ namespace RAID_Util.Views
             TgSync.IsChecked = _config.Mount_Sync;
             TgReadOnly.IsChecked = _config.Mount_ReadOnly;
 
-            TgAutoMount.IsChecked = _config.AutoMount;
+            // ⭐ Persistencia real (fstab)
+            TgPersistMount.IsChecked = _config.PersistMount;
 
             // ⭐ NEW: Mount permissions
             TxtMountPermissions.Text = _config.MountPermissions;
@@ -127,7 +128,6 @@ namespace RAID_Util.Views
             return string.Join(",", opts);
         }
 
-
         private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
         {
             var dialog = new OpenFolderDialog
@@ -161,11 +161,11 @@ namespace RAID_Util.Views
             // ============================
             // 2) VALIDACIÓN DE MOUNT POINT
             // ============================
-            if (TgAutoMount.IsChecked == true)
+            if (TgPersistMount.IsChecked == true)
             {
                 if (string.IsNullOrWhiteSpace(TxtMountPoint.Text))
                 {
-                    await ShowError("Mount point is required when AutoMount is enabled.");
+                    await ShowError("Mount point is required when persistence is enabled.");
                     return;
                 }
 
@@ -227,7 +227,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 6) SI  ES VÁLIDO → GUARDAR CONFIG
+            // 6) SI ES VÁLIDO → GUARDAR CONFIG
             // ============================
 
             // Identity
@@ -241,7 +241,9 @@ namespace RAID_Util.Views
             _config.Mount_Discard = TgDiscard.IsChecked ?? false;
             _config.Mount_Sync = TgSync.IsChecked ?? false;
             _config.Mount_ReadOnly = TgReadOnly.IsChecked ?? false;
-            _config.AutoMount = TgAutoMount.IsChecked ?? false;
+
+            // ⭐ Persistencia real
+            _config.PersistMount = TgPersistMount.IsChecked ?? false;
 
             // ⭐ NEW: Mount permissions
             _config.MountPermissions = TxtMountPermissions.Text.Trim();
@@ -258,39 +260,12 @@ namespace RAID_Util.Views
             ArrayConfigService.Save(_arrayName, _config);
 
             // ============================
-            // 7) MONTAJE / DESMONTAJE REAL
+            // 7) ESCRITURA EN /etc/fstab
             // ============================
 
             string device = $"/dev/{_arrayName}";
             string mountPoint = _config.MountPoint;
             string options = BuildMountOptions();
-
-            if (_config.AutoMount)
-            {
-                if (!System.IO.File.Exists(device))
-                {
-                    await ShowError($"Device {device} does not exist.");
-                    return;
-                }
-
-                bool ok = MountService.Mount(device, mountPoint, options);
-                if (!ok)
-                {
-                    await ShowError("Failed to mount the array.");
-                    return;
-                }
-
-                // ⭐ Apply permissions immediately
-                ShellHelper.EjecutarComoRoot($"chmod {_config.MountPermissions} {mountPoint}");
-            }
-            else
-            {
-                MountService.Unmount(mountPoint);
-            }
-
-            // ============================
-            // 8) ESCRITURA EN /etc/fstab
-            // ============================
 
             try
             {
@@ -302,7 +277,7 @@ namespace RAID_Util.Views
                     return;
                 }
 
-                if (_config.AutoMount)
+                if (_config.PersistMount)
                 {
                     FstabService.WriteEntry(device, mountPoint, fs, options);
                 }
@@ -318,7 +293,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 9) APLICAR CONFIG RAID REAL
+            // 8) APLICAR CONFIG RAID REAL
             // ============================
             try
             {
