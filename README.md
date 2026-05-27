@@ -5,3 +5,9 @@ All of them are designed to act as a bridge between basic users and advanced Lin
 These tools are built to work across all modern Linux distributions, originally developed on Manjaro / Arch, and they require systemd to function properly.
 
 As its name suggests, this third tool — raid‑util — makes its purpose immediately clear.
+
+
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/7f8053f3-8669-4113-ad71-d06aa210f50d" />
+
+
