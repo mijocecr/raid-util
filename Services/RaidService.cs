@@ -331,7 +331,7 @@ namespace RAID_Util.Services
         }
 
         
-        public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
+      public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
 {
     try
     {
@@ -347,7 +347,24 @@ namespace RAID_Util.Services
 
         Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
 
-        // 3) Verificar que el dispositivo existe
+        // ⭐ 3) SI ESTÁ MONTADO → DESMONTAR ANTES DE FORMATEAR
+        var checkMount = ShellHelper.EjecutarComoRoot($"mount | grep -w {devPath}");
+        if (checkMount.ExitCode == 0)
+        {
+            Console.WriteLine($"[RAID] {devPath} está montado. Desmontando...");
+
+            var umount = ShellHelper.EjecutarComoRoot($"umount -f {devPath}");
+            if (umount.ExitCode != 0)
+            {
+                Console.WriteLine($"[RAID] ERROR desmontando: {umount.Stderr}");
+                return false;
+            }
+
+            // ⭐ Limpiar entrada previa en fstab
+            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
+        }
+
+        // 4) Verificar que el dispositivo existe
         var ls = ShellHelper.EjecutarComoRoot($"ls {devPath}");
         if (ls.ExitCode != 0)
         {
@@ -355,7 +372,7 @@ namespace RAID_Util.Services
             return false;
         }
 
-        // 4) Construir comando mkfs
+        // 5) Construir comando mkfs
         string mkfsCmd = fsType switch
         {
             "ext4"          => string.IsNullOrWhiteSpace(label) ? $"mkfs.ext4 -F {devPath}" : $"mkfs.ext4 -F -L \"{label}\" {devPath}",
@@ -369,7 +386,7 @@ namespace RAID_Util.Services
             _ => throw new Exception("Filesystem no soportado")
         };
 
-        // 5) Formatear
+        // 6) Formatear
         var mkfs = ShellHelper.EjecutarComoRoot(mkfsCmd);
         if (mkfs.ExitCode != 0)
         {
@@ -377,18 +394,21 @@ namespace RAID_Util.Services
             return false;
         }
 
-        // 6) Si es swap → activar y terminar
+        // 7) Si es swap → activar y terminar
         if (fsType == "swap")
         {
             ShellHelper.EjecutarComoRoot($"swapon {devPath}");
             return true;
         }
 
-        // 7) Crear directorio de montaje
+        // 8) Crear directorio de montaje
         ShellHelper.EjecutarComoRoot($"mkdir -p {mountPath}");
 
-        // 8) Construir opciones de montaje desde JSON
+        // 9) Construir opciones de montaje desde JSON
         List<string> opts = new();
+
+        // ⭐ Permitir desmontar sin sudo
+        opts.Add("users");
 
         if (cfg.Mount_NoAtime) opts.Add("noatime");
         if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
@@ -396,12 +416,12 @@ namespace RAID_Util.Services
         if (cfg.Mount_Sync) opts.Add("sync");
         if (cfg.Mount_ReadOnly) opts.Add("ro");
 
-        if (opts.Count == 0)
+        if (opts.Count == 1) // solo "users"
             opts.Add("defaults");
 
         string mountOpts = string.Join(",", opts);
 
-        // 9) Montar con opciones
+        // 10) Montar con opciones
         var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
         if (mount.ExitCode != 0)
         {
@@ -409,16 +429,14 @@ namespace RAID_Util.Services
             return false;
         }
 
-   
-        // ⭐ 10) Aplicar permisos configurables desde JSON
+        // ⭐ 11) Aplicar permisos configurables desde JSON
         string perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
             ? "777"
             : cfg.MountPermissions;
 
         ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
 
-        
-        // 11) Si AutoMount = true → escribir en fstab
+        // 12) Si AutoMount = true → escribir en fstab
         if (cfg.AutoMount)
         {
             string fstabEntry = $"{devPath} {mountPath} {NormalizeFs(fsType)} {mountOpts} 0 0";

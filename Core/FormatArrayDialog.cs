@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using RAID_Util.Services;
+using System.Threading.Tasks;
 
 namespace RAID_Util.Core;
 
@@ -9,38 +11,59 @@ public class FormatArrayDialog : Window
 {
     private ComboBox _fsSelector;
     private TextBox _labelBox;
+    private readonly string _arrayName;
 
     public FormatArrayDialog(string arrayName)
     {
-        Width = 460;
-        Height = 320;
-        Title = $"Format {arrayName}";
+        _arrayName = arrayName;
+
+        Width = 360;
+        Height = 250;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        //TransparencyLevelHint = WindowTransparencyLevel.AcrylicBlur;
         CanResize = false;
 
-        Background = this.FindResource("BMWSurfaceBrush") as IBrush;
+        Background = this.FindResource("BMWBackgroundBrush") as IBrush;
+        Foreground = this.FindResource("BMWTextBrush") as IBrush;
+        Title = $"Format {arrayName}";
 
-        var panel = new StackPanel
+        var root = new Grid
         {
-            Margin = new Thickness(22),
-            Spacing = 18
+            RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+            Margin = new Thickness(16)
         };
 
-        panel.Children.Add(new TextBlock
+        // ⭐ TITLE
+        root.Children.Add(new TextBlock
         {
             Text = $"Format {arrayName}",
-            FontSize = 22,
-            FontWeight = FontWeight.Bold,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Foreground = this.FindResource("BMWTextBrush") as IBrush
+            FontSize = 18,
+            FontWeight = FontWeight.SemiBold,
+            TextAlignment = TextAlignment.Center,
+            Foreground = this.FindResource("BMWTextBrush") as IBrush,
+            Margin = new Thickness(0, 0, 0, 10)
         });
 
-        // Filesystem selector
-        var fsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        // ⭐ MAIN CONTENT
+        var panel = new StackPanel { Spacing = 14 };
+        Grid.SetRow(panel, 1);
+
+        // SECTION: Filesystem
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Filesystem",
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = this.FindResource("BMWAccentBrush") as IBrush
+        });
+
+        var fsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         fsRow.Children.Add(new TextBlock
         {
-            Text = "Filesystem:",
-            Width = 120,
+            Text = "Type:",
+            Width = 110,
+            TextAlignment = TextAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
@@ -59,7 +82,7 @@ public class FormatArrayDialog : Window
                 "swap"
             },
             SelectedIndex = 0,
-            Width = 200,
+            Width = 180,
             Background = this.FindResource("BMWInputBrush") as IBrush,
             Foreground = this.FindResource("BMWTextBrush") as IBrush,
             BorderBrush = this.FindResource("BMWBorderBrush") as IBrush
@@ -67,12 +90,22 @@ public class FormatArrayDialog : Window
         fsRow.Children.Add(_fsSelector);
         panel.Children.Add(fsRow);
 
-        // Label
-        var labelRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        // SECTION: Label
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Label",
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = this.FindResource("BMWAccentBrush") as IBrush
+        });
+
+        var labelRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         labelRow.Children.Add(new TextBlock
         {
-            Text = "Label:",
-            Width = 120,
+            Text = "Volume label:",
+            TextAlignment = TextAlignment.Right,
+            Width = 110,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
@@ -80,7 +113,8 @@ public class FormatArrayDialog : Window
         _labelBox = new TextBox
         {
             Watermark = "optional",
-            Width = 200,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Width = 180,
             Background = this.FindResource("BMWInputBrush") as IBrush,
             Foreground = this.FindResource("BMWTextBrush") as IBrush,
             BorderBrush = this.FindResource("BMWBorderBrush") as IBrush
@@ -88,36 +122,56 @@ public class FormatArrayDialog : Window
         labelRow.Children.Add(_labelBox);
         panel.Children.Add(labelRow);
 
-        // Buttons
+        root.Children.Add(panel);
+
+        // ⭐ BUTTON BAR
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 10
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Spacing = 10,
+            Margin = new Thickness(0, 12, 0, 0)
         };
+        Grid.SetRow(buttons, 2);
 
-        buttons.Children.Add(new Button
+        var btnCancel = new Button
         {
             Content = "Cancel",
-            Width = 100,
-            Classes = { "DialogButton" },
-            Command = new LambdaCommand(() => Close(null))
-        });
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Width = 90,
+            Height = 30,
+            Classes = { "DialogButton" }
+        };
+        btnCancel.Click += (_, _) => Close(null);
 
-        buttons.Children.Add(new Button
+        var btnFormat = new Button
         {
             Content = "Format",
-            Width = 100,
-            Classes = { "PrimaryButton" },
-            Command = new LambdaCommand(() => Close(GetResult()))
-        });
+            Width = 90,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Height = 30,
+            Classes = { "PrimaryButton" }
+        };
+        btnFormat.Click += OnFormatClicked;
 
-        panel.Children.Add(buttons);
+        buttons.Children.Add(btnCancel);
+        buttons.Children.Add(btnFormat);
 
-        Content = panel;
+        root.Children.Add(buttons);
+
+        Content = root;
     }
 
-    private FormatArrayResult? GetResult()
+    private async void OnFormatClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        using (LoadingService.Show("Formatting array...", this))
+        {
+            await Task.Delay(200);
+            Close(GetResult());
+        }
+    }
+
+    private FormatArrayResult GetResult()
     {
         return new FormatArrayResult
         {

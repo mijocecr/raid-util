@@ -48,10 +48,12 @@
 
                     <!-- ⭐ FILA 2 (3 botones abajo) -->
                     <Button Grid.Row="1" Grid.Column="0"
-                            Content="Assemble Arrays"
+                            Content="Assemble"
                             HorizontalContentAlignment="Center"
                             HorizontalAlignment="Stretch"
                             x:Name="BtnAssembleArrays"
+                            Background="Green"
+                            Foreground="WhiteSmoke"
                             Classes="HeaderButton"
                             />
 
@@ -63,6 +65,7 @@
                             
                             HorizontalAlignment="Stretch"
                             Foreground="Black"
+                            Background="Orange"
                             
                            />
 
