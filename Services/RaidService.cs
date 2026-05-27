@@ -290,13 +290,12 @@ namespace RAID_Util.Services
 
             string lower = detail.ToLowerInvariant();
 
-            if (lower.Contains("state : clean") && !lower.Contains("degraded"))
+            // Estado real del array
+            if (lower.Contains("state : clean") ||
+                lower.Contains("state : active"))
                 return "Healthy";
 
-            if (lower.Contains("state : active") && !lower.Contains("degraded"))
-                return "Healthy";
-
-            if (lower.Contains("degraded"))
+            if (lower.Contains("state : degraded"))
                 return "Degraded";
 
             if (lower.Contains("recover") ||
@@ -304,17 +303,151 @@ namespace RAID_Util.Services
                 lower.Contains("resync"))
                 return "Rebuilding";
 
-            if (lower.Contains("read-only"))
-                return "Read-Only";
-
-            if (lower.Contains("inactive") ||
-                lower.Contains("failed") ||
-                lower.Contains("faulty"))
+            // Solo marcar como failed si el estado REAL lo dice
+            if (lower.Contains("state : inactive") ||
+                lower.Contains("state : stopped") ||
+                lower.Contains("state : faulty") ||
+                lower.Contains("state : failed"))
                 return "Failed";
 
             return "Unknown";
         }
 
+        public bool AutoAssemble()
+        {
+        
+
+            Console.WriteLine("[RAID] Ejecutando AutoAssemble()");
+
+            // mdadm --assemble --scan es la forma correcta de revivir arrays detenidos
+            var result = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --assemble --scan");
+
+            Console.WriteLine($"[RAID] AutoAssemble EXIT={result.ExitCode}");
+            Console.WriteLine($"[RAID] AutoAssemble STDOUT:\n{result.Stdout}");
+            Console.WriteLine($"[RAID] AutoAssemble STDERR:\n{result.Stderr}");
+
+            // mdadm devuelve 0 si ensambló algo o si ya estaba ensamblado
+            return result.ExitCode == 0;
+        }
+
+        
+        public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
+{
+    try
+    {
+        string devPath = $"/dev/{arrayName}";
+
+        // 1) Cargar configuración JSON del array
+        var cfg = ArrayConfigService.Load(arrayName);
+
+        // 2) Determinar punto de montaje
+        string mountPath = string.IsNullOrWhiteSpace(cfg.MountPoint)
+            ? $"/mnt/{arrayName}"
+            : cfg.MountPoint;
+
+        Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
+
+        // 3) Verificar que el dispositivo existe
+        var ls = ShellHelper.EjecutarComoRoot($"ls {devPath}");
+        if (ls.ExitCode != 0)
+        {
+            Console.WriteLine($"[RAID] ERROR: {devPath} no existe.");
+            return false;
+        }
+
+        // 4) Construir comando mkfs
+        string mkfsCmd = fsType switch
+        {
+            "ext4"          => string.IsNullOrWhiteSpace(label) ? $"mkfs.ext4 -F {devPath}" : $"mkfs.ext4 -F -L \"{label}\" {devPath}",
+            "xfs"           => string.IsNullOrWhiteSpace(label) ? $"mkfs.xfs -f {devPath}" : $"mkfs.xfs -f -L \"{label}\" {devPath}",
+            "btrfs"         => string.IsNullOrWhiteSpace(label) ? $"mkfs.btrfs -f {devPath}" : $"mkfs.btrfs -f -L \"{label}\" {devPath}",
+            "f2fs"          => string.IsNullOrWhiteSpace(label) ? $"mkfs.f2fs -f {devPath}" : $"mkfs.f2fs -f -l \"{label}\" {devPath}",
+            "vfat (FAT32)"  => string.IsNullOrWhiteSpace(label) ? $"mkfs.vfat -F 32 {devPath}" : $"mkfs.vfat -F 32 -n \"{label}\" {devPath}",
+            "exfat"         => string.IsNullOrWhiteSpace(label) ? $"mkfs.exfat {devPath}" : $"mkfs.exfat -n \"{label}\" {devPath}",
+            "ntfs"          => string.IsNullOrWhiteSpace(label) ? $"mkfs.ntfs -f {devPath}" : $"mkfs.ntfs -f -L \"{label}\" {devPath}",
+            "swap"          => string.IsNullOrWhiteSpace(label) ? $"mkswap {devPath}" : $"mkswap -L \"{label}\" {devPath}",
+            _ => throw new Exception("Filesystem no soportado")
+        };
+
+        // 5) Formatear
+        var mkfs = ShellHelper.EjecutarComoRoot(mkfsCmd);
+        if (mkfs.ExitCode != 0)
+        {
+            Console.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
+            return false;
+        }
+
+        // 6) Si es swap → activar y terminar
+        if (fsType == "swap")
+        {
+            ShellHelper.EjecutarComoRoot($"swapon {devPath}");
+            return true;
+        }
+
+        // 7) Crear directorio de montaje
+        ShellHelper.EjecutarComoRoot($"mkdir -p {mountPath}");
+
+        // 8) Construir opciones de montaje desde JSON
+        List<string> opts = new();
+
+        if (cfg.Mount_NoAtime) opts.Add("noatime");
+        if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
+        if (cfg.Mount_Discard) opts.Add("discard");
+        if (cfg.Mount_Sync) opts.Add("sync");
+        if (cfg.Mount_ReadOnly) opts.Add("ro");
+
+        if (opts.Count == 0)
+            opts.Add("defaults");
+
+        string mountOpts = string.Join(",", opts);
+
+        // 9) Montar con opciones
+        var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
+        if (mount.ExitCode != 0)
+        {
+            Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
+            return false;
+        }
+
+   
+        // ⭐ 10) Aplicar permisos configurables desde JSON
+        string perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
+            ? "777"
+            : cfg.MountPermissions;
+
+        ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
+
+        
+        // 11) Si AutoMount = true → escribir en fstab
+        if (cfg.AutoMount)
+        {
+            string fstabEntry = $"{devPath} {mountPath} {NormalizeFs(fsType)} {mountOpts} 0 0";
+            ShellHelper.EjecutarComoRoot($"bash -c \"echo '{fstabEntry}' >> /etc/fstab\"");
+        }
+
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[RAID] ERROR en InitializeArrayAsync: {ex}");
+        return false;
+    }
+}
+
+
+        
+
+private string NormalizeFs(string fs)
+{
+    return fs switch
+    {
+        "vfat (FAT32)" => "vfat",
+        _ => fs
+    };
+}
+
+
+        
         private string ParseDiskRole(string detail, string device)
         {
             string dev = device.Replace("/dev/", "").Trim();
@@ -683,49 +816,90 @@ public string GetNextFreeMdName()
     throw new Exception("No hay dispositivos mdX libres disponibles.");
 }
 
+public async Task<string> GetSmartInfoAsync(string diskName)
+{
+    string cmd = $"sudo smartctl -a /dev/{diskName}";
+    return await ShellHelper.RunCleanAsync(cmd);
+}
 
-        
-        
-/*
-        public bool CreateArray(string name, string level, List<RaidDiskInfo> disks)
-        {
-            try
-            {
-                string levelNum = level.Replace("RAID", "");
-                string deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
+public bool MarkDiskAsFaulty(string arrayName, string diskName)
+{
+    string cmd = $"/usr/sbin/mdadm /dev/{arrayName} --fail /dev/{diskName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+    return result.ExitCode == 0;
+}
 
-                // Ruta correcta para arrays mdadm modernos
-                string arrayPath = $"/dev/md/{name}";
+public bool SetDiskAsSpare(string arrayName, string diskName)
+{
+    string cmd = $"/usr/sbin/mdadm /dev/{arrayName} --add /dev/{diskName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+    return result.ExitCode == 0;
+}
 
-                string cmd =
-                    $"/usr/sbin/mdadm --create {arrayPath} " +
-                    $"--level={levelNum} " +
-                    $"--raid-devices={disks.Count} " +
-                    $"{deviceList} --force --run";
+public bool RemoveDiskFromArray(string arrayName, string diskName)
+{
+    string cmd = $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{diskName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+    return result.ExitCode == 0;
+}
 
-                LogService.Write($"[CREATE] Ejecutando: {cmd}");
+public async Task<bool> InitializeDiskAsync(string diskName)
+{
+    try
+    {
+        await ShellHelper.RunCleanAsync($"sudo wipefs -a /dev/{diskName}");
+        await ShellHelper.RunCleanAsync($"sudo parted -s /dev/{diskName} mklabel gpt");
+        await ShellHelper.RunCleanAsync($"sudo parted -s /dev/{diskName} mkpart primary ext4 1MiB 100%");
+        await ShellHelper.RunCleanAsync($"sudo mkfs.ext4 -F /dev/{diskName}1");
 
-                var result = ShellHelper.EjecutarComoRoot(cmd);
+        return true;
+    }
+    catch
+    {
+        return false;
+    }
+}
 
-                if (result.ExitCode != 0)
-                {
-                    LogService.Error("[CREATE] mdadm falló:");
-                    LogService.Error(result.Stderr);
-                    return false;
-                }
+public async Task<bool> StartArrayResyncAsync(string arrayName)
+{
+    string cmd = $"/usr/sbin/mdadm --readwrite /dev/{arrayName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
 
-                LogService.Write("[CREATE] Array creado correctamente.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogService.Error("[CREATE] EXCEPCIÓN:");
-                LogService.Error(ex.ToString());
-                return false;
-            }
-        }
-*/
-        
+    return result.ExitCode == 0;
+}
+
+public async Task<bool> ForceArrayCheckAsync(string arrayName)
+{
+    string cmd = $"/usr/sbin/mdadm --action=check /dev/{arrayName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+
+    return result.ExitCode == 0;
+}
+
+public async Task<bool> ForceArrayRepairAsync(string arrayName)
+{
+    string cmd = $"/usr/sbin/mdadm --action=repair /dev/{arrayName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+
+    return result.ExitCode == 0;
+}
+
+public async Task<bool> StopArrayAsync(string arrayName)
+{
+    string cmd = $"/usr/sbin/mdadm --stop /dev/{arrayName}";
+    var result = ShellHelper.EjecutarComoRoot(cmd);
+
+    return result.ExitCode == 0;
+}
+
+public async Task<string> GetArrayDetailsAsync(string arrayName)
+{
+    string cmd = $"/usr/sbin/mdadm --detail /dev/{arrayName}";
+    var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot(cmd);
+
+    return (stdout + "\n" + stderr).Trim();
+}
+
        
         
        public bool PersistArrayToMdadmConf()

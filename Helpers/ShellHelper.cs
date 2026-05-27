@@ -82,7 +82,7 @@ namespace RAID_Util.Helpers
         {
             var callId = ++_callCount;
 
-            // 🔥 Asegurar que mdadm tenga ruta absoluta
+            // Asegurar que mdadm tenga ruta absoluta
             command = FixCommandPath(command);
 
             Console.WriteLine($"[SHELL] #{callId} RunCleanAsync: {command}");

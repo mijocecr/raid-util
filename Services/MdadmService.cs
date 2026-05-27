@@ -11,12 +11,14 @@ namespace RAID_Util.Services
         // ============================================================
         // OBTENER DETALLE REAL DEL ARRAY
         // ============================================================
+      
         public static string GetDetail(string arrayName)
         {
             string device = $"/dev/{arrayName}";
-            var result = ShellHelper.EjecutarComoRoot($"mdadm --detail {device}");
+            var result = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {device}");
             return (result.Stdout + "\n" + result.Stderr).Trim();
         }
+
 
         // ============================================================
         // CAMBIAR VELOCIDAD DE RESYNC (CORREGIDO)
@@ -45,18 +47,34 @@ namespace RAID_Util.Services
         {
             string md = GetMdstat().ToLower();
 
+            // Si no aparece en mdstat → array muerto
             if (!md.Contains(arrayName.ToLower()))
-                return false;
+                return true; // FAILED
 
-            return
-                md.Contains("degraded") ||     // RAID1/5/6/10 degradado
-                md.Contains("faulty") ||       // disco faulty
-                md.Contains("(f)") ||          // RAID1 faulty
-                md.Contains("removed") ||      // disco removido
-                md.Contains("missing") ||      // disco faltante
-                md.Contains("broken") ||       // RAID0 roto (tu caso)
-                md.Contains("read-only") ||    // RAID0 roto (tu caso)
-                md.Contains("_");              // RAID1/10 disco faltante
+            // Línea específica del array
+            string[] lines = md.Split('\n');
+            string? line = Array.Find(lines, l => l.Contains(arrayName.ToLower()));
+
+            if (line == null)
+                return true; // FAILED
+
+            // Estados realmente rotos
+            if (line.Contains("inactive") ||
+                line.Contains("failed") ||
+                line.Contains("faulty") ||
+                line.Contains("read-only") ||
+                line.Contains("broken"))
+                return true; // FAILED
+
+            // Estados degradados
+            if (line.Contains("degraded") ||
+                line.Contains("removed") ||
+                line.Contains("missing") ||
+                line.Contains("(f)") ||
+                line.Contains("_"))
+                return true; // DEGRADED
+
+            return false;
         }
 
         // ============================================================
@@ -66,30 +84,37 @@ namespace RAID_Util.Services
         {
             string md = GetMdstat().ToLower();
 
-            return md.Contains(arrayName.ToLower()) &&
-                   (md.Contains("resync") ||
-                    md.Contains("recovery") ||
-                    md.Contains("reshape"));
+            if (!md.Contains(arrayName.ToLower()))
+                return false;
+
+            return md.Contains("resync") ||
+                   md.Contains("recovery") ||
+                   md.Contains("reshape") ||
+                   md.Contains("rebuild");
         }
 
         // ============================================================
         // APLICAR CONFIGURACIÓN RAID REAL
         // ============================================================
+       
         public static void ApplyConfig(string arrayName, ArrayConfig cfg)
         {
-            // 1) Velocidad de resync
+            // Velocidad de resync
             SetResyncSpeed(cfg.ResyncPriority, cfg.ResyncMaxSpeed);
 
-            // 2) Read-only / Read-write
+            // Read-only / Read-write
             if (cfg.Mount_ReadOnly)
-                ShellHelper.EjecutarComoRoot($"mdadm --readonly /dev/{arrayName}");
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readonly /dev/{arrayName}");
             else
-                ShellHelper.EjecutarComoRoot($"mdadm --readwrite /dev/{arrayName}");
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readwrite /dev/{arrayName}");
 
-            // 3) Label (solo si aplica)
+            // Label
             if (!string.IsNullOrWhiteSpace(cfg.FsLabel))
-                ShellHelper.EjecutarComoRoot($"e2label /dev/{arrayName} \"{cfg.FsLabel}\"");
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/e2label /dev/{arrayName} \"{cfg.FsLabel}\"");
         }
+
+        
+        
     }
 }
 

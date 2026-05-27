@@ -11,40 +11,77 @@
 
         <StackPanel Spacing="10" Margin="10">
 
-            <!-- Header bar for global array actions -->
+            <!-- ⭐ HEADER BMW MEJORADO -->
             <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
                     Padding="12"
                     CornerRadius="4"
                     BorderBrush="{DynamicResource BMWBorderBrush}"
                     BorderThickness="1">
 
-                <StackPanel Orientation="Horizontal" Spacing="10">
+                <Grid ColumnDefinitions="*,*,*"
+                      RowDefinitions="Auto,Auto"
+                      ColumnSpacing="10"
+                      RowSpacing="10">
 
-                    <Button Content="Create Array"
+                    <!-- ⭐ FILA 1 (3 botones arriba) -->
+                    <Button Grid.Row="0" Grid.Column="0"
+                            Content="Create Array"
+                            HorizontalContentAlignment="Center"
+                            HorizontalAlignment="Stretch"
                             x:Name="BtnCreateArray"
                             Classes="HeaderButton"/>
-                    <Button Content="Refresh"
+
+                    <Button Grid.Row="0" Grid.Column="1"
+                            Content="Refresh"
+                            HorizontalContentAlignment="Center"
+                            HorizontalAlignment="Stretch"
                             x:Name="BtnRefreshArrays"
                             Classes="HeaderButton"/>
 
-                    <Button Content="Config"
+                    <Button Grid.Row="0" Grid.Column="2"
+                            Content="Config"
+                            
+                            HorizontalContentAlignment="Center"
+                            HorizontalAlignment="Stretch"
                             x:Name="BtnConfigArrays"
                             Classes="HeaderButton"/>
 
-                    <Button Content="Delete Array"
+                    <!-- ⭐ FILA 2 (3 botones abajo) -->
+                    <Button Grid.Row="1" Grid.Column="0"
+                            Content="Assemble Arrays"
+                            HorizontalContentAlignment="Center"
+                            HorizontalAlignment="Stretch"
+                            x:Name="BtnAssembleArrays"
+                            Classes="HeaderButton"
+                            />
+
+                    <Button Grid.Row="1" Grid.Column="1"
+                            Content="Initialize"
+                            x:Name="BtnInitialize"
+                            Classes="HeaderButton"
+                            HorizontalContentAlignment="Center"
+                            
+                            HorizontalAlignment="Stretch"
+                            Foreground="Black"
+                            
+                           />
+
+                    <Button Grid.Row="1" Grid.Column="2"
+                            HorizontalContentAlignment="Center"
+                            Content="Delete Array"
+                            HorizontalAlignment="Stretch"
                             x:Name="BtnDeleteArray"
                             Background="Red"
                             Foreground="WhiteSmoke"
-                            Classes="HeaderButton"/>
+                           />
 
-                   
-
-                </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Array list container -->
             <StackPanel x:Name="ListArrays"
                         Spacing="8"/>
+
         </StackPanel>
 
     </ScrollViewer>

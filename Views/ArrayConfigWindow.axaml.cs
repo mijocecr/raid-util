@@ -6,6 +6,7 @@ using Avalonia.Media;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using RAID_Util.Helpers;
 using RAID_Util.Models;
 using RAID_Util.Services;
 
@@ -43,6 +44,9 @@ namespace RAID_Util.Views
             TgReadOnly.IsChecked = _config.Mount_ReadOnly;
 
             TgAutoMount.IsChecked = _config.AutoMount;
+
+            // ⭐ NEW: Mount permissions
+            TxtMountPermissions.Text = _config.MountPermissions;
 
             // Performance
             NumResyncPriority.Value = _config.ResyncPriority;
@@ -107,17 +111,22 @@ namespace RAID_Util.Views
         {
             var opts = new List<string>();
 
+            // ⭐ Permitir desmontar sin sudo (cualquier usuario)
+            opts.Add("users");
+
             if (TgNoAtime.IsChecked == true) opts.Add("noatime");
             if (TgNoDirAtime.IsChecked == true) opts.Add("nodiratime");
             if (TgDiscard.IsChecked == true) opts.Add("discard");
             if (TgSync.IsChecked == true) opts.Add("sync");
             if (TgReadOnly.IsChecked == true) opts.Add("ro");
 
-            if (opts.Count == 0)
+            // Si solo está "users", añadimos defaults
+            if (opts.Count == 1)
                 opts.Add("defaults");
 
             return string.Join(",", opts);
         }
+
 
         private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
         {
@@ -203,7 +212,22 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 5) SI  ES VÁLIDO → GUARDAR CONFIG
+            // ⭐ 5) VALIDACIÓN DE PERMISOS
+            // ============================
+            if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text))
+            {
+                await ShowError("Permissions cannot be empty.");
+                return;
+            }
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(TxtMountPermissions.Text, @"^[0-7]{3}$"))
+            {
+                await ShowError("Permissions must be a 3‑digit octal value (e.g., 755, 775, 777).");
+                return;
+            }
+
+            // ============================
+            // 6) SI  ES VÁLIDO → GUARDAR CONFIG
             // ============================
 
             // Identity
@@ -219,6 +243,9 @@ namespace RAID_Util.Views
             _config.Mount_ReadOnly = TgReadOnly.IsChecked ?? false;
             _config.AutoMount = TgAutoMount.IsChecked ?? false;
 
+            // ⭐ NEW: Mount permissions
+            _config.MountPermissions = TxtMountPermissions.Text.Trim();
+
             // Performance
             _config.ResyncPriority = (int)NumResyncPriority.Value!;
             _config.ResyncMaxSpeed = (int)NumResyncMaxSpeed.Value!;
@@ -231,7 +258,7 @@ namespace RAID_Util.Views
             ArrayConfigService.Save(_arrayName, _config);
 
             // ============================
-            // 6) MONTAJE / DESMONTAJE REAL
+            // 7) MONTAJE / DESMONTAJE REAL
             // ============================
 
             string device = $"/dev/{_arrayName}";
@@ -252,6 +279,9 @@ namespace RAID_Util.Views
                     await ShowError("Failed to mount the array.");
                     return;
                 }
+
+                // ⭐ Apply permissions immediately
+                ShellHelper.EjecutarComoRoot($"chmod {_config.MountPermissions} {mountPoint}");
             }
             else
             {
@@ -259,7 +289,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 7) ESCRITURA EN /etc/fstab
+            // 8) ESCRITURA EN /etc/fstab
             // ============================
 
             try
@@ -288,7 +318,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 8) APLICAR CONFIG RAID REAL
+            // 9) APLICAR CONFIG RAID REAL
             // ============================
             try
             {

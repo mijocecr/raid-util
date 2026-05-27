@@ -8,45 +8,97 @@ namespace RAID_Util.Services
 {
     public static class ArrayConfigService
     {
-        // ⭐ Ruta real del sistema (requiere root)
         private static string BasePath => "/etc/raid-util/arrays";
 
-        // ⭐ Cargar configuración del array
+        // Normaliza nombre (md0 → md0.json)
+        private static string Normalize(string arrayName)
+        {
+            return arrayName.Trim().Replace("/", "").Replace("\\", "");
+        }
+
+        // Ruta completa del archivo
+        private static string GetPath(string arrayName)
+        {
+            string clean = Normalize(arrayName);
+            return Path.Combine(BasePath, $"{clean}.json");
+        }
+
+        // ⭐ Cargar configuración con validación estricta
         public static ArrayConfig Load(string arrayName)
         {
             try
             {
-                string path = Path.Combine(BasePath, $"{arrayName}.json");
+                string path = GetPath(arrayName);
 
                 if (!File.Exists(path))
-                    return new ArrayConfig(); // Config por defecto
+                {
+                    LogService.Write($"[CFG] No existe config para {arrayName}, usando defaults.");
+                    return new ArrayConfig();
+                }
 
                 string json = File.ReadAllText(path);
-                return JsonConvert.DeserializeObject<ArrayConfig>(json) ?? new ArrayConfig();
+
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    LogService.Error($"[CFG] Archivo vacío: {path}");
+                    return new ArrayConfig();
+                }
+
+                var cfg = JsonConvert.DeserializeObject<ArrayConfig>(json);
+
+                if (cfg == null)
+                {
+                    LogService.Error($"[CFG] JSON inválido en {path}");
+                    return new ArrayConfig();
+                }
+
+                return cfg;
             }
-            catch
+            catch (Exception ex)
             {
+                LogService.Error($"[CFG] Error cargando config de {arrayName}: {ex}");
                 return new ArrayConfig();
             }
         }
 
-        // ⭐ Guardar configuración usando ShellHelper (root)
+        // ⭐ Guardar con backup, permisos y atomicidad
         public static void Save(string arrayName, ArrayConfig cfg)
         {
-            string json = JsonConvert.SerializeObject(cfg, Formatting.Indented);
+            try
+            {
+                string path = GetPath(arrayName);
+                string dir = BasePath;
 
-            // Crear carpeta root
-            ShellHelper.EjecutarComoRoot($"mkdir -p {BasePath}");
+                // Crear carpeta root
+                ShellHelper.EjecutarComoRoot($"mkdir -p {dir}");
 
-            // Guardar en archivo temporal
-            string temp = Path.GetTempFileName();
-            File.WriteAllText(temp, json);
+                // Serializar JSON
+                string json = JsonConvert.SerializeObject(cfg, Formatting.Indented);
 
-            // Copiar con permisos root
-            ShellHelper.EjecutarComoRoot($"cp {temp} {BasePath}/{arrayName}.json");
+                // Archivo temporal seguro
+                string temp = Path.GetTempFileName();
+                File.WriteAllText(temp, json);
 
-            // Ajustar permisos (opcional)
-            ShellHelper.EjecutarComoRoot($"chmod 644 {BasePath}/{arrayName}.json");
+                // Backup si existe
+                if (File.Exists(path))
+                {
+                    string backup = path + ".bak";
+                    ShellHelper.EjecutarComoRoot($"cp {path} {backup}");
+                    LogService.Write($"[CFG] Backup creado: {backup}");
+                }
+
+                // Copiar con permisos root
+                ShellHelper.EjecutarComoRoot($"cp {temp} {path}");
+
+                // Permisos correctos
+                ShellHelper.EjecutarComoRoot($"chmod 644 {path}");
+
+                LogService.Write($"[CFG] Config guardada correctamente: {path}");
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[CFG] Error guardando config de {arrayName}: {ex}");
+            }
         }
     }
 }

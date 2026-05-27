@@ -43,8 +43,13 @@ public partial class RaidView : UserControl
         BtnDeleteArray.Click += OnDeleteArrayClicked;
         BtnRefreshArrays.Click += OnRefreshArraysClicked;
         BtnConfigArrays.Click += OnConfigArraysClicked;
+        BtnAssembleArrays.Click += OnAssembleArraysClicked;
+        BtnInitialize.Click += OnInitializeClicked;
+
         BtnDeleteArray.IsEnabled = false;
         BtnConfigArrays.IsEnabled = false;
+        BtnInitialize.IsEnabled = false;
+
 
         
         Console.WriteLine("[RAIDVIEW] Constructor RaidView ejecutado.");
@@ -61,6 +66,87 @@ public partial class RaidView : UserControl
             // No llamamos a LoadRealData() aquí para no duplicar llamadas a sudo.
         }
     }
+    
+    
+    private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
+    {
+        var service = new RaidService();
+
+        bool ok = service.AutoAssemble();
+
+        if (!ok)
+        {
+            await ShowConfirm("Error", "Could not assemble stopped arrays.");
+            return;
+        }
+
+        await ShowConfirm("Success", "Arrays assembled correctly..");
+
+        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    }
+
+    
+    private async void OnInitializeClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_selectedArray == null)
+        {
+            await ShowConfirm("Error", "Select an array first.");
+            return;
+        }
+
+        var array = _selectedArray;
+
+        // ⭐ Abrir ventana BMW en modal
+        var dlg = new FormatArrayDialog(array.Name);
+        var owner = this.GetVisualRoot() as Window;
+        var result = await dlg.ShowDialog<FormatArrayResult?>(owner);
+
+        // Usuario canceló
+        if (result == null)
+            return;
+
+        var service = new RaidService();
+
+        // ⭐ Llamada correcta con los 3 parámetros
+        bool ok = await service.InitializeArrayAsync(
+            array.Name,
+            result.Filesystem,
+            result.Label
+        );
+
+        if (!ok)
+        {
+            await ShowConfirm("Error", "Could not initialize the array.");
+            return;
+        }
+
+        await ShowConfirm("Success", $"The array {array.Name} was initialized.");
+
+        // Refrescar
+        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    }
+
+
+    
+    
+    
+    private async Task<bool> ShowConfirm(string title, string message)
+    {
+        var dlg = new ConfirmDialog(title, message);
+
+        var owner = this.GetVisualRoot() as Window;
+        if (owner != null)
+            return await dlg.ShowDialog<bool>(owner);
+
+        // fallback
+        return await dlg.ShowDialog<bool>(new Window());
+    }
+
+
+    
+
+    
+    
 
     public void SetArrays(List<RaidArrayInfo> arrays)
     {
@@ -499,21 +585,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     info.Children.Add(new TextBlock
     {
-        Text = $"Avg Temp: {array.AverageTemp}°C",
-        FontSize = 14,
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-    });
-
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Type: {array.DiskSummary}",
-        FontSize = 14,
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-    });
-
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Uptime: {array.Uptime}",
+        Text = $"Avg Temp: {(array.AverageTemp <= 0 ? "N/A" : $"{array.AverageTemp}°C")}",
         FontSize = 14,
         Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
     });
@@ -528,7 +600,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
         });
     }
 
-    // Original grid (icon + info)
+    // Grid principal (icono + info)
     var grid = new Grid
     {
         ColumnDefinitions =
@@ -544,7 +616,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
     grid.Children.Add(info);
     Grid.SetColumn(info, 1);
 
-    // ⭐ Overlay grid for checkbox + more button
+    // Overlay para checkbox + botón More
     var overlay = new Grid
     {
         RowDefinitions =
@@ -554,7 +626,6 @@ private Border BuildArrayCard(RaidArrayInfo array)
         }
     };
 
-    // Top-right panel
     var topRightPanel = new StackPanel
     {
         Orientation = Orientation.Horizontal,
@@ -563,7 +634,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Spacing = 6
     };
 
-    // ⭐ CheckBox (left of More)
+    // Checkbox de selección
     var chkSelect = new CheckBox
     {
         VerticalAlignment = VerticalAlignment.Top,
@@ -577,6 +648,8 @@ private Border BuildArrayCard(RaidArrayInfo array)
         ClearOtherSelections(array);
         BtnDeleteArray.IsEnabled = true;
         BtnConfigArrays.IsEnabled = true;
+        BtnInitialize.IsEnabled = true;
+
         BuildUI();
     };
 
@@ -586,62 +659,53 @@ private Border BuildArrayCard(RaidArrayInfo array)
             _selectedArray = null;
         BtnDeleteArray.IsEnabled = false;
         BtnConfigArrays.IsEnabled = false;
+        BtnInitialize.IsEnabled = false;
+
         BuildUI();
     };
 
     topRightPanel.Children.Add(chkSelect);
 
-    // ⭐ More button
+    // Botón More
     var btnMore = new Button
     {
         Content = "More",
         Classes = { "MoreButton" },
-        VerticalAlignment = VerticalAlignment.Top,
-        HorizontalAlignment = HorizontalAlignment.Right
+        VerticalContentAlignment = VerticalAlignment.Center,
+        HorizontalContentAlignment = HorizontalAlignment.Center
     };
 
-    // ⭐ Create menu
+    // Menú contextual del array (solo acciones RAID reales)
     var menu = new ContextMenu
     {
         Items =
         {
-            new MenuItem { Header = "Format Array", Tag = "format" },
-            new MenuItem { Header = "Details", Tag = "details" },
-            new MenuItem { Header = "Start array", Tag = "start" },
+            new MenuItem { Header = "Start resync/rebuild", Tag = "resync" },
+            new MenuItem { Header = "Force check", Tag = "check" },
+            new MenuItem { Header = "Force repair", Tag = "repair" },
             new MenuItem { Header = "Stop array", Tag = "stop" },
-            new MenuItem { Header = "Add disk", Tag = "add" },
-            new MenuItem { Header = "Remove disk", Tag = "remove" },
-            new MenuItem { Header = "Mark disk faulty", Tag = "faulty" },
-            new MenuItem { Header = "Replace disk", Tag = "replace" },
-            new MenuItem { Header = "Force check or resync", Tag = "check" },
-            new MenuItem { Header = "View logs", Tag = "logs" }
+            new MenuItem { Header = "Details", Tag = "details" }
         }
     };
 
-// ⭐ Open menu on click
     btnMore.Click += (_, _) =>
     {
         menu.PlacementTarget = btnMore;
-        menu.Open(btnMore);  
+        menu.Open(btnMore);
     };
 
-
-// ⭐ Menu item handlers
     foreach (var item in menu.Items.OfType<MenuItem>())
         item.Click += (_, _) => OnMoreMenuClick(array, item.Tag?.ToString());
 
-    
     topRightPanel.Children.Add(btnMore);
 
-    // Add top-right panel
     overlay.Children.Add(topRightPanel);
     Grid.SetRow(topRightPanel, 0);
 
-    // Add original content
     overlay.Children.Add(grid);
     Grid.SetRow(grid, 1);
 
-    // Glow + card border
+    // Glow + tarjeta
     var glowColor = GetArrayGlowColor(array.State);
     var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
 
@@ -672,17 +736,16 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
         if (array.IsExpanded)
             StartMonitoringArray(array, cardBorder);
-
         else
             StopMonitoringArray();
 
         BuildUI();
     };
 
-
     return glowBorder;
 }
 
+    
 // ⭐ Selección única
 
     private void ClearOtherSelections(RaidArrayInfo selected)
@@ -696,12 +759,11 @@ private Border BuildArrayCard(RaidArrayInfo array)
         BtnDeleteArray.IsEnabled = _selectedArray != null;
     }
 
-
-  
     private Border BuildExpandedCard(RaidArrayInfo array)
     {
         var panel = new StackPanel { Spacing = 10 };
 
+        // Título del array
         panel.Children.Add(new TextBlock
         {
             Text = array.Name,
@@ -713,11 +775,14 @@ private Border BuildArrayCard(RaidArrayInfo array)
             Margin = new Thickness(0, 0, 0, 8)
         });
 
+        // Opciones de montaje
         panel.Children.Add(BuildMountOptions(array));
 
+        // Tarjetas de discos
         foreach (var disk in array.Disks)
             panel.Children.Add(BuildDiskCard(disk));
 
+        // Tarjeta expandida final
         return new Border
         {
             Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
@@ -728,255 +793,404 @@ private Border BuildArrayCard(RaidArrayInfo array)
         };
     }
 
-    private Control BuildMountOptions(RaidArrayInfo array)
+  
+   private Control BuildMountOptions(RaidArrayInfo array)
+{
+    var panel = new StackPanel
     {
-        var panel = new StackPanel
+        Spacing = 12,
+        Margin = new Thickness(0, 0, 0, 10)
+    };
+
+    // Fila de botones
+    var buttonsRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 10,
+        HorizontalAlignment = HorizontalAlignment.Right
+    };
+
+    // Botón Mount / Unmount
+    var btnMount = new Button
+    {
+        Content = array.IsMounted ? "Unmount" : "Mount",
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "PrimaryButton" },
+        Width = 100
+    };
+
+    btnMount.Click += (_, _) =>
+    {
+        array.IsMounted = !array.IsMounted;
+        BuildUI();
+    };
+
+    // Botón Open
+    var btnOpen = new Button
+    {
+        Content = "Open",
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "SecondaryButton" },
+        Width = 90
+    };
+
+    buttonsRow.Children.Add(btnMount);
+    buttonsRow.Children.Add(btnOpen);
+
+    panel.Children.Add(buttonsRow);
+
+    // Persist Mount
+    var togglesRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 30,
+        HorizontalAlignment = HorizontalAlignment.Left
+    };
+
+    var chkPersist = new CheckBox
+    {
+        Content = "Persist Mount",
+        IsChecked = array.PersistMount,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
+    };
+
+    chkPersist.Checked += (_, _) => array.PersistMount = true;
+    chkPersist.Unchecked += (_, _) => array.PersistMount = false;
+
+    togglesRow.Children.Add(chkPersist);
+
+    panel.Children.Add(togglesRow);
+
+    // Ruta de montaje
+    panel.Children.Add(new TextBlock
+    {
+        Text = $"Mount Path: {array.MountPath ?? "/mnt/" + array.Name}",
+        FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    return panel;
+}
+
+   
+private async void AnimateSmartDot(Border glow, Border dot, string state)
+{
+    if (state == "WARN")
+    {
+        // ⭐ Parpadeo normal (amarillo)
+        while (true)
         {
-            Spacing = 12,
-            Margin = new Thickness(0, 0, 0, 10)
+            glow.Opacity = 0.25;
+            dot.Opacity = 0.25;
+            await Task.Delay(400);
+
+            glow.Opacity = 0.55;
+            dot.Opacity = 0.55;
+            await Task.Delay(400);
+        }
+    }
+
+    if (state == "FAULTY")
+    {
+        // ⭐ Patrón SOS (rojo)
+        // · · · — — — · · ·
+        while (true)
+        {
+            // 3 cortos
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.20;
+                dot.Opacity = 0.20;
+                await Task.Delay(150);
+
+                glow.Opacity = 0.80;
+                dot.Opacity = 0.80;
+                await Task.Delay(150);
+            }
+
+            // 3 largos
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.20;
+                dot.Opacity = 0.20;
+                await Task.Delay(300);
+
+                glow.Opacity = 0.80;
+                dot.Opacity = 0.80;
+                await Task.Delay(300);
+            }
+
+            // 3 cortos
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.20;
+                dot.Opacity = 0.20;
+                await Task.Delay(150);
+
+                glow.Opacity = 0.80;
+                dot.Opacity = 0.80;
+                await Task.Delay(150);
+            }
+
+            // Pausa entre SOS
+            await Task.Delay(600);
+        }
+    }
+}
+
+
+   
+   
+   
+    
+   private Border BuildDiskCard(RaidDiskInfo disk)
+{
+    Console.WriteLine($"[RAIDVIEW]   BuildDiskCard() para {disk.Name}, Icon={disk.Icon}");
+
+    // Icono del disco
+    var icon = LoadImage(disk.Icon, 72);
+    icon.Margin = new Thickness(2);
+
+    // Nombre del disco
+    var name = new TextBlock
+    {
+        Text = disk.Name,
+        FontSize = 17,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
+    };
+
+    // Modelo
+    var model = new TextBlock
+    {
+        Text = $"Model: {disk.Model}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    };
+
+    // Tamaño
+    var size = new TextBlock
+    {
+        Text = $"Size: {disk.Size}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    };
+
+    // Rol RAID
+    var role = new TextBlock
+    {
+        Text = $"RAID Role: {disk.Role}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    };
+
+    // Estado SMART
+    var smart = new TextBlock
+    {
+        Text = $"SMART: {disk.State}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    };
+
+    // Stack de texto
+    var textStack = new StackPanel
+    {
+        Spacing = 2,
+        VerticalAlignment = VerticalAlignment.Center,
+        Children = { name, model, size, role, smart }
+    };
+
+   
+
+    // Botón More
+    var manageButton = new Button
+    {
+        Content = "More",
+        Width = 80,
+        Height = 32,
+        Margin =  new Thickness(10),
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "IconButton" }
+    };
+    
+    
+    // LED SMART
+    var statusDot = BuildStatusDot(disk.State);
+
+    manageButton.Click += (_, _) =>
+    {
+        var menu = new ContextMenu
+        {
+            Items =
+            {
+                new MenuItem { Header = "SMART Info", Tag = "smart" },
+                new MenuItem { Header = "Mark as Faulty", Tag = "faulty" },
+                new MenuItem { Header = "Set as Spare", Tag = "spare" },
+                new MenuItem { Header = "Remove from Array", Tag = "remove" },
+                new MenuItem { Header = "Initialize Disk", Tag = "init" }
+            }
         };
 
-        var buttonsRow = new StackPanel
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.Click += (_, _) => OnDiskMenuClick(disk, item.Tag?.ToString());
+
+        menu.Open(manageButton);
+    };
+
+    // Grid principal
+    var grid = new Grid
+    {
+        ColumnDefinitions =
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star),
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Auto)
+        },
+        VerticalAlignment = VerticalAlignment.Center
+    };
 
-        var btnMount = new Button
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
+
+    grid.Children.Add(textStack);
+    Grid.SetColumn(textStack, 1);
+
+    grid.Children.Add(manageButton);
+    Grid.SetColumn(manageButton, 2);
+
+    grid.Children.Add(statusDot);
+    Grid.SetColumn(statusDot, 3);
+
+    // Tarjeta final
+    return new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        BorderBrush = (IBrush)Application.Current!.FindResource("BMWBorderBrush")!,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(12),
+        Margin = new Thickness(0, 0, 0, 10),
+        Child = grid
+    };
+}
+
+   
+private async void OnDiskMenuClick(RaidDiskInfo disk, string? action)
+{
+    var service = new RaidService();
+
+    switch (action)
+    {
+        case "smart":
+            string info = await service.GetSmartInfoAsync(disk.Name);
+            ShowSmartDialog(info, disk.Name);
+            break;
+
+        case "faulty":
+            service.MarkDiskAsFaulty(disk.ArrayName, disk.Name);
+            break;
+
+        case "spare":
+            service.SetDiskAsSpare(disk.ArrayName, disk.Name);
+            break;
+
+        case "remove":
+            service.RemoveDiskFromArray(disk.ArrayName, disk.Name);
+            break;
+
+        case "init":
+            await service.InitializeDiskAsync(disk.Name);
+            break;
+    }
+
+    BuildUI();
+}
+
+private void ShowSmartDialog(string text, string diskName)
+{
+    var dialog = new Window
+    {
+        Title = $"SMART — {diskName}",
+        Width = 600,
+        Height = 500,
+        Content = new ScrollViewer
         {
-            Content = array.IsMounted ? "Unmount" : "Mount",
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Classes = { "PrimaryButton" },
-            Width = 100
-        };
+            Content = new TextBlock
+            {
+                Text = text,
+                FontFamily = "Consolas",
+                FontSize = 13,
+                Background = Brushes.Black,
+                Foreground = Brushes.LightGreen
+            }
+        }
+    };
 
-        btnMount.Click += (_, _) =>
+    dialog.Show();
+}
+
+
+
+private Border BuildStatusDot(string smartState)
+{
+    Color color = smartState switch
+    {
+        "OK" => Color.FromRgb(0, 200, 0),
+        "WARN" => Color.FromRgb(255, 200, 0),
+        "FAULTY" => Color.FromRgb(220, 0, 0),
+        _ => Color.FromRgb(255, 200, 0)
+    };
+
+    var glow = new Border
+    {
+        Width = 28,
+        Height = 28,
+        CornerRadius = new CornerRadius(14),
+        Background = new SolidColorBrush(color) { Opacity = 0.35 },
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    var dot = new Border
+    {
+        Width = 16,
+        Height = 16,
+        CornerRadius = new CornerRadius(8),
+        Background = new SolidColorBrush(color),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    var container = new Grid
+    {
+        Width = 28,
+        Height = 28
+    };
+
+    container.Children.Add(glow);
+    container.Children.Add(dot);
+
+    // ⭐ Restaurar parpadeo original
+    if (smartState == "WARN" || smartState == "FAULTY")
+    {
+        Dispatcher.UIThread.Post(() =>
         {
-            array.IsMounted = !array.IsMounted;
-            BuildUI();
-        };
-
-        var btnOpen = new Button
-        {
-            Content = "Open",
-            Classes = { "SecondaryButton" },
-            Width = 90
-        };
-
-        buttonsRow.Children.Add(btnMount);
-        buttonsRow.Children.Add(btnOpen);
-
-        panel.Children.Add(buttonsRow);
-
-        var togglesRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 30,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
-
-        var chkPersist = new CheckBox
-        {
-            Content = "Persist Mount",
-            IsChecked = array.PersistMount,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
-        };
-
-        chkPersist.Checked += (_, _) => array.PersistMount = true;
-        chkPersist.Unchecked += (_, _) => array.PersistMount = false;
-
-        togglesRow.Children.Add(chkPersist);
-
-        panel.Children.Add(togglesRow);
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = $"Mount Path: {array.MountPath ?? "/mnt/" + array.Name}",
-            FontSize = 14,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+            AnimateSmartDot(glow, dot, smartState);
         });
-
-        return panel;
     }
 
-    private Border BuildDiskCard(RaidDiskInfo disk)
+    return new Border
     {
-        Console.WriteLine($"[RAIDVIEW]   BuildDiskCard() para {disk.Name}, Icon={disk.Icon}");
+        Child = container,
+        Background = Brushes.Transparent
+    };
+}
 
-        var icon = LoadImage(disk.Icon, 72);
-        icon.Margin = new Thickness(2);
 
-        var name = new TextBlock
-        {
-            Text = disk.Name,
-            FontSize = 17,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
-        };
-
-        var role = new TextBlock
-        {
-            Text = disk.Role,
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        };
-
-        var state = new TextBlock
-        {
-            Text = disk.State,
-            FontSize = 14,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        };
-
-        var textStack = new StackPanel
-        {
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children = { name, role, state }
-        };
-
-        var statusDot = BuildStatusDot(disk.State);
-
-        var manageButton = new Button
-        {
-            Content = "More",
-            Width = 80,
-            
-            Height = 32,
-            Classes = { "IconButton" },
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Top
-        };
-
-        manageButton.Click += (_, _) =>
-        {
-            var menu = new ContextMenu
-            {
-                Items =
-                {
-                    
-                    new MenuItem
-                    {
-                        Header = "Format",
-                        Command = new LambdaCommand(() => ShowDiskDetails(disk))
-                    },
-                    
-                    new MenuItem
-                    {
-                        Header = "Details",
-                        Command = new LambdaCommand(() => ShowDiskDetails(disk))
-                    },
-                    new MenuItem
-                    {
-                        Header = "Check",
-                        Command = new LambdaCommand(() => RunDiskCheck(disk))
-                    },
-                    new MenuItem
-                    {
-                        Header = "Repair",
-                        Command = new LambdaCommand(() => RunDiskRepair(disk))
-                    },
-                    new MenuItem
-                    {
-                        Header = "SMART Info",
-                        Command = new LambdaCommand(() => ShowSmartInfo(disk))
-                    },
-                    new MenuItem
-                    {
-                        Header = "Mark as Faulty",
-                        Command = new LambdaCommand(() => MarkDiskAsFaulty(disk))
-                    }
-                }
-            };
-
-            menu.Open(manageButton);
-        };
-
-        var grid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Auto)
-            },
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        grid.Children.Add(icon);
-        Grid.SetColumn(icon, 0);
-
-        grid.Children.Add(textStack);
-        Grid.SetColumn(textStack, 1);
-
-        grid.Children.Add(manageButton);
-        Grid.SetColumn(manageButton, 2);
-
-        grid.Children.Add(statusDot);
-        Grid.SetColumn(statusDot, 3);
-
-        return new Border
-        {
-            Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-            BorderBrush = (IBrush)Application.Current!.FindResource("BMWBorderBrush")!,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12),
-            Child = grid
-        };
-    }
-
-    private Border BuildStatusDot(string state)
-    {
-        Color color = state switch
-        {
-            "OK" => Color.FromRgb(0, 255, 0),
-            "FAULTY" => Color.FromRgb(255, 0, 0),
-            _ => Color.FromRgb(255, 200, 0)
-        };
-
-        var glow = new Border
-        {
-            Width = 28,
-            Height = 28,
-            CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(color) { Opacity = 0.35 },
-            Margin = new Thickness(0),
-        };
-
-        var dot = new Border
-        {
-            Width = 16,
-            Height = 16,
-            CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(color),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        var container = new Grid
-        {
-            Width = 28,
-            Height = 28,
-            Margin = new Thickness(8, 0, 8, 0)
-        };
-
-        container.Children.Add(glow);
-        container.Children.Add(dot);
-
-        if (state == "FAULTY")
-            AnimateSOS(dot, glow);
-        else if (state != "OK")
-            AnimateWarning(dot, glow);
-
-        return new Border
-        {
-            Child = container
-        };
-    }
     
     private void StartMonitoringArray(RaidArrayInfo array, Border cardBorder)
 
@@ -1137,73 +1351,35 @@ private Border BuildArrayCard(RaidArrayInfo array)
         }
     }
 
-    
-   
-    private void ShowDiskDetails(RaidDiskInfo disk)
+
+    private async void ShowArrayDetails(RaidArrayInfo array)
     {
-        Console.WriteLine($"Details for {disk.Name}");
+        Console.WriteLine($"[RAIDVIEW] Mostrando detalles de {array.Name}");
+
+        string cmd = $"/usr/sbin/mdadm --detail /dev/{array.Name}";
+        string output = await ShellHelper.RunCleanAsync(cmd);
+
+        var dialog = new Window
+        {
+            Title = $"Array Details — {array.Name}",
+            Width = 600,
+            Height = 500,
+            Content = new ScrollViewer
+            {
+                Content = new TextBlock
+                {
+                    Text = output,
+                    FontFamily = "Consolas",
+                    FontSize = 13,
+                    Foreground = Brushes.White
+                }
+            }
+        };
+
+        dialog.Show();
     }
 
-    private void RunDiskCheck(RaidDiskInfo disk)
-    {
-        Console.WriteLine($"Checking {disk.Name}");
-    }
 
-    private void RunDiskRepair(RaidDiskInfo disk)
-    {
-        Console.WriteLine($"Repairing {disk.Name}");
-    }
-
-    private void ShowSmartInfo(RaidDiskInfo disk)
-    {
-        Console.WriteLine($"SMART info for {disk.Name}");
-    }
-
-    private void MarkDiskAsFaulty(RaidDiskInfo disk)
-    {
-        Console.WriteLine($"Marking {disk.Name} as faulty");
-    }
-
-    private void ShowArrayDetails(RaidArrayInfo array)
-    {
-        Console.WriteLine($"Array details: {array.Name}");
-    }
-
-    private void RunArrayCheck(RaidArrayInfo array)
-    {
-        Console.WriteLine($"Checking array {array.Name}");
-    }
-
-    private void RunArrayRepair(RaidArrayInfo array)
-    {
-        Console.WriteLine($"Repairing array {array.Name}");
-    }
-
-    private void AddSpareToArray(RaidArrayInfo array)
-    {
-        Console.WriteLine($"Adding spare to array {array.Name}");
-    }
-
-    private void RemoveArray(RaidArrayInfo array)
-    {
-        Console.WriteLine($"Removing array {array.Name}");
-    }
-    
-    private void LoadArrays()
-    {
-        // This method reloads all RAID arrays and rebuilds the UI.
-        // It replaces the previous MainWindow.LoadRaidAsync call.
-    }
-
-    private void OpenCreateArrayWindow()
-    {
-        // Opens the Create Array window.
-    }
-
-    private void OpenDeleteArrayWindow()
-    {
-        // Opens the Delete Array window.
-    }
 
     private void OpenArrayConfigWindow()
     {
@@ -1582,64 +1758,132 @@ private Window GetWindow()
     
    //-------------Boton More------------------//
    
-   private void OnMoreMenuClick(RaidArrayInfo array, string? action)
+   private async void OnMoreMenuClick(RaidArrayInfo array, string? action)
    {
-       if (action == null)
-           return;
-
-       Console.WriteLine($"[MORE] Action '{action}' on array {array.Name}");
+       var service = new RaidService();
 
        switch (action)
        {
-           case "format":
-              OpenFormatArrayDialog(array);
-               break;
-           
-           case "details":
-               ShowArrayDetails(array);
-               break;
-
-           case "start":
-               RunArrayCheck(array);   // placeholder
-               break;
-
-           case "stop":
-               RunArrayRepair(array);  // placeholder
-               break;
-
-           case "add":
-               AddSpareToArray(array); // placeholder
-               break;
-
-           case "remove":
-               RemoveArray(array);     // placeholder
-               break;
-
-           case "faulty":
-               Console.WriteLine($"[MORE] Marking array {array.Name} as faulty (UI only)");
-               break;
-
-           case "replace":
-               Console.WriteLine($"[MORE] Replacing disk in {array.Name} (UI only)");
+           case "resync":
+               await service.StartArrayResyncAsync(array.Name);
                break;
 
            case "check":
-               RunArrayCheck(array);   // placeholder
+               await service.ForceArrayCheckAsync(array.Name);
                break;
 
-           case "logs":
-               Console.WriteLine($"[MORE] Viewing logs for {array.Name}");
+           case "repair":
+               await service.ForceArrayRepairAsync(array.Name);
                break;
 
-           default:
-               Console.WriteLine($"[MORE] Unknown action: {action}");
+           case "stop":
+               await service.StopArrayAsync(array.Name);
+               break;
+
+           case "details":
+               string detail = await service.GetArrayDetailsAsync(array.Name);
+               ShowArrayDetailsDialog(detail, array.Name);
                break;
        }
+
+       BuildUI();
    }
+
+   
+   private void ShowArrayDetailsDialog(string text, string arrayName)
+   {
+       var dialog = new Window
+       {
+           Title = $"Array Details — {arrayName}",
+           Width = 600,
+           Height = 500,
+           Content = new ScrollViewer
+           {
+               Content = new TextBlock
+               {
+                   Text = text,
+                   FontFamily = "Consolas",
+                   FontSize = 13,
+                   Background = Brushes.Black,
+                   Foreground = Brushes.LightGreen
+               }
+           }
+       };
+
+       dialog.Show();
+   }
+
+   
 
    
    //-------------Boton More-----------------//
     
+   private async void StartArrayResync(RaidArrayInfo array)
+   {
+       Console.WriteLine($"[RAIDVIEW] Iniciando resync en {array.Name}");
+
+       string cmd = $"/usr/sbin/mdadm --readwrite /dev/{array.Name}";
+       var result = ShellHelper.EjecutarComoRoot(cmd);
+
+       if (result.ExitCode != 0)
+           Console.WriteLine($"[RAIDVIEW] ERROR resync: {result.Stderr}");
+       else
+           Console.WriteLine($"[RAIDVIEW] Resync iniciado correctamente");
+
+       BuildUI();
+   }
+
+
+   private async void ForceArrayCheck(RaidArrayInfo array)
+   {
+       Console.WriteLine($"[RAIDVIEW] Ejecutando check en {array.Name}");
+
+       string cmd = $"/usr/sbin/mdadm --action=check /dev/{array.Name}";
+       var result = ShellHelper.EjecutarComoRoot(cmd);
+
+       if (result.ExitCode != 0)
+           Console.WriteLine($"[RAIDVIEW] ERROR check: {result.Stderr}");
+       else
+           Console.WriteLine($"[RAIDVIEW] Check iniciado correctamente");
+
+       BuildUI();
+   }
+
+   private async void ForceArrayRepair(RaidArrayInfo array)
+   {
+       Console.WriteLine($"[RAIDVIEW] Ejecutando repair en {array.Name}");
+
+       string cmd = $"/usr/sbin/mdadm --action=repair /dev/{array.Name}";
+       var result = ShellHelper.EjecutarComoRoot(cmd);
+
+       if (result.ExitCode != 0)
+           Console.WriteLine($"[RAIDVIEW] ERROR repair: {result.Stderr}");
+       else
+           Console.WriteLine($"[RAIDVIEW] Repair iniciado correctamente");
+
+       BuildUI();
+   }
+
+   
+
+   private async void StopArray(RaidArrayInfo array)
+   {
+       Console.WriteLine($"[RAIDVIEW] Deteniendo array {array.Name}");
+
+       string cmd = $"/usr/sbin/mdadm --stop /dev/{array.Name}";
+       var result = ShellHelper.EjecutarComoRoot(cmd);
+
+       if (result.ExitCode != 0)
+           Console.WriteLine($"[RAIDVIEW] ERROR stop: {result.Stderr}");
+       else
+           Console.WriteLine($"[RAIDVIEW] Array detenido correctamente");
+
+       BuildUI();
+   }
+
+
+  
+
    
    private List<RaidDiskInfo> GetSafeDisks()
    {

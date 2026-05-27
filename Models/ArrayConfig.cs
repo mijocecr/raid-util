@@ -23,4 +23,5 @@ public class ArrayConfig
     public bool AlertDegraded { get; set; } = true;
     public bool AlertDiskFail { get; set; } = true;
     public bool AlertSlowResync { get; set; } = true;
+    public string MountPermissions { get; set; } = "777";
 }

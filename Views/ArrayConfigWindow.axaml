@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="RAID_Util.Views.ArrayConfigWindow"
-        Width="430" Height="500"
+        Width="430" Height="560"
         Background="{DynamicResource BMWBackgroundBrush}"
         Foreground="{DynamicResource BMWTextBrush}"
         TransparencyLevelHint="AcrylicBlur"
@@ -109,6 +109,21 @@
                                       Grid.Row="2" Grid.Column="0"/>
                     </Grid>
 
+                    <!-- ⭐ PERMISSIONS -->
+                    <StackPanel Spacing="4" Margin="0 6 0 0">
+                        <TextBlock Text="Permissions (chmod)"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource BMWTextBrush}"/>
+
+                        <TextBox x:Name="TxtMountPermissions"
+                                 Height="28"
+                                 Width="120"
+                                 Watermark="777"
+                                 Background="{DynamicResource BMWInputBrush}"
+                                 Foreground="{DynamicResource BMWTextBrush}"
+                                 BorderBrush="{DynamicResource BMWBorderBrush}"/>
+                    </StackPanel>
+
                     <ToggleSwitch x:Name="TgAutoMount"
                                   Content="Auto-mount on startup"
                                   Margin="0 4 0 0"/>
@@ -172,7 +187,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- ⭐ FIXED BUTTON BAR (ALWAYS VISIBLE) -->
+        <!-- ⭐ FIXED BUTTON BAR -->
         <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"

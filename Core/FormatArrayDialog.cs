@@ -12,8 +12,8 @@ public class FormatArrayDialog : Window
 
     public FormatArrayDialog(string arrayName)
     {
-        Width = 420;
-        Height = 260;
+        Width = 460;
+        Height = 320;
         Title = $"Format {arrayName}";
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         CanResize = false;
@@ -23,7 +23,7 @@ public class FormatArrayDialog : Window
         var panel = new StackPanel
         {
             Margin = new Thickness(22),
-            Spacing = 16
+            Spacing = 18
         };
 
         panel.Children.Add(new TextBlock
@@ -40,16 +40,26 @@ public class FormatArrayDialog : Window
         fsRow.Children.Add(new TextBlock
         {
             Text = "Filesystem:",
-            Width = 100,
+            Width = 120,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
 
         _fsSelector = new ComboBox
         {
-            ItemsSource = new[] { "ext4", "xfs", "btrfs" },
+            ItemsSource = new[]
+            {
+                "ext4",
+                "xfs",
+                "btrfs",
+                "f2fs",
+                "vfat (FAT32)",
+                "exfat",
+                "ntfs",
+                "swap"
+            },
             SelectedIndex = 0,
-            Width = 160,
+            Width = 200,
             Background = this.FindResource("BMWInputBrush") as IBrush,
             Foreground = this.FindResource("BMWTextBrush") as IBrush,
             BorderBrush = this.FindResource("BMWBorderBrush") as IBrush
@@ -62,7 +72,7 @@ public class FormatArrayDialog : Window
         labelRow.Children.Add(new TextBlock
         {
             Text = "Label:",
-            Width = 100,
+            Width = 120,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
@@ -70,7 +80,7 @@ public class FormatArrayDialog : Window
         _labelBox = new TextBox
         {
             Watermark = "optional",
-            Width = 160,
+            Width = 200,
             Background = this.FindResource("BMWInputBrush") as IBrush,
             Foreground = this.FindResource("BMWTextBrush") as IBrush,
             BorderBrush = this.FindResource("BMWBorderBrush") as IBrush
@@ -89,7 +99,7 @@ public class FormatArrayDialog : Window
         buttons.Children.Add(new Button
         {
             Content = "Cancel",
-            Width = 90,
+            Width = 100,
             Classes = { "DialogButton" },
             Command = new LambdaCommand(() => Close(null))
         });
@@ -97,7 +107,7 @@ public class FormatArrayDialog : Window
         buttons.Children.Add(new Button
         {
             Content = "Format",
-            Width = 90,
+            Width = 100,
             Classes = { "PrimaryButton" },
             Command = new LambdaCommand(() => Close(GetResult()))
         });
