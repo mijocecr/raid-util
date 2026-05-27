@@ -12,7 +12,10 @@ using System.Linq;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform;
 using Avalonia.Styling;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RAID_Util.Core;
+using RAID_Util.Helpers;
 using RAID_Util.Models;
 using RAID_Util.Services;
 
@@ -25,6 +28,12 @@ public partial class RaidView : UserControl
     // ⭐ Flag para forzar fake data si quieres probar la UI sin backend
     private const bool FORCE_FAKE_DATA = false;
 
+    private DispatcherTimer? _monitorBlinkTimer = null;
+    private bool _monitorBlinkState = false;
+    private Border? _monitoringBorder = null;
+    private string? _monitoringArrayName = null;
+
+    
     public bool IsFakeMode => FORCE_FAKE_DATA;
     
     public RaidView()
@@ -93,8 +102,18 @@ public partial class RaidView : UserControl
 
             foreach (var d in a.Disks)
             {
-                if (string.IsNullOrWhiteSpace(d.Icon))
-                    d.Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
+                if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
+                {
+                    d.Icon = d.Icon switch
+                    {
+                        "hdd" => "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                        "ssd" => "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                        "nvme" => "avares://RAID-Util/Assets/Icons/disk-nvme.png",
+                        "usb" => "avares://RAID-Util/Assets/Icons/disk-usb.png",
+                        "virtual" => "avares://RAID-Util/Assets/Icons/disk-virtual.png",
+                        _ => "avares://RAID-Util/Assets/Icons/disk-hdd.png"
+                    };
+                }
 
                 Console.WriteLine($"[RAIDVIEW]   DISK {d.Name} Role={d.Role} State={d.State} Icon={d.Icon}");
             }
@@ -379,9 +398,62 @@ public partial class RaidView : UserControl
                 ListArrays.Children.Add(expanded);
             }
         }
+        
+        // ⭐ Restaurar parpadeo si había un array en monitoreo
+        if (_monitoringArrayName != null)
+        {
+            foreach (var glow in ListArrays.Children.OfType<Border>())
+            {
+                if (glow.Child is Border card)
+                {
+                    if (card.Child is Grid overlay)
+                    {
+                        var textBlocks = overlay.GetVisualDescendants().OfType<TextBlock>();
+
+                        if (textBlocks.Any(t => t.Text.StartsWith(_monitoringArrayName)))
+                        {
+                            _monitoringBorder = card;
+                            RestartBlinking();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+
 
         Console.WriteLine("[RAIDVIEW] BuildUI() completado.");
     }
+    
+    private void RestartBlinking()
+    {
+        if (_monitorBlinkTimer != null)
+            _monitorBlinkTimer.Stop();
+
+        _monitorBlinkTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+
+        _monitorBlinkTimer.Tick += (_, _) =>
+        {
+            if (_monitoringBorder == null)
+                return;
+
+            _monitorBlinkState = !_monitorBlinkState;
+
+            _monitoringBorder.BorderBrush = _monitorBlinkState
+                ? Brushes.Orange
+                : Brushes.Transparent;
+
+            _monitoringBorder.BorderThickness = new Thickness(3);
+        };
+
+        _monitorBlinkTimer.Start();
+    }
+
+    
 
     private RaidArrayInfo? _selectedArray = null;
 
@@ -597,8 +669,16 @@ private Border BuildArrayCard(RaidArrayInfo array)
     cardBorder.PointerPressed += (_, _) =>
     {
         array.IsExpanded = !array.IsExpanded;
+
+        if (array.IsExpanded)
+            StartMonitoringArray(array, cardBorder);
+
+        else
+            StopMonitoringArray();
+
         BuildUI();
     };
+
 
     return glowBorder;
 }
@@ -897,6 +977,75 @@ private Border BuildArrayCard(RaidArrayInfo array)
             Child = container
         };
     }
+    
+    private void StartMonitoringArray(RaidArrayInfo array, Border cardBorder)
+
+    {
+        // Detener monitorización previa si existía
+        StopMonitoringArray();
+
+        _monitoringArrayName = array.Name;
+        _monitoringBorder = cardBorder;
+
+
+        // ============================
+        // INICIAR MONITORIZACIÓN REAL
+        // ============================
+        var cfg = ArrayConfigService.Load(array.Name);
+
+        RaidAlertService.StartMonitoring(array.Name, cfg, msg =>
+        {
+            NotificadorLinux.Enviar(msg, 6000, "critical", "raid-util");
+        });
+
+        // ============================
+        // PARPADEO EN NARANJA
+        // ============================
+        _monitorBlinkTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+
+        _monitorBlinkTimer.Tick += (_, _) =>
+        {
+            if (_monitoringBorder == null)
+                return;
+
+            _monitorBlinkState = !_monitorBlinkState;
+
+            _monitoringBorder.BorderBrush = _monitorBlinkState
+                ? Brushes.Orange
+                : Brushes.Transparent;
+
+            _monitoringBorder.BorderThickness = new Thickness(3);
+        };
+
+        _monitorBlinkTimer.Start();
+    }
+
+    private void StopMonitoringArray()
+    {
+        RaidAlertService.StopMonitoring();
+
+        if (_monitorBlinkTimer != null)
+        {
+            _monitorBlinkTimer.Stop();
+            _monitorBlinkTimer = null;
+        }
+
+        if (_monitoringBorder != null)
+        {
+            _monitoringBorder.BorderBrush = Brushes.Transparent;
+            _monitoringBorder.BorderThickness = new Thickness(0);
+        }
+
+        _monitoringBorder = null;
+        _monitoringArrayName = null;
+    }
+
+    
+    
+    
 
     private async void AnimateWarning(Border dot, Border glow)
     {
@@ -954,9 +1103,10 @@ private Border BuildArrayCard(RaidArrayInfo array)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(uriString))
+            if (string.IsNullOrWhiteSpace(uriString) ||
+                !uriString.Contains("avares://"))
             {
-                Console.WriteLine("[RAIDVIEW] LoadImage(): uriString vacío, usando icono por defecto.");
+                Console.WriteLine($"[RAIDVIEW] LoadImage(): Icono inválido '{uriString}', usando icono por defecto.");
                 uriString = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
             }
 
@@ -974,8 +1124,9 @@ private Border BuildArrayCard(RaidArrayInfo array)
         {
             Console.WriteLine($"[RAIDVIEW] LoadImage() ERROR con '{uriString}': {ex.Message}. Usando icono por defecto.");
 
-            var fallback = new Uri("avares://RAID-Util/Assets/Icons/disk-hdd.png");
-            using var stream = AssetLoader.Open(fallback);
+            // fallback final
+            var fallbackUri = new Uri("avares://RAID-Util/Assets/Icons/disk-hdd.png");
+            using var stream = AssetLoader.Open(fallbackUri);
 
             return new Image
             {
@@ -986,6 +1137,8 @@ private Border BuildArrayCard(RaidArrayInfo array)
         }
     }
 
+    
+   
     private void ShowDiskDetails(RaidDiskInfo disk)
     {
         Console.WriteLine($"Details for {disk.Name}");

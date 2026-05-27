@@ -11,7 +11,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
 
-                <!-- PALETA BMW CON SOPORTE LIGHT/DARK -->
+                <!-- ⭐ ESTE ES EL CORRECTO -->
                 <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml"/>
 
             </ResourceDictionary.MergedDictionaries>
@@ -26,7 +26,7 @@
         <!-- Tema Fluent (obligatorio para ThemeVariant) -->
         <fluent:FluentTheme/>
 
-        <!-- ESTILOS BMW (botones, bordes, textos, etc.) -->
+        <!-- ⭐ Tus estilos BMW -->
         <StyleInclude Source="avares://RAID-Util/Styles/BMWStyles.axaml"/>
 
     </Application.Styles>

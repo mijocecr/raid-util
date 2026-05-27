@@ -66,7 +66,7 @@ public class ConfirmDialog : Window
         // DELETE BUTTON
         var deleteBtn = new Button
         {
-            Content = "Delete",
+            Content = "Accept",
             Width = 90,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             Classes = { "DangerButton" },
