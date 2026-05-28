@@ -11,7 +11,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
 
-                <!-- ⭐ ESTE ES EL CORRECTO -->
+                <!-- ⭐ Tus colores BMW -->
                 <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml"/>
 
             </ResourceDictionary.MergedDictionaries>
@@ -23,11 +23,19 @@
     <!-- ========================= -->
     <Application.Styles>
 
-        <!-- Tema Fluent (obligatorio para ThemeVariant) -->
+        <!-- Tema Fluent -->
         <fluent:FluentTheme/>
 
         <!-- ⭐ Tus estilos BMW -->
         <StyleInclude Source="avares://RAID-Util/Styles/BMWStyles.axaml"/>
+
+        <!-- ========================= -->
+        <!--   ICONO GLOBAL DE VENTANA -->
+        <!-- ========================= -->
+        <Style Selector="Window">
+            <Setter Property="Icon"
+                    Value="avares://RAID-Util/Assets/Icons/raid-util.png"/>
+        </Style>
 
     </Application.Styles>
 

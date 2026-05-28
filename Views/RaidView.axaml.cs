@@ -578,17 +578,25 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     info.Children.Add(new TextBlock
     {
-        Text = $"Size: {array.TotalSize} (Usable {array.UsableSize}, Parity {array.ParitySize})",
+        Text = $"Size: {array.TotalSize}",
         FontSize = 14,
         Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
     });
 
     info.Children.Add(new TextBlock
     {
-        Text = $"Avg Temp: {(array.AverageTemp <= 0 ? "N/A" : $"{array.AverageTemp}°C")}",
+        Text = $"Path: {array.Path}",
         FontSize = 14,
         Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
     });
+    
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {array.ParitySize}",
+        FontSize = 14,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
 
     if (array.RebuildProgress > 0)
     {

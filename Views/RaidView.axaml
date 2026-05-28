@@ -7,86 +7,76 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <!-- ⭐ GRID PRINCIPAL -->
+    <Grid RowDefinitions="Auto,*"
+          Margin="10"
+          RowSpacing="10">
 
-        <StackPanel Spacing="10" Margin="10">
+        <!-- ⭐ HEADER FIJO (NO SCROLL) -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                Padding="12"
+                CornerRadius="4"
+                BorderBrush="{DynamicResource BMWBorderBrush}"
+                BorderThickness="1">
 
-            <!-- ⭐ HEADER BMW MEJORADO -->
-            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
-                    Padding="12"
-                    CornerRadius="4"
-                    BorderBrush="{DynamicResource BMWBorderBrush}"
-                    BorderThickness="1">
+            <Grid ColumnDefinitions="*,*,*"
+                  RowDefinitions="Auto,Auto"
+                  ColumnSpacing="10"
+                  RowSpacing="10">
 
-                <Grid ColumnDefinitions="*,*,*"
-                      RowDefinitions="Auto,Auto"
-                      ColumnSpacing="10"
-                      RowSpacing="10">
+                <!-- FILA 1 -->
+                <Button Grid.Row="0" Grid.Column="0"
+                        Content="Create Array"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnCreateArray"
+                        Classes="HeaderButton"/>
 
-                    <!-- ⭐ FILA 1 (3 botones arriba) -->
-                    <Button Grid.Row="0" Grid.Column="0"
-                            Content="Create Array"
-                            HorizontalContentAlignment="Center"
-                            HorizontalAlignment="Stretch"
-                            x:Name="BtnCreateArray"
-                            Classes="HeaderButton"/>
+                <Button Grid.Row="0" Grid.Column="1"
+                        Content="Refresh"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnRefreshArrays"
+                        Classes="HeaderButton"/>
 
-                    <Button Grid.Row="0" Grid.Column="1"
-                            Content="Refresh"
-                            HorizontalContentAlignment="Center"
-                            HorizontalAlignment="Stretch"
-                            x:Name="BtnRefreshArrays"
-                            Classes="HeaderButton"/>
+                <Button Grid.Row="0" Grid.Column="2"
+                        Content="Config"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnConfigArrays"
+                        Classes="HeaderButton"/>
 
-                    <Button Grid.Row="0" Grid.Column="2"
-                            Content="Config"
-                            
-                            HorizontalContentAlignment="Center"
-                            HorizontalAlignment="Stretch"
-                            x:Name="BtnConfigArrays"
-                            Classes="HeaderButton"/>
+                <!-- FILA 2 -->
+                <Button Grid.Row="1" Grid.Column="0"
+                        Content="Assemble"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnAssembleArrays"
+                        Background="Green"
+                        Foreground="WhiteSmoke"
+                        Classes="HeaderButton"/>
 
-                    <!-- ⭐ FILA 2 (3 botones abajo) -->
-                    <Button Grid.Row="1" Grid.Column="0"
-                            Content="Assemble"
-                            HorizontalContentAlignment="Center"
-                            HorizontalAlignment="Stretch"
-                            x:Name="BtnAssembleArrays"
-                            Background="Green"
-                            Foreground="WhiteSmoke"
-                            Classes="HeaderButton"
-                            />
+                <Button Grid.Row="1" Grid.Column="1"
+                        Content="Initialize"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnInitialize"
+                        Foreground="Black"
+                        Background="Orange"
+                        Classes="HeaderButton"/>
 
-                    <Button Grid.Row="1" Grid.Column="1"
-                            Content="Initialize"
-                            x:Name="BtnInitialize"
-                            Classes="HeaderButton"
-                            HorizontalContentAlignment="Center"
-                            
-                            HorizontalAlignment="Stretch"
-                            Foreground="Black"
-                            Background="Orange"
-                            
-                           />
+                <Button Grid.Row="1" Grid.Column="2"
+                        Content="Delete Array"
+                        HorizontalAlignment="Stretch"
+                        x:Name="BtnDeleteArray"
+                        Background="Red"
+                        Foreground="WhiteSmoke"/>
+            </Grid>
+        </Border>
 
-                    <Button Grid.Row="1" Grid.Column="2"
-                            HorizontalContentAlignment="Center"
-                            Content="Delete Array"
-                            HorizontalAlignment="Stretch"
-                            x:Name="BtnDeleteArray"
-                            Background="Red"
-                            Foreground="WhiteSmoke"
-                           />
-
-                </Grid>
-            </Border>
-
-            <!-- Array list container -->
+        <!-- ⭐ SOLO LA LISTA SCROLLEA -->
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto">
             <StackPanel x:Name="ListArrays"
                         Spacing="8"/>
+        </ScrollViewer>
 
-        </StackPanel>
-
-    </ScrollViewer>
+    </Grid>
 
 </UserControl>
