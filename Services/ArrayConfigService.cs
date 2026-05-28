@@ -10,24 +10,35 @@ namespace RAID_Util.Services
     {
         private static string BasePath => "/etc/raid-util/arrays";
 
-        // Normaliza nombre (md0 → md0.json)
+        // ============================
+        // 1) Normalizar nombre seguro
+        // ============================
         private static string Normalize(string arrayName)
         {
-            return arrayName.Trim().Replace("/", "").Replace("\\", "");
+            // Solo letras, números, guion y guion bajo
+            return System.Text.RegularExpressions.Regex
+                .Replace(arrayName, @"[^a-zA-Z0-9\-_]", "");
         }
 
-        // Ruta completa del archivo
+        // ============================
+        // 2) Ruta completa del archivo
+        // ============================
         private static string GetPath(string arrayName)
         {
             string clean = Normalize(arrayName);
             return Path.Combine(BasePath, $"{clean}.json");
         }
 
-        // ⭐ Cargar configuración con validación estricta
+        // ============================
+        // 3) Cargar configuración
+        // ============================
         public static ArrayConfig Load(string arrayName)
         {
             try
             {
+                // Garantizar directorio
+                ShellHelper.EjecutarComoRoot($"mkdir -p \"{BasePath}\"");
+
                 string path = GetPath(arrayName);
 
                 if (!File.Exists(path))
@@ -44,19 +55,19 @@ namespace RAID_Util.Services
                     return new ArrayConfig();
                 }
 
-                var cfg = JsonConvert.DeserializeObject<ArrayConfig>(json);
+                var cfg = JsonConvert.DeserializeObject<ArrayConfig>(json) ?? new ArrayConfig();
 
-                if (cfg == null)
-                {
-                    LogService.Error($"[CFG] JSON inválido en {path}");
-                    return new ArrayConfig();
-                }
+                // ============================
+                // Compatibilidad con versiones antiguas
+                // ============================
+                cfg.MountPermissions ??= "755";
+                cfg.Name ??= "";
+                cfg.FsLabel ??= "";
+                cfg.MountPoint ??= "";
 
-                // ⭐ Compatibilidad con versiones antiguas
-                // Si el JSON viejo tenía AutoMount, lo ignoramos.
-                // PersistMount ya viene en el nuevo modelo.
-                if (cfg.MountPermissions is null)
-                    cfg.MountPermissions = "755";
+                // Validación de rangos
+                cfg.ResyncPriority = Math.Clamp(cfg.ResyncPriority, 1, 200000);
+                cfg.ResyncMaxSpeed = Math.Clamp(cfg.ResyncMaxSpeed, 100, 500000);
 
                 return cfg;
             }
@@ -67,7 +78,9 @@ namespace RAID_Util.Services
             }
         }
 
-        // ⭐ Guardar con backup, permisos y atomicidad
+        // ============================
+        // 4) Guardar configuración
+        // ============================
         public static void Save(string arrayName, ArrayConfig cfg)
         {
             try
@@ -76,7 +89,7 @@ namespace RAID_Util.Services
                 string dir = BasePath;
 
                 // Crear carpeta root
-                ShellHelper.EjecutarComoRoot($"mkdir -p {dir}");
+                ShellHelper.EjecutarComoRoot($"mkdir -p \"{dir}\"");
 
                 // Serializar JSON
                 string json = JsonConvert.SerializeObject(cfg, Formatting.Indented);
@@ -89,15 +102,16 @@ namespace RAID_Util.Services
                 if (File.Exists(path))
                 {
                     string backup = path + ".bak";
-                    ShellHelper.EjecutarComoRoot($"cp {path} {backup}");
+                    ShellHelper.EjecutarComoRoot($"cp \"{path}\" \"{backup}\"");
                     LogService.Write($"[CFG] Backup creado: {backup}");
                 }
 
                 // Copiar con permisos root
-                ShellHelper.EjecutarComoRoot($"cp {temp} {path}");
+                ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{path}\"");
 
                 // Permisos correctos
-                ShellHelper.EjecutarComoRoot($"chmod 644 {path}");
+                ShellHelper.EjecutarComoRoot($"chmod 644 \"{path}\"");
+                ShellHelper.EjecutarComoRoot($"chown root:root \"{path}\"");
 
                 LogService.Write($"[CFG] Config guardada correctamente: {path}");
             }

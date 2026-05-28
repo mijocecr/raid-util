@@ -41,7 +41,8 @@ namespace RAID_Util.Helpers
                 using var process = new Process { StartInfo = psi };
                 process.Start();
 
-                const int timeoutMs = 15000;
+                const int timeoutMs = 300000; // 5 minutos
+
 
                 if (!process.WaitForExit(timeoutMs))
                 {
@@ -103,7 +104,8 @@ namespace RAID_Util.Helpers
 
                 process.StandardInput.Close();
 
-                const int timeoutMs = 15000;
+                const int timeoutMs = 300000; // 5 minutos
+
 
                 if (!process.WaitForExit(timeoutMs))
                 {

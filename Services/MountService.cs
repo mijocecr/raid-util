@@ -14,11 +14,8 @@ namespace RAID_Util.Services
             if (!File.Exists("/proc/mounts"))
                 return false;
 
-            var lines = File.ReadAllLines("/proc/mounts");
-
-            foreach (var line in lines)
+            foreach (var line in File.ReadAllLines("/proc/mounts"))
             {
-                // Coincidencia exacta del punto de montaje
                 var parts = line.Split(' ');
                 if (parts.Length >= 2 && parts[1] == mountPoint)
                     return true;
@@ -28,24 +25,57 @@ namespace RAID_Util.Services
         }
 
         // ============================
-        // 2) MONTAR
+        // 2) MONTAR (universal, blindado)
         // ============================
+      
+        
         public static bool Mount(string device, string mountPoint, string options = "defaults")
         {
-            // Crear carpeta si no existe
             ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
 
-            // Evitar montar dos veces
             if (IsMounted(mountPoint))
                 return true;
 
+            // Ejecutar lsblk y limpiar el output
+            var fsResult = ShellHelper.EjecutarComoRoot(
+                $"lsblk -no FSTYPE \"{device}\""
+            );
+
+            string fsType = fsResult.Stdout
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]
+                .Trim()
+                .ToLower();
+
+            if (string.IsNullOrWhiteSpace(fsType))
+                fsType = "unknown";
+
+            string finalOpts = options;
+
+            // FS no POSIX → necesitan uid/gid/umask
+            if (fsType is "exfat" or "vfat" or "ntfs")
+            {
+                if (!finalOpts.Contains("uid="))
+                    finalOpts += ",uid=1000";
+
+                if (!finalOpts.Contains("gid="))
+                    finalOpts += ",gid=1000";
+
+                if (!finalOpts.Contains("umask="))
+                    finalOpts += ",umask=0002";
+            }
+
+            finalOpts = finalOpts.TrimStart(',');
+
             var r = ShellHelper.EjecutarComoRoot(
-                $"mount -o {options} \"{device}\" \"{mountPoint}\""
+                $"mount -o {finalOpts} \"{device}\" \"{mountPoint}\""
             );
 
             return r.ExitCode == 0;
         }
 
+
+        
+        
         // ============================
         // 3) DESMONTAR
         // ============================
@@ -54,7 +84,6 @@ namespace RAID_Util.Services
             if (!IsMounted(mountPoint))
                 return true;
 
-            // -f para arrays RAID o dispositivos ocupados
             var r = ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
             return r.ExitCode == 0;
         }

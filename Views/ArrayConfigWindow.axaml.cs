@@ -43,10 +43,10 @@ namespace RAID_Util.Views
             TgSync.IsChecked = _config.Mount_Sync;
             TgReadOnly.IsChecked = _config.Mount_ReadOnly;
 
-            // ⭐ Persistencia real (fstab)
+            // Persistencia real (fstab)
             TgPersistMount.IsChecked = _config.PersistMount;
 
-            // ⭐ NEW: Mount permissions
+            // Mount permissions
             TxtMountPermissions.Text = _config.MountPermissions;
 
             // Performance
@@ -108,12 +108,12 @@ namespace RAID_Util.Views
             await dlg.ShowDialog(this);
         }
 
+        // ============================================================
+        // ⭐ BuildMountOptions FINAL (sin "users", sin basura)
+        // ============================================================
         private string BuildMountOptions()
         {
             var opts = new List<string>();
-
-            // ⭐ Permitir desmontar sin sudo (cualquier usuario)
-            opts.Add("users");
 
             if (TgNoAtime.IsChecked == true) opts.Add("noatime");
             if (TgNoDirAtime.IsChecked == true) opts.Add("nodiratime");
@@ -121,11 +121,7 @@ namespace RAID_Util.Views
             if (TgSync.IsChecked == true) opts.Add("sync");
             if (TgReadOnly.IsChecked == true) opts.Add("ro");
 
-            // Si solo está "users", añadimos defaults
-            if (opts.Count == 1)
-                opts.Add("defaults");
-
-            return string.Join(",", opts);
+            return opts.Count == 0 ? "defaults" : string.Join(",", opts);
         }
 
         private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
@@ -212,7 +208,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // ⭐ 5) VALIDACIÓN DE PERMISOS
+            // 5) VALIDACIÓN DE PERMISOS
             // ============================
             if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text))
             {
@@ -227,14 +223,12 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 6) SI ES VÁLIDO → GUARDAR CONFIG
+            // 6) GUARDAR CONFIG
             // ============================
 
-            // Identity
             _config.Name = TxtName.Text ?? "";
             _config.FsLabel = TxtFsLabel.Text ?? "";
 
-            // Mount
             _config.MountPoint = TxtMountPoint.Text ?? "";
             _config.Mount_NoAtime = TgNoAtime.IsChecked ?? false;
             _config.Mount_NoDirAtime = TgNoDirAtime.IsChecked ?? false;
@@ -242,17 +236,13 @@ namespace RAID_Util.Views
             _config.Mount_Sync = TgSync.IsChecked ?? false;
             _config.Mount_ReadOnly = TgReadOnly.IsChecked ?? false;
 
-            // ⭐ Persistencia real
             _config.PersistMount = TgPersistMount.IsChecked ?? false;
 
-            // ⭐ NEW: Mount permissions
             _config.MountPermissions = TxtMountPermissions.Text.Trim();
 
-            // Performance
             _config.ResyncPriority = (int)NumResyncPriority.Value!;
             _config.ResyncMaxSpeed = (int)NumResyncMaxSpeed.Value!;
 
-            // Alerts
             _config.AlertDegraded = TgAlertDegraded.IsChecked ?? false;
             _config.AlertDiskFail = TgAlertDiskFail.IsChecked ?? false;
             _config.AlertSlowResync = TgAlertSlowResync.IsChecked ?? false;
@@ -260,7 +250,7 @@ namespace RAID_Util.Views
             ArrayConfigService.Save(_arrayName, _config);
 
             // ============================
-            // 7) ESCRITURA EN /etc/fstab
+            // 7) FSTAB
             // ============================
 
             string device = $"/dev/{_arrayName}";
@@ -293,7 +283,7 @@ namespace RAID_Util.Views
             }
 
             // ============================
-            // 8) APLICAR CONFIG RAID REAL
+            // 8) APLICAR CONFIG RAID
             // ============================
             try
             {

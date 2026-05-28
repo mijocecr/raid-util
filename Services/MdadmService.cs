@@ -1,4 +1,3 @@
-
 using System;
 using System.IO;
 using RAID_Util.Helpers;
@@ -11,20 +10,19 @@ namespace RAID_Util.Services
         // ============================================================
         // OBTENER DETALLE REAL DEL ARRAY
         // ============================================================
-      
         public static string GetDetail(string arrayName)
         {
             string device = $"/dev/{arrayName}";
-            var result = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {device}");
+            var result = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail \"{device}\"");
             return (result.Stdout + "\n" + result.Stderr).Trim();
         }
 
-
         // ============================================================
-        // CAMBIAR VELOCIDAD DE RESYNC (CORREGIDO)
+        // CAMBIAR VELOCIDAD DE RESYNC
         // ============================================================
         public static void SetResyncSpeed(int min, int max)
         {
+            // Se asume que ya vienen validados/rangeados desde ArrayConfigService
             ShellHelper.EjecutarComoRoot($"bash -c \"echo {min} > /proc/sys/dev/raid/speed_limit_min\"");
             ShellHelper.EjecutarComoRoot($"bash -c \"echo {max} > /proc/sys/dev/raid/speed_limit_max\"");
         }
@@ -35,13 +33,13 @@ namespace RAID_Util.Services
         public static string GetMdstat()
         {
             if (!File.Exists("/proc/mdstat"))
-                return "";
+                return string.Empty;
 
             return File.ReadAllText("/proc/mdstat");
         }
 
         // ============================================================
-        // DETECTAR ARRAY DEGRADADO / ROTO (VERSIÓN COMPLETA)
+        // DETECTAR ARRAY DEGRADADO / ROTO
         // ============================================================
         public static bool IsDegraded(string arrayName)
         {
@@ -96,52 +94,26 @@ namespace RAID_Util.Services
         // ============================================================
         // APLICAR CONFIGURACIÓN RAID REAL
         // ============================================================
-       
         public static void ApplyConfig(string arrayName, ArrayConfig cfg)
         {
+            string device = $"/dev/{arrayName}";
+
             // Velocidad de resync
             SetResyncSpeed(cfg.ResyncPriority, cfg.ResyncMaxSpeed);
 
             // Read-only / Read-write
             if (cfg.Mount_ReadOnly)
-                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readonly /dev/{arrayName}");
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readonly \"{device}\"");
             else
-                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readwrite /dev/{arrayName}");
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readwrite \"{device}\"");
 
-            // Label
+            // Label (OJO: esto solo es válido para ext2/3/4)
             if (!string.IsNullOrWhiteSpace(cfg.FsLabel))
-                ShellHelper.EjecutarComoRoot($"/usr/sbin/e2label /dev/{arrayName} \"{cfg.FsLabel}\"");
+            {
+                // Aquí asumes ext*; si el FS puede ser xfs/btrfs/exfat, habría que
+                // o bien detectar FS antes, o no tocar label si no es ext*.
+                ShellHelper.EjecutarComoRoot($"/usr/sbin/e2label \"{device}\" \"{cfg.FsLabel}\"");
+            }
         }
-
-        
-        
     }
 }
-
-
-
-
-/*
- 
-   añadir discos
-   
-   quitar discos
-   
-   marcar faulty
-   
-   reemplazar discos
-   
-   reshape
-   
-   grow
-   
-   shrink
-   
-   activar bitmap
-   
-   desactivar bitmap
-   
-   
- *
- * 
- */

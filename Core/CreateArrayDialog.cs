@@ -25,7 +25,7 @@ public class CreateArrayDialog : Window
 
         Width = 450;
         Height = 500;
-        Title = "Create RAID Array";
+        Title = "Create Array";
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         CanResize = false;
 
@@ -40,14 +40,14 @@ public class CreateArrayDialog : Window
         // TITLE
         panel.Children.Add(new TextBlock
         {
-            Text = "Create RAID Array",
+            Text = "Create Array",
             FontSize = 24,
             FontWeight = FontWeight.Bold,
             HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
 
-        // FRIENDLY NAME FIELD (optional)
+        // FRIENDLY NAME FIELD
         var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         nameRow.Children.Add(new TextBlock
         {
@@ -69,11 +69,11 @@ public class CreateArrayDialog : Window
         nameRow.Children.Add(_nameBox);
         panel.Children.Add(nameRow);
 
-        // RAID LEVEL SELECTOR
+        // LEVEL SELECTOR (JBOD + RAID)
         var levelRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         levelRow.Children.Add(new TextBlock
         {
-            Text = "RAID Level:",
+            Text = "Array Type:",
             Width = 120,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = this.FindResource("BMWTextBrush") as IBrush
@@ -81,7 +81,7 @@ public class CreateArrayDialog : Window
 
         _levelSelector = new ComboBox
         {
-            ItemsSource = new[] { "RAID0", "RAID1", "RAID5", "RAID6", "RAID10" },
+            ItemsSource = new[] { "JBOD (Linear)", "RAID0", "RAID1", "RAID5", "RAID6", "RAID10" },
             SelectedIndex = 0,
             Width = 200,
             Background = this.FindResource("BMWInputBrush") as IBrush,
@@ -102,7 +102,7 @@ public class CreateArrayDialog : Window
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
 
-        // DISK LIST WITH SCROLL
+        // DISK LIST
         var diskPanel = new StackPanel { Spacing = 6 };
 
         foreach (var d in _disks)
@@ -183,14 +183,39 @@ public class CreateArrayDialog : Window
             .Select(c => (RaidDiskInfo)c.Tag)
             .ToList();
 
+        string level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
+
         if (selected.Count == 0)
         {
             _summary.Text = "Select at least one disk.";
             return;
         }
 
-        string level = _levelSelector.SelectedItem?.ToString() ?? "RAID0";
+        // JBOD (linear) summary
+        if (level == "JBOD (Linear)")
+        {
+            if (selected.Count < 2)
+            {
+                _summary.Text = "JBOD (Linear) requires at least 2 disks.";
+                return;
+            }
 
+            double sum = selected
+                .Select(d => ParseSizeToGB(d.Size))
+                .Sum();
+
+            string sizeText = sum >= 1024
+                ? $"{sum / 1024.0:F2} TB"
+                : $"{sum:F0} GB";
+
+            _summary.Text =
+                $"Type: JBOD (Linear)\n" +
+                $"Disks: {selected.Count}\n" +
+                $"Total size: {sizeText}";
+            return;
+        }
+
+        // RAID summary
         var sizesGb = selected
             .Select(d => ParseSizeToGB(d.Size))
             .Where(v => v > 0)
@@ -204,14 +229,31 @@ public class CreateArrayDialog : Window
 
         double usableGb = CalculateRaidUsableSize(level, sizesGb);
 
-        string sizeText = usableGb >= 1024
+        string sizeText2 = usableGb >= 1024
             ? $"{usableGb / 1024.0:F2} TB"
             : $"{usableGb:F0} GB";
 
         _summary.Text =
             $"Level: {level}\n" +
             $"Disks: {selected.Count}\n" +
-            $"Estimated size: {sizeText} usable";
+            $"Estimated size: {sizeText2} usable";
+    }
+
+    private string? ValidateSelection(string level, int count)
+    {
+        if (level == "JBOD (Linear)")
+            return count < 2 ? "JBOD (Linear) requires at least 2 disks." : null;
+
+        return level switch
+        {
+            "RAID0" when count < 2 => "RAID0 requires at least 2 disks.",
+            "RAID1" when count < 2 => "RAID1 requires at least 2 disks.",
+            "RAID5" when count < 3 => "RAID5 requires at least 3 disks.",
+            "RAID6" when count < 4 => "RAID6 requires at least 4 disks.",
+            "RAID10" when count < 4 => "RAID10 requires at least 4 disks.",
+            "RAID10" when count % 2 != 0 => "RAID10 requires an even number of disks.",
+            _ => null
+        };
     }
 
     private double ParseSizeToGB(string size)
@@ -247,20 +289,6 @@ public class CreateArrayDialog : Window
         return value;
     }
 
-    private string? ValidateSelection(string level, int count)
-    {
-        return level switch
-        {
-            "RAID0" when count < 2 => "RAID0 requires at least 2 disks.",
-            "RAID1" when count < 2 => "RAID1 requires at least 2 disks.",
-            "RAID5" when count < 3 => "RAID5 requires at least 3 disks.",
-            "RAID6" when count < 4 => "RAID6 requires at least 4 disks.",
-            "RAID10" when count < 4 => "RAID10 requires at least 4 disks.",
-            "RAID10" when count % 2 != 0 => "RAID10 requires an even number of disks.",
-            _ => null
-        };
-    }
-
     private double CalculateRaidUsableSize(string level, List<double> sizes)
     {
         double min = sizes.Min();
@@ -280,7 +308,7 @@ public class CreateArrayDialog : Window
     private CreateArrayResult? GetResult()
     {
         string friendlyName = _nameBox.Text?.Trim() ?? "";
-        string level = _levelSelector.SelectedItem?.ToString() ?? "RAID0";
+        string level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
 
         var selected = _diskChecks
             .Where(c => c.IsChecked == true)
@@ -297,15 +325,22 @@ public class CreateArrayDialog : Window
         string? error = ValidateSelection(level, selected.Count);
         if (error != null)
         {
-            new ConfirmDialog("Invalid RAID configuration", error)
+            new ConfirmDialog("Invalid configuration", error)
                 .ShowDialog(this);
             return null;
         }
 
+        // Convert UI label to mdadm level
+        string mdadmLevel = level switch
+        {
+            "JBOD (Linear)" => "linear",
+            _ => level
+        };
+
         return new CreateArrayResult
         {
             FriendlyName = friendlyName,
-            Level = level,
+            Level = mdadmLevel,
             Disks = selected
         };
     }

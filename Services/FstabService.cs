@@ -36,17 +36,17 @@ namespace RAID_Util.Services
         {
             try
             {
-                var result = ShellHelper.EjecutarComoRoot($"blkid {device}");
-                string output = result.Stdout + result.Stderr;
+                var result = ShellHelper.EjecutarComoRoot($"blkid \"{device}\"");
+                string output = (result.Stdout + result.Stderr).ToLower();
 
-                if (output.Contains("TYPE=\"ext4\"")) return "ext4";
-                if (output.Contains("TYPE=\"xfs\"")) return "xfs";
-                if (output.Contains("TYPE=\"btrfs\"")) return "btrfs";
-                if (output.Contains("TYPE=\"f2fs\"")) return "f2fs";
-                if (output.Contains("TYPE=\"vfat\"")) return "vfat";
-                if (output.Contains("TYPE=\"exfat\"")) return "exfat";
-                if (output.Contains("TYPE=\"ntfs\"")) return "ntfs";
-                if (output.Contains("TYPE=\"swap\"")) return "swap";
+                if (output.Contains("type=\"ext4\"")) return "ext4";
+                if (output.Contains("type=\"xfs\"")) return "xfs";
+                if (output.Contains("type=\"btrfs\"")) return "btrfs";
+                if (output.Contains("type=\"f2fs\"")) return "f2fs";
+                if (output.Contains("type=\"vfat\"")) return "vfat";
+                if (output.Contains("type=\"exfat\"")) return "exfat";
+                if (output.Contains("type=\"ntfs\"")) return "ntfs";
+                if (output.Contains("type=\"swap\"")) return "swap";
             }
             catch { }
 
@@ -63,31 +63,26 @@ namespace RAID_Util.Services
             if (!File.Exists(FstabPath))
                 ShellHelper.EjecutarComoRoot($"touch \"{FstabPath}\"");
 
-            var lines = File.ReadAllLines(FstabPath).ToList();
+            // Validación básica
+            if (mountPoint.Contains(" "))
+                throw new Exception("Mount point cannot contain spaces in /etc/fstab.");
 
-            // Normalizar espacios
+            var lines = File.ReadAllLines(FstabPath).ToList();
             List<string> cleaned = new();
 
             foreach (var line in lines)
             {
                 string trimmed = line.Trim();
 
-                // Saltar comentarios
-                if (trimmed.StartsWith("#"))
-                {
-                    cleaned.Add(line);
-                    continue;
-                }
-
-                // Saltar líneas vacías
-                if (string.IsNullOrWhiteSpace(trimmed))
+                // Mantener comentarios y líneas vacías
+                if (trimmed.StartsWith("#") || string.IsNullOrWhiteSpace(trimmed))
                 {
                     cleaned.Add(line);
                     continue;
                 }
 
                 // Parsear columnas
-                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
 
                 if (parts.Length >= 2)
                 {
@@ -114,6 +109,7 @@ namespace RAID_Util.Services
             // Copiar con permisos root
             ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
             ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
+            ShellHelper.EjecutarComoRoot($"chown root:root \"{FstabPath}\"");
         }
 
         // ============================================================
@@ -139,7 +135,7 @@ namespace RAID_Util.Services
                     continue;
                 }
 
-                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
 
                 if (parts.Length >= 1)
                 {
@@ -158,6 +154,7 @@ namespace RAID_Util.Services
 
             ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
             ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
+            ShellHelper.EjecutarComoRoot($"chown root:root \"{FstabPath}\"");
         }
     }
 }

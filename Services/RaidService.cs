@@ -785,31 +785,31 @@ public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendly
 {
     try
     {
-        // ⭐ 1. Detectar automáticamente el siguiente mdX libre
-        string mdName = GetNextFreeMdName();     // ej: md2
+        string mdName = GetNextFreeMdName();
         string arrayPath = $"/dev/{mdName}";
-
-        // Guardar para CreateRealArray
         LastCreatedMdName = mdName;
 
-        // ⭐ 2. Normalizar nivel RAID (RAID1 → 1)
-        string levelNum = level.Replace("RAID", "").Trim();
+        // ⭐ Normalizar nivel RAID
+        string mdadmLevel = level.ToLower() switch
+        {
+            "linear" => "linear",
+            "jbod" => "linear",
+            "jbod (linear)" => "linear",
+            _ => level.Replace("RAID", "").Trim()
+        };
 
-        // ⭐ 3. Lista de discos
         string deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
 
-        // ⭐ 4. Nombre amigable opcional
         string nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
             ? mdName
             : friendlyName.Trim();
 
-        // ⭐ 5. Comando mdadm robusto y moderno
         string cmd =
             $"/usr/sbin/mdadm --create {arrayPath} " +
             $"--verbose " +
             $"--metadata=1.2 " +
             $"--name={nameForMdadm} " +
-            $"--level={levelNum} " +
+            $"--level={mdadmLevel} " +
             $"--raid-devices={disks.Count} " +
             $"{deviceList} --force --run";
 
@@ -824,7 +824,6 @@ public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendly
             return false;
         }
 
-        // ⭐ 6. Esperar a que udev cree /dev/mdX
         ShellHelper.EjecutarComoRoot("udevadm settle");
 
         LogService.Write($"[CREATE] Array creado correctamente → {arrayPath}");
@@ -837,6 +836,7 @@ public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendly
         return false;
     }
 }
+
 
 
 

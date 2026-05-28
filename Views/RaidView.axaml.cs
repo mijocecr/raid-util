@@ -838,7 +838,6 @@ private Border BuildArrayCard(RaidArrayInfo array)
         Margin = new Thickness(0, 0, 0, 10)
     };
 
-    // Fila de botones
     var buttonsRow = new StackPanel
     {
         Orientation = Orientation.Horizontal,
@@ -846,7 +845,6 @@ private Border BuildArrayCard(RaidArrayInfo array)
         HorizontalAlignment = HorizontalAlignment.Right
     };
 
-    // Botón Mount / Unmount
     var btnMount = new Button
     {
         Content = isMounted ? "Unmount" : "Mount",
@@ -864,8 +862,8 @@ private Border BuildArrayCard(RaidArrayInfo array)
         }
         else
         {
-            // Construir opciones de montaje (igual que en ConfigWindow)
-            var opts = new List<string> { "users" };
+            // SOLO flags del usuario
+            var opts = new List<string>();
 
             if (cfg.Mount_NoAtime) opts.Add("noatime");
             if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
@@ -873,21 +871,19 @@ private Border BuildArrayCard(RaidArrayInfo array)
             if (cfg.Mount_Sync) opts.Add("sync");
             if (cfg.Mount_ReadOnly) opts.Add("ro");
 
-            if (opts.Count == 1)
-                opts.Add("defaults");
-
-            string mountOpts = string.Join(",", opts);
+            string mountOpts = opts.Count == 0
+                ? "defaults"
+                : string.Join(",", opts);
 
             MountService.Mount($"/dev/{array.Name}", mountPoint, mountOpts);
 
-            // Aplicar permisos
+            // chmod solo afecta a FS POSIX (ext4/xfs/btrfs/f2fs)
             ShellHelper.EjecutarComoRoot($"chmod {cfg.MountPermissions} \"{mountPoint}\"");
         }
 
-        BuildUI(); // refrescar tarjeta
+        BuildUI();
     };
 
-    // Botón Open
     var btnOpen = new Button
     {
         Content = "Open",
@@ -904,15 +900,11 @@ private Border BuildArrayCard(RaidArrayInfo array)
             DesktopHelper.OpenPath(mountPoint);
     };
 
-
-
-
     buttonsRow.Children.Add(btnMount);
     buttonsRow.Children.Add(btnOpen);
 
     panel.Children.Add(buttonsRow);
 
-    // Ruta de montaje
     panel.Children.Add(new TextBlock
     {
         Text = $"Mount Path: {mountPoint}",
@@ -923,6 +915,8 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     return panel;
 }
+
+
 
 
 
