@@ -4,6 +4,9 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using RAID_Util.Services;
 using System.Threading.Tasks;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace RAID_Util.Core
 {
@@ -67,26 +70,22 @@ namespace RAID_Util.Core
                 Foreground = this.FindResource("BMWTextBrush") as IBrush
             });
 
-            // ⭐ Lista de FS alineada con NormalizeFs()
+            // ⭐ Construir lista dinámica de FS
+            var fsList = new List<string> { "ext4", "xfs", "btrfs", "swap" };
+
+            if (HasF2FS())
+                fsList.Add("f2fs");
+
             _fsSelector = new ComboBox
             {
-                ItemsSource = new[]
-                {
-                    "ext4",
-                    "xfs",
-                    "btrfs",
-                    "f2fs",
-                    "vfat (FAT32)",
-                    "exfat",
-                    "ntfs",
-                    "swap"
-                },
+                ItemsSource = fsList,
                 SelectedIndex = 0,
                 Width = 180,
                 Background = this.FindResource("BMWInputBrush") as IBrush,
                 Foreground = this.FindResource("BMWTextBrush") as IBrush,
                 BorderBrush = this.FindResource("BMWBorderBrush") as IBrush
             };
+
             fsRow.Children.Add(_fsSelector);
             panel.Children.Add(fsRow);
 
@@ -160,6 +159,20 @@ namespace RAID_Util.Core
             root.Children.Add(buttons);
 
             Content = root;
+        }
+
+        // ⭐ Detectar si mkfs.f2fs está instalado
+        private bool HasF2FS()
+        {
+            string[] paths =
+            {
+                "/usr/bin/mkfs.f2fs",
+                "/usr/sbin/mkfs.f2fs",
+                "/sbin/mkfs.f2fs",
+                "/bin/mkfs.f2fs"
+            };
+
+            return paths.Any(File.Exists);
         }
 
         private async void OnFormatClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

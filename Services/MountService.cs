@@ -36,10 +36,8 @@ namespace RAID_Util.Services
             if (IsMounted(mountPoint))
                 return true;
 
-            // Ejecutar lsblk y limpiar el output
-            var fsResult = ShellHelper.EjecutarComoRoot(
-                $"lsblk -no FSTYPE \"{device}\""
-            );
+            // Detectar filesystem
+            var fsResult = ShellHelper.EjecutarComoRoot($"lsblk -no FSTYPE \"{device}\"");
 
             string fsType = fsResult.Stdout
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]
@@ -51,7 +49,7 @@ namespace RAID_Util.Services
 
             string finalOpts = options;
 
-            // FS no POSIX → necesitan uid/gid/umask
+            // FS no POSIX → uid/gid/umask
             if (fsType is "exfat" or "vfat" or "ntfs")
             {
                 if (!finalOpts.Contains("uid="))
@@ -70,8 +68,19 @@ namespace RAID_Util.Services
                 $"mount -o {finalOpts} \"{device}\" \"{mountPoint}\""
             );
 
-            return r.ExitCode == 0;
+            if (r.ExitCode != 0)
+                return false;
+
+            // ⭐ FIX UNIVERSAL PARA DEBIAN Y TODOS LOS POSIX FS
+            if (fsType is "ext4" or "xfs" or "btrfs" or "f2fs")
+            {
+                ShellHelper.EjecutarComoRoot($"chown 1000:1000 \"{mountPoint}\"");
+                ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
+            }
+
+            return true;
         }
+
 
 
         
