@@ -1,0 +1,42 @@
+<UserControl
+    x:Class="RAID_Util.Views.DisksView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid RowDefinitions="Auto,*"
+          Margin="10"
+          RowSpacing="10">
+
+        <!-- HEADER -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                Padding="12"
+                CornerRadius="4"
+                BorderBrush="{DynamicResource BMWBorderBrush}"
+                BorderThickness="1">
+
+            <StackPanel>
+                <TextBlock Text="Disk Workshop"
+                           FontSize="22"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource BMWTextBrush}" />
+
+                <TextBlock Text="Inspect and prepare physical disks for RAID or JBOD."
+                           FontSize="14"
+                           Foreground="{DynamicResource BMWTextDimBrush}" />
+            </StackPanel>
+        </Border>
+
+        <!-- LISTA SCROLLEABLE -->
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto">
+
+            <StackPanel x:Name="DiskList"
+                        Spacing="10"
+                        Margin="0 0 0 10"
+                        HorizontalAlignment="Stretch" />
+        </ScrollViewer>
+
+    </Grid>
+
+</UserControl>

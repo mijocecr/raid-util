@@ -68,7 +68,8 @@ namespace RAID_Util.Services
                     Role = "Unknown",
                     ArrayName = "",
                     IsRotational = isRotational,
-                    Icon = GetDiskIcon(name, model, isRotational)   // ⭐ ICONO REAL ⭐
+                    Icon = DiskIconService.GetIcon(name, model, isRotational)
+
                 };
 
                 string mdadmInfo = await RunMdadmAsync($"--examine /dev/{name}");
@@ -93,33 +94,7 @@ namespace RAID_Util.Services
         //  ICONOS REALES POR TIPO DE DISCO
         // ============================================================
 
-        private string GetDiskIcon(string name, string model, bool isRotational)
-        {
-            string lowerName = name.ToLowerInvariant();
-            string lowerModel = model.ToLowerInvariant();
-
-            // NVMe
-            if (lowerName.StartsWith("nvme"))
-                return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
-
-            // USB
-            if (lowerModel.Contains("usb"))
-                return "avares://RAID-Util/Assets/Icons/disk-usb.png";
-
-            // Virtual Disk (VMware, QEMU, VirtualBox…)
-            if (lowerModel.Contains("virtual") ||
-                lowerModel.Contains("vmware") ||
-                lowerModel.Contains("qemu") ||
-                lowerModel.Contains("vbox"))
-                return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
-
-            // HDD
-            if (isRotational)
-                return "avares://RAID-Util/Assets/Icons/disk-hdd.png";
-
-            // SSD SATA
-            return "avares://RAID-Util/Assets/Icons/disk-ssd.png";
-        }
+       
 
         // ============================================================
         //  PARSER ROBUSTO PARA ROTA
@@ -607,17 +582,16 @@ private string NormalizeFs(string fs)
         //  HELPERS
         // ============================================================
 
+        
         private async Task<RaidDiskInfo> GetDiskInfo(string device)
         {
-            // Normalizar nombre
             string name = device.Replace("/dev/", "").Trim();
 
-            // ⭐ Si es partición (sdc1, nvme0n1p1), obtener el disco padre
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
-                name = name.Substring(0, 3); // sdc1 → sdc
+                name = name.Substring(0, 3);
 
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
-                name = name.Split('p')[0]; // nvme0n1p1 → nvme0n1
+                name = name.Split('p')[0];
 
             string json = await ShellHelper.RunCleanAsync(
                 $"lsblk -J -o NAME,MODEL,SIZE,ROTA,TYPE /dev/{name}"
@@ -627,14 +601,8 @@ private string NormalizeFs(string fs)
                 return CreateUnknownDisk(name);
 
             dynamic data;
-            try
-            {
-                data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!;
-            }
-            catch
-            {
-                return CreateUnknownDisk(name);
-            }
+            try { data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!; }
+            catch { return CreateUnknownDisk(name); }
 
             if (data.blockdevices == null || data.blockdevices.Count == 0)
                 return CreateUnknownDisk(name);
@@ -643,11 +611,9 @@ private string NormalizeFs(string fs)
 
             string model = dev.model ?? "Unknown";
             string size = dev.size ?? "Unknown";
-            bool isRotational = dev.rota == 1;
-            string type = dev.type ?? "disk";
+            bool isRotational = ParseRota(dev.rota);
 
-            // ⭐ Elegir icono según tipo
-            string icon = isRotational ? "hdd" : "ssd";
+            string icon = DiskIconService.GetIcon(name, model, isRotational);
 
             return new RaidDiskInfo
             {
@@ -655,9 +621,12 @@ private string NormalizeFs(string fs)
                 Model = model,
                 Size = size,
                 Icon = icon,
+                IsRotational = isRotational,
                 ArrayName = ""
             };
         }
+
+        
 
         private RaidDiskInfo CreateUnknownDisk(string name)
         {
@@ -666,7 +635,8 @@ private string NormalizeFs(string fs)
                 Name = name,
                 Model = "Unknown",
                 Size = "Unknown",
-                Icon = "unknown",
+                Icon = DiskIconService.GetIcon(name, "Unknown", false),
+
                 ArrayName = ""
             };
         }

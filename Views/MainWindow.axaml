@@ -93,6 +93,7 @@
             <TabItem>
                 <TabItem.Header>
                     <TextBlock Text="Status" Tag="0"
+                               PointerPressed="onStatus_Clicked"
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
@@ -103,6 +104,7 @@
             <TabItem>
                 <TabItem.Header>
                     <TextBlock Text="RAID" Tag="1"
+                               PointerPressed="onRaid_Clicked"
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
@@ -111,30 +113,24 @@
 
             </TabItem>
 
-            <!-- JBOD TAB -->
-            <TabItem>
-                <TabItem.Header>
-                    <TextBlock Text="JBOD" Tag="2"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
-                </TabItem.Header>
-
-                <Grid/>
-            </TabItem>
-
+          
             <!-- DISKS TAB -->
             <TabItem>
                 <TabItem.Header>
-                    <TextBlock Text="Disks" Tag="3"
+                    <TextBlock Text="Disks" Tag="2"
+                               PointerPressed="onDisks_Clicked"
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 
-                <Grid/>
+                <views1:DisksView x:Name="DisksViewControl"/>
+                
             </TabItem>
 
             <!-- LOGS TAB -->
             <TabItem>
                 <TabItem.Header>
-                    <TextBlock Text="Logs" Tag="4"
+                    <TextBlock Text="Logs" Tag="3"
+                               PointerPressed="onLogss_Clicked"
                                Foreground="{DynamicResource BMWTextBrush}"/>
                 </TabItem.Header>
 

@@ -29,19 +29,25 @@
                 <Button Grid.Row="0" Grid.Column="0"
                         Content="Create Array"
                         HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        BorderBrush="{DynamicResource BMWAccentBrush}"
                         x:Name="BtnCreateArray"
                         Classes="HeaderButton"/>
 
                 <Button Grid.Row="0" Grid.Column="1"
                         Content="Refresh"
                         HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        BorderBrush="{DynamicResource BMWAccentBrush}"
                         x:Name="BtnRefreshArrays"
                         Classes="HeaderButton"/>
 
                 <Button Grid.Row="0" Grid.Column="2"
                         Content="Config"
                         HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
                         x:Name="BtnConfigArrays"
+                        BorderBrush="{DynamicResource BMWAccentBrush}"
                         Classes="HeaderButton"/>
 
                 <!-- FILA 2 -->
@@ -49,24 +55,31 @@
                         Content="Assemble"
                         HorizontalAlignment="Stretch"
                         x:Name="BtnAssembleArrays"
-                        Background="Green"
-                        Foreground="WhiteSmoke"
+                        HorizontalContentAlignment="Center"
+                        
+                        BorderBrush="{DynamicResource BMWHealthHealthyBrush}"
+                        
                         Classes="HeaderButton"/>
 
                 <Button Grid.Row="1" Grid.Column="1"
                         Content="Initialize"
                         HorizontalAlignment="Stretch"
                         x:Name="BtnInitialize"
-                        Foreground="Black"
-                        Background="Orange"
+                        HorizontalContentAlignment="Center"
+                        
+                        BorderBrush="{DynamicResource BMWHealthWarningBrush}"
                         Classes="HeaderButton"/>
 
                 <Button Grid.Row="1" Grid.Column="2"
                         Content="Delete Array"
                         HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
                         x:Name="BtnDeleteArray"
-                        Background="Red"
-                        Foreground="WhiteSmoke"/>
+                        BorderBrush="{DynamicResource BMWHealthCriticalBrush}"
+                        
+                        />
+                        
+                        
             </Grid>
         </Border>
 

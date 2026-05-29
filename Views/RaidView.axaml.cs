@@ -1185,9 +1185,19 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
         // SMART INFO
         // --------------------------------------------------------
         case "smart":
+        {
             string info = await service.GetSmartInfoAsync(disk.Name);
-            ShowSmartDialog(info, disk.Name);
+
+            var dlg = new ConsoleDialog($"SMART — {disk.Name}", info);
+            var owner = this.GetVisualRoot() as Window;
+
+            if (owner != null)
+                await dlg.ShowDialog(owner);
+            else
+                await dlg.ShowDialog(new Window());
+
             break;
+        }
 
         // --------------------------------------------------------
         // MARK AS FAULTY
@@ -1289,31 +1299,6 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
     }
 
     BuildUI();
-}
-
-
-
-private void ShowSmartDialog(string text, string diskName)
-{
-    var dialog = new Window
-    {
-        Title = $"SMART — {diskName}",
-        Width = 600,
-        Height = 500,
-        Content = new ScrollViewer
-        {
-            Content = new TextBlock
-            {
-                Text = text,
-                FontFamily = "Consolas",
-                FontSize = 13,
-                Background = Brushes.Black,
-                Foreground = Brushes.LightGreen
-            }
-        }
-    };
-
-    dialog.Show();
 }
 
 
@@ -2152,9 +2137,21 @@ private Window GetWindow()
         // DETAILS
         // --------------------------------------------------------
         case "details":
+        {
             string detail = await service.GetArrayDetailsAsync(array.Name);
-            ShowArrayDetailsDialog(detail, array.Name);
+
+            var dlg = new ConsoleDialog($"Array Details — {array.Name}", detail);
+            var owner = this.GetVisualRoot() as Window;
+
+            if (owner != null)
+                await dlg.ShowDialog(owner);
+            else
+                await dlg.ShowDialog(new Window());
+
             break;
+        }
+
+        
 
         default:
             await ShowConfirm("Error", "Unknown action.");
@@ -2165,35 +2162,7 @@ private Window GetWindow()
 }
 
    
-  //--------------Boton More------------------//
-   
-   private void ShowArrayDetailsDialog(string text, string arrayName)
-   {
-       var dialog = new Window
-       {
-           Title = $"Array Details — {arrayName}",
-           Width = 600,
-           Height = 500,
-           Content = new ScrollViewer
-           {
-               Content = new TextBlock
-               {
-                   Text = text,
-                   FontFamily = "Consolas",
-                   FontSize = 13,
-                   Background = Brushes.Black,
-                   Foreground = Brushes.LightGreen
-               }
-           }
-       };
-
-       dialog.Show();
-   }
-
-   
-
-   
-   //-------------Boton More-----------------//
+  
     
    private async void StartArrayResync(RaidArrayInfo array)
    {

@@ -39,105 +39,119 @@ public partial class MainWindow : Window
         MainTabs.SelectionChanged += OnTabChanged;
     }
 
-   protected override async void OnOpened(EventArgs e)
-{
-    base.OnOpened(e);
-
-    LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
-
-    // ⭐ FIX: If FakeData is active, skip all backend initialization
-    if (RaidViewControl != null && RaidViewControl.IsFakeMode)
+    protected override async void OnOpened(EventArgs e)
     {
-        LogService.Write("[MAIN] FakeData mode detected → skipping sudo, mdadm and backend initialization.");
-        StatusBarText.Text = "Fake data mode.";
-        _sudoReady = true;
-        _raidLoaded = true;
-        return;
-    }
+        base.OnOpened(e);
 
-    _config = ConfigManager.Load();
-    LogService.Debug("[MAIN] Configuration loaded.");
+        LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
 
-    StatusBarText.Text = "Initializing...";
-    await Task.Delay(120);
-
-    const int maxAttempts = 2;
-    int attempts = 0;
-
-    while (true)
-    {
-        attempts++;
-
-        LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
-        await SolicitarPassword();
-
-        if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
+        // ⭐ MODO FAKE: no tocar sudo ni mdadm, pero sí inicializar vistas en fake
+        if (RaidViewControl != null && RaidViewControl.IsFakeMode)
         {
-            StatusBarText.Text = "Initialization aborted.";
-            LogService.Error("[MAIN] Initialization aborted: no password provided.");
-            return;
-        }
+            LogService.Write("[MAIN] FakeData mode detected → skipping sudo, mdadm and backend initialization.");
+            StatusBarText.Text = "Fake data mode.";
 
-        StatusBarText.Text = "Validating password...";
-        LogService.Debug("[MAIN] Validating admin password...");
-
-        var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
-
-        LogService.Debug($"[MAIN] sudo test exit={exit}");
-        LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
-        if (!string.IsNullOrWhiteSpace(stderr))
-            LogService.Debug($"[MAIN] sudo test stderr='{stderr.Trim()}'");
-
-        if (exit == 0)
-        {
-            LogService.Write("[MAIN] Password validated successfully.");
             _sudoReady = true;
-            break;
-        }
+            _raidLoaded = true;
 
-        var dlg = new IncorrectPasswordDialog();
-        await dlg.ShowDialog(this);
+            if (DisksViewControl != null)
+            {
+                LogService.Debug("[MAIN] Inicializando DisksView en modo fake.");
+                DisksViewControl.Initialize(sudoReady: true, forceFake: true);
+            }
 
-        if (attempts >= maxAttempts)
-        {
-            StatusBarText.Text = "Too many failed attempts.";
-            Close();
             return;
         }
+
+        _config = ConfigManager.Load();
+        LogService.Debug("[MAIN] Configuration loaded.");
+
+        StatusBarText.Text = "Initializing...";
+        await Task.Delay(120);
+
+        const int maxAttempts = 2;
+        int attempts = 0;
+
+        while (true)
+        {
+            attempts++;
+
+            LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
+            await SolicitarPassword();
+
+            if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
+            {
+                StatusBarText.Text = "Initialization aborted.";
+                LogService.Error("[MAIN] Initialization aborted: no password provided.");
+                return;
+            }
+
+            StatusBarText.Text = "Validating password...";
+            LogService.Debug("[MAIN] Validating admin password...");
+
+            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
+
+            LogService.Debug($"[MAIN] sudo test exit={exit}");
+            LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
+            if (!string.IsNullOrWhiteSpace(stderr))
+                LogService.Debug($"[MAIN] sudo test stderr='{stderr.Trim()}'");
+
+            if (exit == 0)
+            {
+                LogService.Write("[MAIN] Password validated successfully.");
+                _sudoReady = true;
+
+                // ⭐ Inicializar DisksView ahora que sudo está listo
+                if (DisksViewControl != null)
+                {
+                    LogService.Debug("[MAIN] Inicializando DisksView después de validar sudo.");
+                    DisksViewControl.Initialize(_sudoReady, forceFake: false);
+                }
+
+                break;
+            }
+
+            var dlg = new IncorrectPasswordDialog();
+            await dlg.ShowDialog(this);
+
+            if (attempts >= maxAttempts)
+            {
+                StatusBarText.Text = "Too many failed attempts.";
+                Close();
+                return;
+            }
+        }
+
+        StatusBarText.Text = "Checking RAID subsystem...";
+        var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
+
+        LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
+
+        if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
+        {
+            StatusBarText.Text = "RAID subsystem unavailable.";
+            LogService.Error("[MAIN] RAID subsystem unavailable (mdadm not found).");
+            return;
+        }
+
+        await Task.Delay(120);
+
+        StatusBarText.Text = "System ready.";
+
+        _timerManager = new TimerManager(
+            statusView: StatusViewControl,
+            logsView: LogsViewControl,
+            generalRefreshMs: _config.GeneralRefreshMs,
+            rebuildRefreshMs: _config.RebuildRefreshMs,
+            hotplugRefreshMs: _config.HotplugRefreshMs
+        );
+
+        _timerManager.StartAll();
+
+        LogService.Debug($"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
+        StatusBarText.Text = "Ready.";
     }
 
-    StatusBarText.Text = "Checking RAID subsystem...";
-    var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
-
-    LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
-
-    if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
-    {
-        StatusBarText.Text = "RAID subsystem unavailable.";
-        LogService.Error("[MAIN] RAID subsystem unavailable (mdadm not found).");
-        return;
-    }
-
-    await Task.Delay(120);
-
-    StatusBarText.Text = "System ready.";
-
-    _timerManager = new TimerManager(
-        statusView: StatusViewControl,
-        logsView: LogsViewControl,
-        generalRefreshMs: _config.GeneralRefreshMs,
-        rebuildRefreshMs: _config.RebuildRefreshMs,
-        hotplugRefreshMs: _config.HotplugRefreshMs
-    );
-
-    _timerManager.StartAll();
-
-    LogService.Debug($"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
-    StatusBarText.Text = "Ready.";
-}
-
-    
-    
     private async Task SolicitarPassword()
     {
         var dialog = new PasswordDialog();
@@ -148,6 +162,16 @@ public partial class MainWindow : Window
     private async void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
         LogService.Debug($"[MAIN] TabIndexChanged → SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
+
+        // ⭐ Inicializar DisksView si el usuario abre la pestaña Disks
+        if (MainTabs.SelectedIndex == 2 && _sudoReady)
+        {
+            if (DisksViewControl != null)
+            {
+                LogService.Debug("[MAIN] Inicializando DisksView desde TabChanged.");
+                DisksViewControl.Initialize(_sudoReady, forceFake: false);
+            }
+        }
 
         if (!_sudoReady)
         {
@@ -197,9 +221,6 @@ public partial class MainWindow : Window
                 LogService.Debug($"[MAIN] Disks returned: {disks.Count}");
                 foreach (var d in disks)
                     LogService.Debug($"[MAIN] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
-
-                // TRAZA: ¿Avalonia creó el control?
-                LogService.Debug($"[MAIN] RaidViewControl is null? {RaidViewControl == null}");
 
                 if (RaidViewControl == null)
                 {
@@ -255,5 +276,24 @@ public partial class MainWindow : Window
     {
         StatusBarText.Text = text;
     }
-    
+
+    private void onStatus_Clicked(object? sender, PointerPressedEventArgs e)
+    {
+        UpdateStatus("System Overview");
+    }
+
+    private void onRaid_Clicked(object? sender, PointerPressedEventArgs e)
+    {
+        UpdateStatus("Redundant Array of Independent Disks");
+    }
+
+    private void onDisks_Clicked(object? sender, PointerPressedEventArgs e)
+    {
+        UpdateStatus("Physical Disks ");
+    }
+
+    private void onLogss_Clicked(object? sender, PointerPressedEventArgs e)
+    {
+        UpdateStatus("Raid Logs ");
+    }
 }

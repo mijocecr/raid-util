@@ -15,8 +15,8 @@
     <Border Background="#AA000000">
 
         <!-- Caja central -->
-        <Border Background="#1E1E1E"
-                BorderBrush="#3A7BFF"
+        <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                BorderBrush="{DynamicResource BMWAccentBrush}"
                 BorderThickness="2"
                 CornerRadius="12"
                 Padding="22"
@@ -28,17 +28,17 @@
 
                 <TextBlock x:Name="MessageText"
                            Text="Loading..."
-                           FontSize="16"
-                           TextWrapping="Wrap"
+                           FontSize="18"
                            FontWeight="SemiBold"
-                           Foreground="White"
-                           HorizontalAlignment="Center"/>
+                           Foreground="{DynamicResource BMWTextBrush}"
+                           HorizontalAlignment="Center"
+                           TextWrapping="Wrap"/>
 
                 <ProgressBar IsIndeterminate="True"
                              Width="260"
                              Height="8"
-                             Foreground="#3A7BFF"
-                             Background="#333"
+                             Foreground="{DynamicResource BMWAccentBrush}"
+                             Background="{DynamicResource BMWTextDimBrush}"
                              CornerRadius="4"/>
 
             </StackPanel>
