@@ -71,19 +71,33 @@ public partial class RaidView : UserControl
     private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
     {
         var service = new RaidService();
+        var parent = GetWindow();
 
-        bool ok = service.AutoAssemble();
+        // 1) Mostrar diálogo de carga
+        var loading = new LoadingDialog("Assembling arrays...");
+        loading.Show(parent);
 
+        await Task.Delay(50); // Permite renderizar el diálogo
+
+        // 2) Ejecutar AutoAssemble en segundo plano
+        bool ok = await Task.Run(() => service.AutoAssemble());
+
+        // 3) Cerrar diálogo
+        loading.Close();
+
+        // 4) Mostrar resultado
         if (!ok)
         {
             await ShowConfirm("Error", "Could not assemble stopped arrays.");
             return;
         }
 
-        await ShowConfirm("Success", "Arrays assembled correctly..");
+        await ShowConfirm("Success", "Arrays assembled correctly.");
 
+        // 5) Refrescar arrays
         BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     }
+
 
     
     private async void OnInitializeClicked(object? sender, RoutedEventArgs e)
@@ -132,7 +146,7 @@ public partial class RaidView : UserControl
     
     private async Task<bool> ShowConfirm(string title, string message)
     {
-        var dlg = new ConfirmDialog(title, message);
+        var dlg = new InfoDialog(title, message);
 
         var owner = this.GetVisualRoot() as Window;
         if (owner != null)
@@ -1953,43 +1967,63 @@ private Window GetWindow()
         return;
     }
 
-    string level = array.Level.ToUpperInvariant();
-
     if (array.Disks == null || array.Disks.Count == 0)
     {
         await ShowConfirm("Error", "This array has no disks.");
         return;
     }
 
+    // Normalizamos acción
+    string act = action?.Trim().ToLowerInvariant() ?? "";
+
     // No permitir acciones si el array está fallado
-    if (array.State == "Failed" && action != "details")
+    if (array.State == "Failed" && act != "details")
     {
         await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
         return;
     }
 
     // ============================================================
-    // VALIDACIONES POR TIPO DE RAID
+    // DETECCIÓN DE NIVELES
     // ============================================================
 
-    bool IsRaid0 = level == "RAID0";
-    bool IsRaid1 = level == "RAID1";
-    bool IsRaid5 = level == "RAID5";
-    bool IsRaid6 = level == "RAID6";
+    string level = array.Level.ToUpperInvariant();
+
+    bool IsRaid0  = level == "RAID0";
+    bool IsRaid1  = level == "RAID1";
+    bool IsRaid5  = level == "RAID5";
+    bool IsRaid6  = level == "RAID6";
     bool IsRaid10 = level == "RAID10";
 
-    // RAID0 → solo permite stop y details
+    // NUEVO: soporte real para LINEAR / JBOD
+    bool IsLinear = level.Contains("LINEAR") || level.Contains("JBOD");
+
+    // ============================================================
+    // RESTRICCIONES POR TIPO
+    // ============================================================
+
+    // RAID0 → solo stop y details
     if (IsRaid0)
     {
-        if (action != "stop" && action != "details")
+        if (act != "stop" && act != "details")
         {
-            await ShowConfirm("Error", "This RAID level (RAID0) does not support this action.");
+            await ShowConfirm("Error", "RAID0 does not support this action.");
+            return;
+        }
+    }
+
+    // LINEAR/JBOD → solo stop y details
+    if (IsLinear)
+    {
+        if (act != "stop" && act != "details")
+        {
+            await ShowConfirm("Error", "Linear/JBOD arrays do not support this action.");
             return;
         }
     }
 
     // ============================================================
-    // VALIDACIÓN DE MONTAJE READ-ONLY (REAL)
+    // VALIDACIÓN DE MONTAJE READ-ONLY
     // ============================================================
 
     bool IsMountedReadOnly = false;
@@ -2010,16 +2044,13 @@ private Window GetWindow()
     // ACCIONES
     // ============================================================
 
-    switch (action)
+    switch (act)
     {
-        // --------------------------------------------------------
-        // RESYNC / REBUILD
-        // --------------------------------------------------------
         case "resync":
 
-            if (IsRaid0)
+            if (IsRaid0 || IsLinear)
             {
-                await ShowConfirm("Error", "RAID0 cannot be rebuilt.");
+                await ShowConfirm("Error", "This RAID level does not support resync.");
                 return;
             }
 
@@ -2046,14 +2077,11 @@ private Window GetWindow()
             await ShowConfirm("Success", "Resync started.");
             break;
 
-        // --------------------------------------------------------
-        // FORCE CHECK
-        // --------------------------------------------------------
         case "check":
 
-            if (IsRaid0)
+            if (IsRaid0 || IsLinear)
             {
-                await ShowConfirm("Error", "RAID0 does not support consistency checks.");
+                await ShowConfirm("Error", "This RAID level does not support consistency checks.");
                 return;
             }
 
@@ -2073,14 +2101,11 @@ private Window GetWindow()
             await ShowConfirm("Success", "Check started.");
             break;
 
-        // --------------------------------------------------------
-        // FORCE REPAIR
-        // --------------------------------------------------------
         case "repair":
 
-            if (IsRaid0)
+            if (IsRaid0 || IsLinear)
             {
-                await ShowConfirm("Error", "RAID0 cannot be repaired.");
+                await ShowConfirm("Error", "This RAID level does not support repair.");
                 return;
             }
 
@@ -2106,36 +2131,39 @@ private Window GetWindow()
             await ShowConfirm("Success", "Repair started.");
             break;
 
-        // --------------------------------------------------------
-        // STOP ARRAY
-        // --------------------------------------------------------
         case "stop":
 
-            if (array.IsMounted)
+            // 1) Si está montado → desmontar
+            if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
             {
-                await ShowConfirm("Error", "Unmount the array before stopping it.");
+                var um = ShellHelper.EjecutarComoRoot($"umount -f \"{array.MountPath}\"");
+
+                if (um.ExitCode != 0)
+                {
+                    await ShowConfirm("Error",
+                        $"Failed to unmount array.\n\n{um.Stdout}\n{um.Stderr}");
+                    return;
+                }
+            }
+
+            // 2) Intentar detener
+            var result = await service.StopArrayAsync(array.Name);
+
+            if (result.ExitCode != 0)
+            {
+                await ShowConfirm("Error",
+                    $"Failed to stop array.\n\n{result.Stdout}\n{result.Stderr}");
                 return;
             }
 
-            if (array.State == "Rebuilding")
-            {
-                await ShowConfirm("Error", "Cannot stop array while rebuilding.");
-                return;
-            }
-
-            if (array.MountPath == "/" || array.MountPath == "/root")
-            {
-                await ShowConfirm("Error", "This array contains the root filesystem. Cannot stop.");
-                return;
-            }
-
-            await service.StopArrayAsync(array.Name);
             await ShowConfirm("Success", "Array stopped.");
+            await LoadRaidAsync();
+            
             break;
 
-        // --------------------------------------------------------
-        // DETAILS
-        // --------------------------------------------------------
+
+
+
         case "details":
         {
             string detail = await service.GetArrayDetailsAsync(array.Name);
@@ -2151,15 +2179,14 @@ private Window GetWindow()
             break;
         }
 
-        
-
         default:
-            await ShowConfirm("Error", "Unknown action.");
+            await ShowConfirm("Error", $"Unknown action '{action}'.");
             break;
     }
 
-    BuildUI();
+    
 }
+
 
    
   

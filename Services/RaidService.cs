@@ -141,10 +141,14 @@ namespace RAID_Util.Services
         //  LECTURA DE ARRAYS (SIN CAMBIOS)
         // ============================================================
 
-        public async Task<List<RaidArrayInfo>> GetArraysAsync()
+        
+public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
 
+    // ============================================================
+    // 1) mdadm --detail --scan
+    // ============================================================
     var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
     string scan = (stdout + "\n" + stderr).Trim();
 
@@ -154,6 +158,9 @@ namespace RAID_Util.Services
     if (string.IsNullOrWhiteSpace(scan))
         return arrays;
 
+    // ============================================================
+    // 2) Parsear cada ARRAY detectado
+    // ============================================================
     foreach (var raw in scan.Split('\n'))
     {
         string line = raw.Trim();
@@ -164,13 +171,15 @@ namespace RAID_Util.Services
         if (parts.Length < 2)
             continue;
 
-        // ⭐ Path real del array (ej: /dev/md0)
+        // Path real del array (ej: /dev/md0)
         string arrayPath = parts[1];
 
-        // ⭐ Nombre amigable (ej: md0 o miguelito)
+        // Nombre amigable (md0)
         string arrayName = arrayPath.Split('/').Last();
 
-        // Obtener detalle real del array
+        // ============================================================
+        // 3) Obtener detalle real del array
+        // ============================================================
         string detail = await RunMdadmAsync($"--detail {arrayPath}");
 
         Console.WriteLine("=== DETAIL OUTPUT ===");
@@ -181,15 +190,18 @@ namespace RAID_Util.Services
             continue;
 
         string state = ParseArrayState(detail);
+        string level = ParseLevel(detail);
 
-        // ⭐ Obtener discos normalizados (sdc, sdd, etc.)
+        // ============================================================
+        // 4) Obtener discos del array
+        // ============================================================
         var diskNames = await GetDisksInArrayAsync(arrayName, detail);
 
         var info = new RaidArrayInfo
         {
             Name = arrayName,
-            Path = arrayPath,          // ⭐ CRÍTICO para DeleteArrayAsync
-            Level = ParseLevel(detail),
+            Path = arrayPath,
+            Level = level,
             State = state,
             StateIcon = GetStateIcon(state),
             Disks = new List<RaidDiskInfo>(),
@@ -204,10 +216,42 @@ namespace RAID_Util.Services
             RebuildETA = ParseRebuildEta(detail)
         };
 
-        // ⭐ Normalizar nombres de discos y obtener info real
+        // ============================================================
+        // 5) Obtener MountPath e IsMounted desde lsblk
+        // ============================================================
+        try
+        {
+            string lsblk = await ShellHelper.RunCleanAsync(
+                $"lsblk -J -o NAME,MOUNTPOINT /dev/{arrayName}"
+            );
+
+            dynamic blk = Newtonsoft.Json.JsonConvert.DeserializeObject(lsblk)!;
+
+            string mount = "";
+            try
+            {
+                mount = blk.blockdevices[0].mountpoint ?? "";
+            }
+            catch
+            {
+                mount = "";
+            }
+
+            info.MountPath = mount;
+            info.IsMounted = !string.IsNullOrWhiteSpace(mount);
+        }
+        catch
+        {
+            info.MountPath = "";
+            info.IsMounted = false;
+        }
+
+        // ============================================================
+        // 6) Obtener información detallada de cada disco
+        // ============================================================
         foreach (var dev in diskNames)
         {
-            string devName = dev.Split('/').Last(); // por si acaso
+            string devName = dev.Split('/').Last();
 
             RaidDiskInfo diskInfo = await GetDiskInfo(devName);
 
@@ -221,10 +265,14 @@ namespace RAID_Util.Services
         arrays.Add(info);
     }
 
+    // ============================================================
+    // 7) Trazas finales
+    // ============================================================
     Console.WriteLine("=== ARRAYS DETECTADOS ===");
     foreach (var arr in arrays)
     {
         Console.WriteLine($"ARRAY: {arr.Name}  Level={arr.Level}  State={arr.State}");
+        Console.WriteLine($"  MountPath={arr.MountPath}  IsMounted={arr.IsMounted}");
         Console.WriteLine($"  Discos detectados: {arr.Disks.Count}");
 
         foreach (var d in arr.Disks)
@@ -900,13 +948,13 @@ public async Task<bool> ForceArrayRepairAsync(string arrayName)
     return result.ExitCode == 0;
 }
 
-public async Task<bool> StopArrayAsync(string arrayName)
+public async Task<(int ExitCode, string Stdout, string Stderr)> StopArrayAsync(string arrayName)
 {
     string cmd = $"/usr/sbin/mdadm --stop /dev/{arrayName}";
-    var result = ShellHelper.EjecutarComoRoot(cmd);
-
-    return result.ExitCode == 0;
+    return ShellHelper.EjecutarComoRoot(cmd);
 }
+
+
 
 public async Task<string> GetArrayDetailsAsync(string arrayName)
 {
