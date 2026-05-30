@@ -1542,32 +1542,51 @@ public async Task<string> GetArrayDetailsAsync(string arrayName)
             foreach (var raw in output.Split('\n'))
             {
                 string line = raw.Trim();
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
 
-                // ⭐ Solo líneas que terminan en /dev/sdX o /dev/nvmeXnY
+                // ⭐ 1) Ignorar líneas que indican SLOT VACÍO
+                // Ejemplo: "- 0 0 1 removed"
+                if (line.Contains(" removed", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // ⭐ 2) Solo procesar líneas que contengan /dev/
                 if (!line.Contains("/dev/"))
                     continue;
 
-                // ⭐ Evitar líneas que NO son discos (UUID, metadata, etc.)
-                if (!line.EndsWith("/dev/sd") &&
-                    !line.Contains("/dev/sd") &&
-                    !line.Contains("/dev/nvme"))
-                    continue;
-
+                // ⭐ 3) Separar columnas
                 string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 0)
+                if (parts.Length < 5)
                     continue;
 
+                // parts:
+                // [0] Number
+                // [1] Major
+                // [2] Minor
+                // [3] RaidDevice
+                // [4...] State + devicePath
+
+                string raidDevice = parts[3];
+
+                // ⭐ 4) Si RaidDevice es "-", el disco YA NO pertenece al array
+                if (raidDevice == "-")
+                    continue;
+
+                // ⭐ 5) Extraer el último token que debe ser /dev/xxx
                 string dev = parts[^1];
 
-                if (dev.StartsWith("/dev/"))
-                {
-                    string devName = dev.Split('/').Last();
-                    result.Add(devName);
-                }
+                if (!dev.StartsWith("/dev/"))
+                    continue;
+
+                string devName = dev.Split('/').Last();
+
+                // ⭐ 6) Añadir disco válido
+                result.Add(devName);
             }
 
             return result;
         }
+
 
         
         

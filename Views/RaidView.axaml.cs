@@ -102,6 +102,8 @@ public partial class RaidView : UserControl
         BtnConfigArrays.IsEnabled = false;
         BtnInitialize.IsEnabled = false;
 
+        foreach (var item in DiskMenu.Items.OfType<MenuItem>())
+            item.Click += OnDiskMenuItemClick;
 
         
         Console.WriteLine("[RAIDVIEW] Constructor RaidView ejecutado.");
@@ -726,7 +728,7 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     topRightPanel.Children.Add(chkSelect);
 
-    // ⭐ Botón More (usando menú estático)
+    // ⭐ Botón More
     var btnMore = new Button
     {
         Content = "More",
@@ -775,32 +777,47 @@ private Border BuildArrayCard(RaidArrayInfo array)
 
     glowBorder.Child = cardBorder;
 
-    // ⭐ Animación (no tocada)
+    // ⭐ Animación
     AnimateArrayGlow(glowBorder, glowBrush);
 
-    // ⭐ Expandir/colapsar
+    // ⭐ EXPANDIR / COLAPSAR — VERSIÓN FUNCIONAL
     cardBorder.PointerPressed += (_, _) =>
     {
         array.IsExpanded = !array.IsExpanded;
+
+        var parent = ListArrays;
+        int index = parent.Children.IndexOf(glowBorder);
 
         if (array.IsExpanded)
         {
             NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Started");
             StartMonitoringArray(array, cardBorder);
 
+            var expanded = BuildExpandedCard(array);
+            expanded.Tag = $"expanded:{array.Name}";
+            parent.Children.Insert(index + 1, expanded);
         }
-
         else
         {
             StopMonitoringArray();
             NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Stopped");
-            BuildUI();
+
+            foreach (var child in parent.Children.ToList())
+            {
+                if (child is Border b &&
+                    b.Tag is string tag &&
+                    tag == $"expanded:{array.Name}")
+                {
+                    parent.Children.Remove(b);
+                    break;
+                }
+            }
         }
-            
     };
 
     return glowBorder;
 }
+
 
 
     
@@ -1042,7 +1059,18 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
 }
 
 
-   private Border BuildDiskCard(RaidArrayInfo array, RaidDiskInfo disk)
+   // Variables globales necesarias:
+private RaidDiskInfo? _currentDisk;
+private RaidArrayInfo? _currentArray;
+
+// Handler global (fuera de BuildDiskCard)
+private async void OnDiskMenuItemClick(object? sender, EventArgs e)
+{
+    if (sender is MenuItem mi && mi.Tag is string tag && _currentDisk != null && _currentArray != null)
+        await OnDiskMenuClick(_currentArray, _currentDisk, tag);
+}
+
+private Border BuildDiskCard(RaidArrayInfo array, RaidDiskInfo disk)
 {
     Console.WriteLine($"[RAIDVIEW]   BuildDiskCard() para {disk.Name}, Icon={disk.Icon}");
 
@@ -1105,7 +1133,7 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
     // ⭐ LED SMART
     var statusDot = BuildStatusDot(disk.State);
 
-    // ⭐ Botón More (usa menú estático)
+    // ⭐ Botón More
     var manageButton = new Button
     {
         Content = "More",
@@ -1117,24 +1145,33 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
         Classes = { "IconButton" }
     };
 
-    manageButton.Click += (_, _) =>
+    // ⭐ Crear menú contextual por-disco (NO estático)
+    var menu = new ContextMenu
     {
-        DiskMenu.PlacementTarget = manageButton;
-        DiskMenu.Open(manageButton);
+        Items =
+        {
+            new MenuItem { Header = "SMART Info", Tag = "smart" },
+            new MenuItem { Header = "Mark as Faulty", Tag = "faulty" },
+            new MenuItem { Header = "Set as Spare", Tag = "spare" },
+            new MenuItem { Header = "Remove from Array", Tag = "remove" }
+        }
     };
 
-    // ⭐ Asignar handlers UNA sola vez
-    foreach (var item in DiskMenu.Items.OfType<MenuItem>())
+    // ⭐ Handlers DIRECTOS (sin variables globales)
+    foreach (var item in menu.Items.OfType<MenuItem>())
     {
-        item.Click -= DiskMenuHandler; // evitar duplicados
-        item.Click += DiskMenuHandler;
+        item.Click += async (_, _) =>
+        {
+            await OnDiskMenuClick(array, disk, item.Tag?.ToString());
+        };
     }
 
-    async void DiskMenuHandler(object? sender, EventArgs e)
+    // ⭐ Abrir menú contextual
+    manageButton.Click += (_, _) =>
     {
-        if (sender is MenuItem mi)
-            await OnDiskMenuClick(array, disk, mi.Tag?.ToString());
-    }
+        menu.PlacementTarget = manageButton;
+        menu.Open(manageButton);
+    };
 
     // ⭐ Grid principal
     var grid = new Grid
@@ -1167,12 +1204,14 @@ private async void AnimateSmartDot(Border glow, Border dot, string state)
         Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
         BorderBrush = (IBrush)Application.Current!.FindResource("BMWBorderBrush")!,
         BorderThickness = new Thickness(1),
-        CornerRadius = DiskCardRadius,     // ⭐ antes: new CornerRadius(8)
-        Padding = DiskCardPadding,         // ⭐ antes: new Thickness(12)
-        Margin = DiskCardMargin,           // ⭐ antes: new Thickness(0,0,0,10)
+        CornerRadius = DiskCardRadius,
+        Padding = DiskCardPadding,
+        Margin = DiskCardMargin,
         Child = grid
     };
 }
+
+
 
    
 
@@ -2105,34 +2144,54 @@ private Window GetWindow()
     
 }
 
-
 private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
 {
     var owner = this.GetVisualRoot() as Window;
 
-    bool confirm = await ShowConfirm(
+    // Confirmación
+    var confirm = new InfoDialog(
         "Remove Disk",
         $"Are you sure you want to remove /dev/{diskName} from {array.Name}?"
     );
 
-    if (!confirm)
+    bool ok = await confirm.ShowDialog<bool>(owner ?? new Window());
+    if (!ok)
         return;
 
-    using (LoadingService.Show("Removing disk...", owner))
-    {
-        var service = new RaidService();
-        bool ok = await service.RemoveDiskFromArrayAsync(array.Name, diskName);
+    // Loading
+    var loading = new LoadingDialog($"Removing /dev/{diskName}...");
+    loading.Show(owner);
 
-        if (!ok)
-        {
-            await ShowConfirm("Error", $"Could not remove /dev/{diskName}.");
-            return;
-        }
+    try
+    {
+        // 1) Marcar como faulty (si no lo está)
+        ShellHelper.EjecutarComoRoot(
+            $"mdadm /dev/{array.Name} --fail /dev/{diskName}"
+        );
+
+        // 2) Remover del array
+        ShellHelper.EjecutarComoRoot(
+            $"mdadm /dev/{array.Name} --remove /dev/{diskName}"
+        );
+    }
+    finally
+    {
+        loading.Close();
     }
 
-    await ShowConfirm("Success", $"/dev/{diskName} removed and cleaned.");
+    // 3) Refrescar RAID
     await LoadRaidAsync();
+
+    // 4) Refrescar UI
+    BuildUI();
+
+    // 5) Notificación
+    NotificadorLinux.Enviar(
+        $"Disk removed:\n/ dev/{diskName} removed from {array.Name}"
+    );
 }
+
+
 
 
    private async Task AddDiskToArrayUI(RaidArrayInfo array)

@@ -20,7 +20,39 @@ namespace RAID_Util.Views
     public partial class DisksView : UserControl
     {
         private readonly List<RaidDiskInfo> _disks = new();
+            
+        private static bool _resourcesReady;
+        private static IBrush? _bmwTextBrush;
+        private static IBrush? _bmwTextDimBrush;
+        private static IBrush? _bmwAccentBrush;
+        private static IBrush? _bmwSurfaceElevatedBrush;
+        private static IBrush? _bmwBorderBrush;
+        private static Thickness _cardBorderThickness;
+        private static Thickness _cardPadding;
+        private static Thickness _cardMargin;
+        private static CornerRadius _cardCornerRadius;
 
+        private static void EnsureResources()
+        {
+            if (_resourcesReady)
+                return;
+
+            var app = Application.Current!;
+            _bmwTextBrush            = (IBrush)app.FindResource("BMWTextBrush")!;
+            _bmwTextDimBrush         = (IBrush)app.FindResource("BMWTextDimBrush")!;
+            _bmwAccentBrush          = (IBrush)app.FindResource("BMWAccentBrush")!;
+            _bmwSurfaceElevatedBrush = (IBrush)app.FindResource("BMWSurfaceElevatedBrush")!;
+            _bmwBorderBrush          = (IBrush)app.FindResource("BMWBorderBrush")!;
+
+            _cardBorderThickness = new Thickness(1);
+            _cardPadding         = new Thickness(12);
+            _cardMargin          = new Thickness(0, 0, 0, 10);
+            _cardCornerRadius    = new CornerRadius(10);
+
+            _resourcesReady = true;
+        }
+
+        
         public DisksView()
         {
             InitializeComponent();
@@ -161,9 +193,9 @@ private Border BuildDiskCard(RaidDiskInfo disk)
 {
     LogService.Debug($"[DISKSVIEW] BuildDiskCard() → {disk.Name}");
 
-    // ============================================================
-    // ⭐ NORMALIZAR TODOS LOS CAMPOS PARA EVITAR NULLREFERENCE
-    // ============================================================
+    EnsureResources();
+
+    // Normalizar campos
     disk.Model       ??= "Unknown";
     disk.Serial      ??= "Unknown";
     disk.Type        ??= "Unknown";
@@ -173,9 +205,7 @@ private Border BuildDiskCard(RaidDiskInfo disk)
     disk.Filesystem  ??= "";
     disk.MountPoint  ??= "";
 
-    // ============================================================
-    // ICONO
-    // ============================================================
+    // Icono
     string fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
     var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
     icon.Stretch = Stretch.Uniform;
@@ -189,63 +219,59 @@ private Border BuildDiskCard(RaidDiskInfo disk)
         Child = icon
     };
 
-    // ============================================================
-    // DETALLES
-    // ============================================================
+    // Detalles
     var details = new Grid();
     for (int i = 0; i < 6; i++)
         details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
     int r = 0;
 
-    details.Children.Add(new TextBlock
+    void AddRow(Control c)
+    {
+        details.Children.Add(c);
+        Grid.SetRow(c, r++);
+    }
+
+    AddRow(new TextBlock
     {
         Text = disk.Model,
         TextWrapping = TextWrapping.Wrap,
         FontSize = 16,
         FontWeight = FontWeight.Bold,
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!
+        Foreground = _bmwTextBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    details.Children.Add(new TextBlock
+    AddRow(new TextBlock
     {
         Text = $"/dev/{disk.Name}  •  {disk.Size}",
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+        Foreground = _bmwTextDimBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    details.Children.Add(new TextBlock
+    AddRow(new TextBlock
     {
         Text = $"Type: {disk.Type}",
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+        Foreground = _bmwTextDimBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    details.Children.Add(new TextBlock
+    AddRow(new TextBlock
     {
         Text = $"Serial: {disk.Serial}",
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+        Foreground = _bmwTextDimBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    details.Children.Add(new TextBlock
+    AddRow(new TextBlock
     {
         Text = $"Temperature: {disk.Temperature}",
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+        Foreground = _bmwTextDimBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    details.Children.Add(new TextBlock
+    AddRow(new TextBlock
     {
         Text = $"Status: {disk.Status}",
-        Foreground = (IBrush)Application.Current!.FindResource("BMWAccentBrush")!
+        Foreground = _bmwAccentBrush
     });
-    Grid.SetRow(details.Children[^1], r++);
 
-    // ============================================================
-    // BOTÓN MORE
-    // ============================================================
+    // Botón More
     var btnMore = new Button
     {
         Content = "More",
@@ -255,7 +281,6 @@ private Border BuildDiskCard(RaidDiskInfo disk)
         HorizontalAlignment = HorizontalAlignment.Right,
         VerticalAlignment = VerticalAlignment.Top
     };
-
     btnMore.Classes.Add("MoreButton");
 
     if (disk.IsSystemDisk)
@@ -285,9 +310,7 @@ private Border BuildDiskCard(RaidDiskInfo disk)
         };
     }
 
-    // ============================================================
-    // GRID PRINCIPAL
-    // ============================================================
+    // Grid principal
     var grid = new Grid
     {
         ColumnDefinitions =
@@ -309,20 +332,19 @@ private Border BuildDiskCard(RaidDiskInfo disk)
     Grid.SetColumn(btnMore, 2);
     Grid.SetRow(btnMore, 0);
 
-    // ============================================================
-    // TARJETA FINAL
-    // ============================================================
+    // Tarjeta final
     return new Border
     {
-        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-        BorderBrush = (IBrush)Application.Current!.FindResource("BMWBorderBrush")!,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(10),
-        Padding = new Thickness(12),
-        Margin = new Thickness(0, 0, 0, 10),
-        Child = grid
+        Background     = _bmwSurfaceElevatedBrush,
+        BorderBrush    = _bmwBorderBrush,
+        BorderThickness = _cardBorderThickness,
+        CornerRadius   = _cardCornerRadius,
+        Padding        = _cardPadding,
+        Margin         = _cardMargin,
+        Child          = grid
     };
 }
+
 
 
 
