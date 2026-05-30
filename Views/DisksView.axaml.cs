@@ -7,11 +7,13 @@ using RAID_Util.Models;
 using RAID_Util.Services;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 using RAID_Util.Core;
+
 
 namespace RAID_Util.Views
 {
@@ -92,6 +94,8 @@ namespace RAID_Util.Views
         // ============================================================
         // REAL DATA
         // ============================================================
+       
+        
         private void LoadRealData()
         {
             LogService.Debug("[DISKSVIEW] LoadRealData() iniciado.");
@@ -105,13 +109,16 @@ namespace RAID_Util.Views
 
                 foreach (var d in list)
                 {
-                    LogService.Debug($"[DISKSVIEW] Disco detectado: {d.Name} Model={d.Model} Size={d.Size} RAID={d.IsUsedByRaid} Mounted={d.IsMounted}");
+                    // Normalizar valores NULL
+                    d.Model        ??= "Unknown";
+                    d.Serial       ??= "Unknown";
+                    d.Type         ??= "Unknown";
+                    d.Temperature  ??= "N/A";
+                    d.Status       ??= "Free";
+                    d.Filesystem   ??= "";
+                    d.MountPoint   ??= "";
 
-                    // Normalizar estado
-                    if (string.IsNullOrWhiteSpace(d.State))
-                        d.State = d.IsUsedByRaid ? "Used by RAID" : "Free";
-
-                    // ⭐ Normalizar icono con DiskIconService
+                    // Normalizar icono
                     d.Icon = DiskIconService.GetIcon(d.Icon, d.Model, d.IsRotational);
 
                     _disks.Add(d);
@@ -124,6 +131,10 @@ namespace RAID_Util.Views
 
             LogService.Debug("[DISKSVIEW] LoadRealData() completado.");
         }
+
+
+
+
 
         // ============================================================
         // RENDERIZAR TARJETAS
@@ -145,13 +156,27 @@ namespace RAID_Util.Views
         // TARJETA DE DISCO
         // ============================================================
         
+
 private Border BuildDiskCard(RaidDiskInfo disk)
 {
     LogService.Debug($"[DISKSVIEW] BuildDiskCard() → {disk.Name}");
 
-    // ⭐ Normalizar icono SIEMPRE antes de cargarlo
-    string fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
+    // ============================================================
+    // ⭐ NORMALIZAR TODOS LOS CAMPOS PARA EVITAR NULLREFERENCE
+    // ============================================================
+    disk.Model       ??= "Unknown";
+    disk.Serial      ??= "Unknown";
+    disk.Type        ??= "Unknown";
+    disk.Size        ??= "Unknown";
+    disk.Temperature ??= "N/A";
+    disk.Status      ??= "Free";
+    disk.Filesystem  ??= "";
+    disk.MountPoint  ??= "";
 
+    // ============================================================
+    // ICONO
+    // ============================================================
+    string fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
     var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
     icon.Stretch = Stretch.Uniform;
 
@@ -164,14 +189,12 @@ private Border BuildDiskCard(RaidDiskInfo disk)
         Child = icon
     };
 
+    // ============================================================
+    // DETALLES
+    // ============================================================
     var details = new Grid();
-
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-    details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+    for (int i = 0; i < 6; i++)
+        details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
     int r = 0;
 
@@ -220,6 +243,9 @@ private Border BuildDiskCard(RaidDiskInfo disk)
     });
     Grid.SetRow(details.Children[^1], r++);
 
+    // ============================================================
+    // BOTÓN MORE
+    // ============================================================
     var btnMore = new Button
     {
         Content = "More",
@@ -232,15 +258,36 @@ private Border BuildDiskCard(RaidDiskInfo disk)
 
     btnMore.Classes.Add("MoreButton");
 
-    var menu = BuildContextMenu(disk);
-
-    btnMore.Click += (_, _) =>
+    if (disk.IsSystemDisk)
     {
-        LogService.Debug($"[DISKSVIEW] Abriendo menú More para {disk.Name}");
-        menu.PlacementTarget = btnMore;
-        menu.Open(btnMore);
-    };
+        btnMore.IsVisible = false;
+    }
+    else
+    {
+        var menu = BuildDiskContextMenu(disk);
 
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.Click += (_, _) =>
+            {
+                string? action = item.Tag?.ToString();
+                OnMenuClick(disk, action);
+            };
+        }
+
+        btnMore.ContextMenu = menu;
+
+        btnMore.Click += (_, _) =>
+        {
+            LogService.Debug($"[DISKSVIEW] Abriendo menú More para {disk.Name}");
+            menu.PlacementTarget = btnMore;
+            menu.Open(btnMore);
+        };
+    }
+
+    // ============================================================
+    // GRID PRINCIPAL
+    // ============================================================
     var grid = new Grid
     {
         ColumnDefinitions =
@@ -262,6 +309,9 @@ private Border BuildDiskCard(RaidDiskInfo disk)
     Grid.SetColumn(btnMore, 2);
     Grid.SetRow(btnMore, 0);
 
+    // ============================================================
+    // TARJETA FINAL
+    // ============================================================
     return new Border
     {
         Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
@@ -274,104 +324,146 @@ private Border BuildDiskCard(RaidDiskInfo disk)
     };
 }
 
+
+
         // ============================================================
         // MENÚ MORE
         // ============================================================
-        private ContextMenu BuildContextMenu(RaidDiskInfo disk)
+      
+     
+        private ContextMenu BuildDiskContextMenu(RaidDiskInfo disk)
         {
-            LogService.Debug($"[DISKSVIEW] BuildContextMenu() para {disk.Name}");
-
             var menu = new ContextMenu();
+            var items = new List<MenuItem>();
 
-            var items = new List<MenuItem>
+            // Siempre disponibles
+            items.Add(new MenuItem { Header = "View Info", Tag = "info" });
+            items.Add(new MenuItem { Header = "SMART", Tag = "smart" });
+
+            if (disk.IsSystemDisk)
             {
-                new MenuItem { Header = "View Info", Tag = "info" },
-                new MenuItem { Header = "SMART", Tag = "smart" },
-                new MenuItem { Header = "Unmount", Tag = "unmount" },
-                new MenuItem { Header = "Wipe Disk", Tag = "wipe" },
-                new MenuItem { Header = "Zero Superblock", Tag = "zerosb" },
-                new MenuItem { Header = "Create Partition Table", Tag = "ptable" },
-                new MenuItem { Header = "Initialize", Tag = "init" }
-            };
+                menu.ItemsSource = items;
+                return menu;
+            }
 
-            foreach (var mi in items)
-                mi.Click += (_, _) => OnMenuClick(disk, mi.Tag?.ToString());
+            if (disk.IsUsedByRaid)
+            {
+                menu.ItemsSource = items;
+                return menu;
+            }
+
+            if (disk.IsMounted)
+            {
+                items.Add(new MenuItem { Header = "Unmount", Tag = "unmount" });
+                menu.ItemsSource = items;
+                return menu;
+            }
+
+            items.Add(new MenuItem { Header = "Wipe Disk", Tag = "wipe" });
+            items.Add(new MenuItem { Header = "Zero Superblock", Tag = "zerosb" });
+            items.Add(new MenuItem { Header = "Create Partition Table", Tag = "ptable" });
+            items.Add(new MenuItem { Header = "Initialize", Tag = "init" });
 
             menu.ItemsSource = items;
-
             return menu;
         }
 
+
+
+
+
         // ============================================================
-        // ACCIONES DEL MENÚ MORE
+        // ACCIONES DEL MENU MORE
         // ============================================================
+       
+        
         private async void OnMenuClick(RaidDiskInfo disk, string? action)
-        {
-            LogService.Write($"[DISKSVIEW] Acción '{action}' solicitada sobre {disk.Name}");
+{
+    LogService.Write($"[DISKSVIEW] Acción solicitada sobre {disk.Name}: '{action}'");
 
-            if (string.IsNullOrWhiteSpace(action))
-            {
-                LogService.Error("[DISKSVIEW] Acción nula recibida.");
-                return;
-            }
+    // Normalizar acción
+    string act = action?.Trim().ToLowerInvariant() ?? "";
 
-            // ============================================================
-            // PROTECCIONES CRÍTICAS
-            // ============================================================
-            if (disk.IsSystemDisk)
-            {
-                LogService.Error($"[DISKSVIEW] BLOQUEADO: {disk.Name} es disco del sistema.");
-                await ShowInfoDialog("Error", "This disk belongs to the operating system. Action blocked.");
-                return;
-            }
+    if (string.IsNullOrWhiteSpace(act))
+    {
+        LogService.Error("[DISKSVIEW] Acción nula o vacía recibida.");
+        return;
+    }
 
-            if (disk.IsUsedByRaid &&
-                (action == "wipe" || action == "zerosb" || action == "ptable" || action == "init"))
-            {
-                LogService.Error($"[DISKSVIEW] BLOQUEADO: {disk.Name} pertenece a RAID {disk.ArrayName}.");
-                await ShowInfoDialog("Error", "This disk is part of a RAID array. Action blocked.");
-                return;
-            }
+    // ============================================================
+    // ⭐ PROTECCIÓN 1: Disco del sistema → bloquear destructivas
+    // ============================================================
+    if (disk.IsSystemDisk &&
+        (act == "wipe" || act == "zerosb" || act == "ptable" || act == "init"))
+    {
+        await ShowInfoDialog("Error", "This disk belongs to the operating system.");
+        return;
+    }
 
-            // ============================================================
-            // ACCIONES
-            // ============================================================
-            switch (action)
-            {
-                case "info":
-                    await ShowInfo(disk);
-                    break;
+    // ============================================================
+    // ⭐ PROTECCIÓN 2: Disco en RAID → bloquear destructivas
+    // ============================================================
+    if (disk.IsUsedByRaid &&
+        (act == "wipe" || act == "zerosb" || act == "ptable" || act == "init"))
+    {
+        await ShowInfoDialog("Error", "This disk is part of a RAID array.");
+        return;
+    }
 
-                case "smart":
-                    await RunSmart(disk);
-                    break;
+    // ============================================================
+    // ⭐ PROTECCIÓN 3: Disco montado → solo permitir unmount
+    // ============================================================
+    if (disk.IsMounted &&
+        act != "unmount" &&
+        act != "info" &&
+        act != "smart")
+    {
+        await ShowInfoDialog("Error", "Unmount the disk first.");
+        return;
+    }
 
-                case "unmount":
-                    await UnmountDisk(disk);
-                    break;
+    // ============================================================
+    // ⭐ ACCIONES
+    // ============================================================
+    switch (act)
+    {
+        case "info":
+            await ShowInfo(disk);
+            break;
 
-                case "wipe":
-                    await WipeDisk(disk);
-                    break;
+        case "smart":
+            await RunSmart(disk);
+            break;
 
-                case "zerosb":
-                    await ZeroSuperblock(disk);
-                    break;
+        case "unmount":
+            await UnmountDisk(disk);
+            break;
 
-                case "ptable":
-                    await CreatePartitionTable(disk);
-                    break;
+        case "wipe":
+            await WipeDisk(disk);
+            break;
 
-                case "init":
-                    await InitializeDisk(disk);
-                    break;
+        case "zerosb":
+            await ZeroSuperblock(disk);
+            break;
 
-                default:
-                    LogService.Error($"[DISKSVIEW] Acción desconocida: {action}");
-                    await ShowInfoDialog("Error", $"Unknown action: {action}");
-                    break;
-            }
-        }
+        case "ptable":
+            await CreatePartitionTable(disk);
+            break;
+
+        case "init":
+            await InitializeDisk(disk);
+            break;
+
+        default:
+            LogService.Error($"[DISKSVIEW] Acción desconocida: {act}");
+            await ShowInfoDialog("Error", $"Unknown action '{act}'.");
+            break;
+    }
+}
+
+
+
 
         // ============================================================
         // DIÁLOGOS BMW
@@ -535,21 +627,76 @@ private Border BuildDiskCard(RaidDiskInfo disk)
             RenderDisks();
         }
 
+        
+        
+
         private async Task InitializeDisk(RaidDiskInfo disk)
+{
+    var dlg = new InitializeDiskDialog();
+    var owner = this.GetVisualRoot() as Window;
+
+    var result = await dlg.ShowDialog<InitializeDiskDialog?>(owner);
+    if (result == null)
+        return;
+
+    string label = result.SelectedLabel;
+    string fs = result.SelectedFs;
+
+    string part = $"/dev/{disk.Name}1";
+    string mountPoint = $"/mnt/raid-util/{label}";
+
+    using (LoadingService.Show($"Initializing /dev/{disk.Name}..."))
+    {
+        await Task.Run(() =>
         {
-            LogService.Write($"[DISKSVIEW] Initialize Disk → {disk.Name}");
-
-            bool confirm = await ShowConfirm("Initialize Disk", $"This will create a new partition and filesystem on /dev/{disk.Name}. Continue?");
-            if (!confirm) return;
-
+            // 1) Crear GPT
             ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
-            ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mkpart primary ext4 0% 100%");
-            ShellHelper.EjecutarComoRoot($"mkfs.ext4 -F /dev/{disk.Name}1");
 
-            await ShowInfoDialog("Initialize Disk", "Disk initialized successfully.");
+            // 2) Crear partición primaria
+            ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mkpart primary 0% 100%");
 
-            LoadRealData();
-            RenderDisks();
-        }
+            // 3) Formatear
+            string cmd = fs switch
+            {
+                "ext4"  => $"mkfs.ext4 -F -L \"{label}\" {part}",
+                "xfs"   => $"mkfs.xfs -f -L \"{label}\" {part}",
+                "btrfs" => $"mkfs.btrfs -f -L \"{label}\" {part}",
+                "f2fs"  => $"mkfs.f2fs -f -l \"{label}\" {part}",
+                "ntfs"  => $"mkfs.ntfs -f -L \"{label}\" {part}",
+                "exfat" => $"mkfs.exfat -n \"{label}\" {part}",
+                "fat32" => $"mkfs.vfat -F 32 -n \"{label}\" {part}",
+                _ => throw new Exception("Unsupported filesystem")
+            };
+
+            ShellHelper.EjecutarComoRoot(cmd);
+
+            // 4) Esperar a udev
+            ShellHelper.EjecutarComoRoot("udevadm settle");
+
+            // 5) Desmontar si udev montó automáticamente
+            MountService.Unmount(mountPoint);
+
+            // 6) Montar correctamente
+            MountService.Mount(part, mountPoint);
+
+            // ⭐ 7) Permitir desmontar sin contraseña en Dolphin
+            ShellHelper.EjecutarComoRoot($"chown 1000:1000 \"{mountPoint}\"");
+            ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
+        });
+    }
+
+    await ShowInfoDialog(
+        "Disk Initialized",
+        $"Disk /dev/{disk.Name} initialized successfully.\n\nFS: {fs}\nLabel: {label}\nMount: {mountPoint}"
+    );
+
+    LoadRealData();
+    RenderDisks();
+}
+
+
+
+        
+        
     }
 }

@@ -110,24 +110,40 @@ public partial class RaidView : UserControl
 
         var array = _selectedArray;
 
-        // ⭐ Abrir ventana BMW en modal
+        // 1) Diálogo BMW para elegir FS y label
         var dlg = new FormatArrayDialog(array.Name);
         var owner = this.GetVisualRoot() as Window;
         var result = await dlg.ShowDialog<FormatArrayResult?>(owner);
 
-        // Usuario canceló
         if (result == null)
             return;
 
-        var service = new RaidService();
+        // 2) Mostrar loading dialog
+        var loading = new LoadingDialog($"Initializing {array.Name}...");
+        loading.Show(owner);
 
-        // ⭐ Llamada correcta con los 3 parámetros
-        bool ok = await service.InitializeArrayAsync(
-            array.Name,
-            result.Filesystem,
-            result.Label
-        );
+        bool ok = false;
 
+        try
+        {
+            // 3) Ejecutar la operación pesada en segundo plano
+            ok = await Task.Run(async () =>
+            {
+                var service = new RaidService();
+                return await service.InitializeArrayAsync(
+                    array.Name,
+                    result.Filesystem,
+                    result.Label
+                );
+            });
+        }
+        finally
+        {
+            // 4) Cerrar loading dialog
+            loading.Close();
+        }
+
+        // 5) Mostrar resultado
         if (!ok)
         {
             await ShowConfirm("Error", "Could not initialize the array.");
@@ -136,9 +152,10 @@ public partial class RaidView : UserControl
 
         await ShowConfirm("Success", $"The array {array.Name} was initialized.");
 
-        // Refrescar
+        // 6) Refrescar UI
         BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     }
+
 
 
     
@@ -1446,64 +1463,86 @@ private Border BuildStatusDot(string smartState)
     }
 
 
-    private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+    
+   
+private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+{
+    var parent = GetWindow();
+    var service = new RaidService();
+
+    // 1) Obtener todos los discos detectados por el sistema
+    var allDisks = await service.GetAllDisksAsync();
+
+    // 2) Obtener nodos completos (discos + particiones)
+    var nodes = RaidService.Nodes;
+
+    // 3) FILTRO UNIVERSAL (sin excepciones, sin quemar información)
+    var freeDisks = allDisks
+        .Where(d => !d.IsUsedByRaid)                      // no pertenece a RAID
+        .Where(d => !d.HasRaidMetadata)                   // no tiene metadata RAID
+        .Where(d => !d.IsMounted)                         // disco no montado
+        .Where(d => d.Children.All(child =>
+        {
+            // Buscar partición en nodes, no en allDisks
+            if (!nodes.TryGetValue(child, out dynamic part))
+                return true; // si no existe, no bloquea
+
+            string mp = part.mountpoint ?? "";
+            return string.IsNullOrWhiteSpace(mp);
+        }))
+        .ToList();
+
+    LogService.Write($"[CREATE ARRAY] Discos elegibles: {freeDisks.Count}");
+
+    // 4) Si no hay discos libres → mensaje
+    if (freeDisks.Count == 0)
     {
-        var parent = GetWindow();
-        var service = new RaidService();
-
-        // Obtener discos reales
-        var allDisks = await service.GetAllDisksAsync();
-
-        var freeDisks = allDisks
-            .Where(d => d.State == "Free")
-            .Where(d => !IsDiskMounted(d.Name))
-            .ToList();
-
-        if (freeDisks.Count == 0)
-        {
-            new ConfirmDialog("No disks", "No free disks available to create a RAID array.")
-                .ShowDialog(parent);
-            return;
-        }
-
-        // Diálogo de creación
-        var dialog = new CreateArrayDialog(freeDisks);
-        var result = await dialog.ShowDialog<CreateArrayResult?>(parent);
-
-        if (result == null)
-            return;
-
-        // Mostrar diálogo de carga (UI thread)
-        var loading = new LoadingDialog("Creating RAID array...");
-        loading.Show(parent);
-
-        await Task.Delay(50); // permite renderizar
-
-        bool ok;
-
-        if (IsFakeMode)
-        {
-            // Fake mode: solo ejecutar
-            ok = await Task.Run(() => { CreateFakeArray(result); return true; });
-        }
-        else
-        {
-            // Real mode: CreateRealArray ahora es async
-            ok = await CreateRealArray(result);
-        }
-
-        loading.Close();
-
-        if (!ok)
-        {
-            new ConfirmDialog("Error", "Failed to create RAID array.")
-                .ShowDialog(parent);
-            return;
-        }
-
-        // Recargar arrays reales
-        await LoadRealData();
+        new ConfirmDialog("No disks", "No free disks available to create a RAID array.")
+            .ShowDialog(parent);
+        return;
     }
+
+    // 5) Mostrar diálogo de creación
+    var dialog = new CreateArrayDialog(freeDisks);
+    var result = await dialog.ShowDialog<CreateArrayResult?>(parent);
+
+    if (result == null)
+        return;
+
+    // 6) Mostrar diálogo de carga
+    var loading = new LoadingDialog("Creating RAID array...");
+    loading.Show(parent);
+
+    await Task.Delay(50);
+
+    bool ok;
+
+    // 7) Crear array real o fake
+    if (IsFakeMode)
+    {
+        ok = await Task.Run(() => { CreateFakeArray(result); return true; });
+    }
+    else
+    {
+        ok = await CreateRealArray(result);
+    }
+
+    loading.Close();
+
+    // 8) Error al crear
+    if (!ok)
+    {
+        new ConfirmDialog("Error", "Failed to create RAID array.")
+            .ShowDialog(parent);
+        return;
+    }
+
+    // 9) Recargar datos reales
+    await LoadRealData();
+}
+
+
+
 
 
     
@@ -2171,68 +2210,83 @@ private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
                    !d.IsRoot &&                // no contiene /
                    !d.IsHome &&                // no contiene /home
                    !d.IsSwap &&                // no contiene swap
-                   !d.IsUsedByRaid &&          // no pertenece a otro array
-                   !d.IsUsbSystemSource        // si RAID-util corre desde USB
+                   !d.IsUsedByRaid         // no pertenece a otro array
+                   
            )
            .ToList();
    }
 
    private async Task AddDiskToArrayUI(RaidArrayInfo array)
-   {
-       LogService.Write($"[RAIDVIEW] AddDiskToArrayUI → {array.Name}");
+{
+    LogService.Write($"[RAIDVIEW] AddDiskToArrayUI → {array.Name}");
 
-       var service = new RaidService();
+    var service = new RaidService();
 
-       // 1) Obtener discos libres y huérfanos
-       var allDisks = await service.GetAllDisksAsync();
-       var candidates = allDisks
-           .Where(d => d.State == "Free" || d.State == "Orphan")
-           .ToList();
+    // 1) Obtener todos los discos detectados por el backend
+    var allDisks = await service.GetAllDisksAsync();
 
-       if (candidates.Count == 0)
-       {
-           await ShowConfirm("No disks available", "There are no free or orphan disks to add.");
-           return;
-       }
+    // ⭐ FILTRO REAL basado en tu modelo actual
+    var candidates = allDisks
+        .Where(d =>
+            d.State == "Free"                  // Solo discos realmente libres
+        )
+        .Where(d =>
+            d.Type == "disk"                   // No rom, no loop, no lvm, no part
+        )
+        .Where(d =>
+            d.Children == null || d.Children.Count == 0   // No particiones
+        )
+        .Where(d =>
+            string.IsNullOrWhiteSpace(d.ArrayName)        // No pertenece a ningún array
+        )
+        .ToList();
 
-       // 2) Mostrar diálogo de selección
-       var dlg = new SelectDiskDialog(candidates);
-       var owner = this.GetVisualRoot() as Window;
+    if (candidates.Count == 0)
+    {
+        await ShowConfirm("No disks available",
+            "There are no valid free disks to add.");
+        return;
+    }
 
-       string? selectedDisk = await dlg.ShowDialog<string?>(owner ?? new Window());
+    // 2) Mostrar diálogo de selección
+    var dlg = new SelectDiskDialog(candidates);
+    var owner = this.GetVisualRoot() as Window;
 
-       if (string.IsNullOrWhiteSpace(selectedDisk))
-       {
-           LogService.Write("[RAIDVIEW] AddDiskToArrayUI → cancelado por el usuario.");
-           return;
-       }
+    string? selectedDisk = await dlg.ShowDialog<string?>(owner ?? new Window());
 
-       // 3) Ejecutar AddDiskToArrayAsync
-       bool ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
+    if (string.IsNullOrWhiteSpace(selectedDisk))
+    {
+        LogService.Write("[RAIDVIEW] AddDiskToArrayUI → cancelado por el usuario.");
+        return;
+    }
 
-       if (!ok)
-       {
-           await ShowConfirm("Error", $"Could not add /dev/{selectedDisk} to {array.Name}.");
-           return;
-       }
+    // 3) Ejecutar AddDiskToArrayAsync
+    bool ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
 
-       await ShowConfirm("Success", $"/dev/{selectedDisk} added to {array.Name}.");
+    if (!ok)
+    {
+        await ShowConfirm("Error", $"Could not add /dev/{selectedDisk} to {array.Name}.");
+        return;
+    }
 
-       // ⭐ 4) Preguntar si quiere expandir el array
-       bool grow = await ShowConfirm(
-           "Expand RAID Array",
-           $"The disk /dev/{selectedDisk} was added as a spare.\n\n" +
-           $"Do you want to expand {array.Name} to use this disk?"
-       );
+    await ShowConfirm("Success", $"/dev/{selectedDisk} added to {array.Name}.");
 
-       if (grow)
-       {
-           await ExpandArrayAndResize(array.Name, array.Disks.Count + 1);
-       }
+    // ⭐ 4) Preguntar si quiere expandir el array
+    bool grow = await ShowConfirm(
+        "Expand RAID Array",
+        $"The disk /dev/{selectedDisk} was added as a spare.\n\n" +
+        $"Do you want to expand {array.Name} to use this disk?"
+    );
 
-       // 5) Refrescar arrays
-       await LoadRealData();
-   }
+    if (grow)
+    {
+        await ExpandArrayAndResize(array.Name, array.Disks.Count + 1);
+    }
+
+    // 5) Refrescar arrays
+    await LoadRealData();
+}
+
 
 
    

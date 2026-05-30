@@ -13,29 +13,26 @@ namespace RAID_Util.Services
 {
     public class RaidService
     {
-        // ============================================================
-        //  CONSULTA DE DISCOS (UNIFICADO A RaidDiskInfo)
-        // ============================================================
+        
 
-        public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
+
+public static Dictionary<string, dynamic> Nodes { get; private set; } = new();
+
+public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
 {
     var result = new List<RaidDiskInfo>();
 
-    // 1) Obtener arrays reales (SIN cambiar firma)
+    // 1) Obtener arrays reales
     var arrays = await GetArraysAsync();
-
-    // Lista de miembros reales
     var arrayMembers = arrays
         .SelectMany(a => a.Disks)
         .Select(d => d.Name)
         .ToHashSet();
 
+    // 2) lsblk universal
     string json = await ShellHelper.RunCleanAsync(
-        "lsblk -J -o NAME,MODEL,SIZE,ROTA,TYPE"
+        "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE,PKNAME"
     );
-
-    Console.WriteLine("[RAID] lsblk RAW JSON:");
-    Console.WriteLine(json);
 
     if (string.IsNullOrWhiteSpace(json))
         return result;
@@ -45,64 +42,127 @@ namespace RAID_Util.Services
     {
         data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!;
     }
-    catch (Exception ex)
+    catch
     {
-        Console.WriteLine("[RAID] ERROR al parsear JSON de lsblk:");
-        Console.WriteLine(ex);
         return result;
     }
 
+    // 3) Indexar todos los nodos (discos + particiones)
+    var nodes = new Dictionary<string, dynamic>();
     foreach (var dev in data.blockdevices)
     {
-        string type = dev.type ?? "unknown";
+        nodes[(string)dev.name] = dev;
 
-        if (type != "disk" && type != "lvm" && type != "loop")
+        if (dev.children != null)
+        {
+            foreach (var child in dev.children)
+                nodes[(string)child.name] = child;
+        }
+    }
+
+    // Exponer nodos globalmente
+    Nodes = nodes;
+
+    // 4) Procesar solo discos físicos
+    foreach (var dev in data.blockdevices)
+    {
+        if ((string)dev.type != "disk")
             continue;
 
-        string name = (string)dev.name;
+        string name = dev.name;
         string model = dev.model ?? "Unknown";
         string size = dev.size ?? "Unknown";
-
+        string mount = dev.mountpoint ?? "";
+        string fstype = dev.fstype ?? "";
         bool isRotational = ParseRota(dev.rota);
+
+        // ⭐ Children reales del JSON
+        List<string> children = new();
+        if (dev.children != null)
+        {
+            foreach (var child in dev.children)
+                children.Add((string)child.name);
+        }
+
+        // ⭐ Fallback: reconstruir children con PKNAME si no hay children
+        if (children.Count == 0)
+        {
+            children = nodes
+                .Where(kv => (string?)kv.Value.pkname == name)
+                .Select(kv => (string)kv.Key)
+                .Where(n => n != name)
+                .ToList();
+        }
 
         var disk = new RaidDiskInfo
         {
             Name = name,
             Size = size,
             Model = model,
-            State = "Unknown",
-            Role = "Unknown",
-            ArrayName = "",
+            MountPoint = mount,
+            Filesystem = fstype,
             IsRotational = isRotational,
+            Children = children,
             Icon = DiskIconService.GetIcon(name, model, isRotational)
         };
 
-        // ⭐ 1) ¿Está en un array REAL?
-        if (arrayMembers.Contains(name))
-        {
-            disk.State = "In Array";
-            result.Add(disk);
-            continue;
-        }
+        // ============================================================
+        // ⭐ FLAGS DE SEGURIDAD
+        // ============================================================
 
-        // ⭐ 2) ¿Tiene metadata RAID pero NO pertenece a ningún array?
+        // 1) ¿Está montado el disco completo?
+        disk.IsMounted = !string.IsNullOrWhiteSpace(disk.MountPoint);
+
+        // 2) ¿Alguna partición está montada?
+        bool anyChildMounted = disk.Children.Any(childName =>
+        {
+            if (!nodes.TryGetValue(childName, out dynamic part))
+                return false;
+
+            string mp = part.mountpoint ?? "";
+            return !string.IsNullOrWhiteSpace(mp);
+        });
+
+        if (anyChildMounted)
+            disk.IsMounted = true;
+
+        // 3) ¿Es disco del sistema?
+        disk.IsSystemDisk =
+            disk.MountPoint == "/" ||
+            disk.MountPoint == "/boot" ||
+            disk.MountPoint == "/boot/efi" ||
+            disk.Children.Any(c =>
+            {
+                var child = nodes[c];
+                string mp = child.mountpoint ?? "";
+                return mp == "/" || mp == "/boot" || mp == "/boot/efi";
+            });
+
+        // 4) ¿Es swap?
+        disk.IsSwap =
+            disk.Filesystem == "swap" ||
+            disk.Children.Any(c =>
+            {
+                var child = nodes[c];
+                string fs = child.fstype ?? "";
+                return fs == "swap";
+            });
+
+        // 5) ¿Pertenece a un array RAID real?
+        disk.IsUsedByRaid = arrayMembers.Contains(name);
+
+        // 6) ¿Tiene metadata RAID?
         string mdadmInfo = await RunMdadmAsync($"--examine /dev/{name}");
-
-        if (!string.IsNullOrWhiteSpace(mdadmInfo) &&
-            mdadmInfo.Contains("Raid Level", StringComparison.OrdinalIgnoreCase))
-        {
-            disk.State = "Orphan"; // disco con metadata RAID pero sin array
-        }
-        else
-        {
-            disk.State = "Free"; // disco normal
-        }
+        disk.HasRaidMetadata = mdadmInfo.Contains("Raid Level", StringComparison.OrdinalIgnoreCase);
 
         result.Add(disk);
     }
 
     return result;
 }
+
+
+
 
 public async Task<bool> AddDiskToArrayAsync(string arrayName, string diskName)
 {

@@ -14,6 +14,8 @@
         <entry key="Views/ConfirmDialog.axaml" value="RAID-Util.csproj" />
         <entry key="Views/DisksView.axaml" value="RAID-Util.csproj" />
         <entry key="Views/IncorrectPasswordDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/InitializeDiskDialog.axaml" value="RAID-Util.csproj" />
+        <entry key="Views/InitializeDiskDialogService.axaml" value="RAID-Util.csproj" />
         <entry key="Views/LoadingDialog.axaml" value="RAID-Util.csproj" />
         <entry key="Views/LogsView.axaml" value="RAID-Util.csproj" />
         <entry key="Views/MainWindow.axaml" value="RAID-Util.csproj" />

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace RAID_Util.Models
 {
     public class RaidDiskInfo
@@ -10,7 +12,7 @@ namespace RAID_Util.Models
         public string Size { get; set; } = "Unknown";        // 500G, 1.8T, etc.
 
         // Tipo físico / categoría
-        public string Type { get; set; } = "Unknown";        // SSD SATA, HDD 7200 RPM, NVMe PCIe 4.0
+        public string Type { get; set; } = "Unknown";        // disk, rom, loop, etc.
         public bool IsRotational { get; set; } = false;      // HDD = true, SSD/NVMe = false
 
         // Información hardware adicional
@@ -37,16 +39,22 @@ namespace RAID_Util.Models
         public bool IsRoot { get; set; } = false;            // /
         public bool IsHome { get; set; } = false;            // /home
         public bool IsSwap { get; set; } = false;            // swap
-        public bool IsMounted { get; set; } = false;         // cualquier punto de montaje
-        public bool IsUsedByRaid { get; set; } = false;      // pertenece a otro array
-        public bool IsUsbSystemSource { get; set; } = false; // si RAID-util corre desde USB
+
+        public bool IsMounted { get; set; } = false;         // disco montado
+        public bool IsUsedByRaid { get; set; } = false;      // pertenece a un array RAID
+
+        // ⭐ NUEVO: metadata RAID detectada por mdadm --examine
+        public bool HasRaidMetadata { get; set; } = false;
+
+        // ⭐ NUEVO: lista de particiones hijas (sda1, sda2…)
+        public List<string> Children { get; set; } = new();
 
         // ============================================================
         // INFORMACIÓN DE MONTADO / FS
         // ============================================================
         public string MountPoint { get; set; } = string.Empty;   // /mnt/data, /, /boot, etc.
         public string Filesystem { get; set; } = string.Empty;   // ext4, xfs, btrfs, etc.
-        public string Status { get; set; }
+        public string Status { get; set; } = string.Empty;
 
         // ============================================================
         // DEBUG

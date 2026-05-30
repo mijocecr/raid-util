@@ -10,15 +10,14 @@ namespace RAID_Util.Services
     public static class DiskService
     {
         // ============================================================
-        // OBTENER TODOS LOS DISCOS FÍSICOS REALES
+        // OBTENER TODOS LOS DISCOS FÍSICOS Y PARTICIONES ÚTILES
         // ============================================================
         public static List<RaidDiskInfo> GetAllDisks()
         {
             var disks = new List<RaidDiskInfo>();
 
-            // 1) Ejecutar lsblk en JSON
             string json = ShellHelper.EjecutarSinRoot(
-                "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE"
+                "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE,PKNAME"
             ).Stdout;
 
             if (string.IsNullOrWhiteSpace(json))
@@ -28,7 +27,24 @@ namespace RAID_Util.Services
 
             foreach (var d in parsed)
             {
-                if (d.Type != "disk")
+                // ⭐ MOSTRAR discos crudos (disk) Y particiones inicializadas (part)
+                if (d.Type != "disk" && d.Type != "part")
+                    continue;
+
+                // ⭐ IGNORAR discos del sistema
+                if (SystemDiskDetector.IsSystemDisk(d.Name))
+                    continue;
+
+                // ⭐ IGNORAR discos RAID
+                if (MdadmService_IsDiskInArray(d.Name, out string arrayName))
+                    continue;
+
+                // ⭐ NO ignorar discos iSCSI (FILEIO)
+                // Solo ignoramos virtuales reales
+                if (d.Model.Contains("virtual", StringComparison.OrdinalIgnoreCase) ||
+                    d.Model.Contains("loop", StringComparison.OrdinalIgnoreCase) ||
+                    d.Model.Contains("zram", StringComparison.OrdinalIgnoreCase) ||
+                    d.Model.Contains("mapper", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 bool isRot =
@@ -48,18 +64,14 @@ namespace RAID_Util.Services
                     Type = GetDiskType(d),
                     Temperature = GetTemperature(d.Name),
 
-                    // ⭐ ICONO CORRECTO USANDO DiskIconService (con nombre y modelo)
-                    Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot)
+                    Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot),
+
+                    // RAID
+                    IsUsedByRaid = false,
+                    ArrayName = ""
                 };
 
-                // 2) Detectar si pertenece a un array RAID
-                info.IsUsedByRaid = MdadmService_IsDiskInArray(d.Name, out string arrayName);
-                info.ArrayName = arrayName;
-
-                // 3) Detectar si es disco del sistema
-                info.IsSystemDisk = SystemDiskDetector.IsSystemDisk(d.Name);
-
-                // ⭐ 4) STATUS REAL
+                // ⭐ STATUS REAL
                 info.Status = GetDiskStatus(info);
 
                 disks.Add(info);
@@ -110,8 +122,10 @@ namespace RAID_Util.Services
             if (model.Contains("usb"))
                 return "USB";
 
-            if (model.Contains("fileio") ||
-                model.Contains("virtual") ||
+            if (model.Contains("fileio"))
+                return "iSCSI";
+
+            if (model.Contains("virtual") ||
                 model.Contains("vmware") ||
                 model.Contains("qemu") ||
                 model.Contains("vbox") ||
@@ -130,7 +144,6 @@ namespace RAID_Util.Services
         // ============================================================
         // TEMPERATURA REAL (SMARTCTL)
         // ============================================================
-        
         private static string GetTemperature(string name)
         {
             var r = ShellHelper.EjecutarComoRoot($"smartctl -A /dev/{name}");
@@ -140,14 +153,12 @@ namespace RAID_Util.Services
 
             var lines = r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-            // ============================
-            // 1) NVMe: "Temperature: 42 Celsius"
-            // ============================
+            // NVMe
             foreach (var line in lines)
             {
                 if (line.Contains("Temperature:", StringComparison.OrdinalIgnoreCase) &&
                     line.Contains("Celsius", StringComparison.OrdinalIgnoreCase) &&
-                    !line.Contains("Sensor", StringComparison.OrdinalIgnoreCase)) // evitar "Temperature Sensor 1"
+                    !line.Contains("Sensor", StringComparison.OrdinalIgnoreCase))
                 {
                     var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                     foreach (var p in parts)
@@ -158,22 +169,15 @@ namespace RAID_Util.Services
                 }
             }
 
-            // ============================
-            // 2) HDD/SSD: atributo 194
-            // ============================
+            // HDD/SSD atributo 194
             foreach (var line in lines)
             {
-                // Aceptamos línea que empiece por 194 o contenga "Temperature_Celsius"
                 var trimmed = line.Trim();
                 if (!trimmed.StartsWith("194") && !trimmed.Contains("Temperature_Celsius", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // Ejemplo:
-                // 194 Temperature_Celsius ... 29 (Min/Max 18/52)
                 var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-                // Estrategia simple y segura:
-                // buscar el ÚLTIMO número ANTES de un token que empiece por '('
                 int lastNumberBeforeParen = -1;
                 foreach (var p in parts)
                 {
@@ -191,18 +195,14 @@ namespace RAID_Util.Services
             return "N/A";
         }
 
-
-
         // ============================================================
         // STATUS REAL DEL DISCO
         // ============================================================
         private static string GetDiskStatus(RaidDiskInfo info)
         {
-            // 1) Si está en RAID → estado definido por mdadm
             if (info.IsUsedByRaid)
                 return "In RAID";
 
-            // 2) Leer estado SMART
             var r = ShellHelper.EjecutarComoRoot($"smartctl -H /dev/{info.Name}");
 
             if (string.IsNullOrWhiteSpace(r.Stdout))
