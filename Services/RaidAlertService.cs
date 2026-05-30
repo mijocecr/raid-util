@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using RAID_Util.Models;
@@ -10,12 +11,21 @@ namespace RAID_Util.Services
     {
         private static CancellationTokenSource? _cts;
         private static string _lastMdstat = "";
+        private static string _lastDetail = "";
+        private static string? _currentArray;
+        private static DateTime _lastAlertTime = DateTime.MinValue;
+
+        // Evitar spam de alertas (ej: 30s entre alertas iguales)
+        private const int AlertCooldownSeconds = 30;
 
         public static void StartMonitoring(string arrayName, ArrayConfig cfg, Action<string> onAlert)
         {
             StopMonitoring();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
+            _currentArray = arrayName;
+            _lastMdstat = "";
+            _lastDetail = "";
 
             Task.Run(async () =>
             {
@@ -23,40 +33,52 @@ namespace RAID_Util.Services
                 {
                     try
                     {
-                        string mdstat = MdadmService.GetMdstat();
+                        string mdstat = SafeGetMdstat();
+                        string detail = SafeGetDetail(arrayName);
 
-                        if (mdstat != _lastMdstat)
+                        bool mdstatChanged = mdstat != _lastMdstat;
+                        bool detailChanged = detail != _lastDetail;
+
+                        if (mdstatChanged || detailChanged)
                         {
                             _lastMdstat = mdstat;
+                            _lastDetail = detail;
 
-                            // Degradado
-                            if (cfg.AlertDegraded && MdadmService.IsDegraded(arrayName))
-                                onAlert($"Array {arrayName} is degraded.");
+                            // 1) Degradado
+                            if (cfg.AlertDegraded && SafeIsDegraded(arrayName))
+                                TryAlert(onAlert, $"Array {arrayName} is degraded.");
 
-                            // Disco fallado
-                            if (cfg.AlertDiskFail && mdstat.Contains("faulty"))
-                                onAlert($"A disk in array {arrayName} has failed.");
+                            // 2) Disco fallado (por array, no global)
+                            if (cfg.AlertDiskFail && HasFaultyDisk(mdstat, arrayName))
+                                TryAlert(onAlert, $"A disk in array {arrayName} has failed.");
 
-                            // Resync lento
-                            if (cfg.AlertSlowResync && MdadmService.IsResyncing(arrayName))
+                            // 3) Resync lento
+                            if (cfg.AlertSlowResync && SafeIsResyncing(arrayName))
                             {
-                                var detail = MdadmService.GetDetail(arrayName);
-                                var speed = ExtractSpeed(detail);
-
-                                if (int.TryParse(speed, out int kb) &&
-                                    kb < cfg.ResyncMaxSpeed / 10)
+                                var speedStr = ExtractSpeed(detail);
+                                if (int.TryParse(speedStr, out int kb))
                                 {
-                                    onAlert($"Array {arrayName} resync is slow ({kb} KB/s).");
+                                    // Ej: si cfg.ResyncMaxSpeed = 200000 KB/s → alerta si < 20000
+                                    if (kb > 0 && kb < cfg.ResyncMaxSpeed / 10)
+                                        TryAlert(onAlert, $"Array {arrayName} resync is slow ({kb} KB/s).");
                                 }
                             }
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // No rompemos el bucle por errores puntuales
+                        LogService.Error($"[RaidAlertService] Monitor error: {ex.Message}");
                     }
 
-                    await Task.Delay(3000, token);
+                    try
+                    {
+                        await Task.Delay(3000, token);
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        // Cancelado → salir del bucle
+                        break;
+                    }
                 }
             }, token);
         }
@@ -64,19 +86,137 @@ namespace RAID_Util.Services
         public static void StopMonitoring()
         {
             try { _cts?.Cancel(); } catch { }
+            _cts = null;
+            _currentArray = null;
+            _lastMdstat = "";
+            _lastDetail = "";
+        }
+
+        // ----------------- HELPERS SEGUROS -----------------
+
+        private static string SafeGetMdstat()
+        {
+            try
+            {
+                return MdadmService.GetMdstat() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[RaidAlertService] GetMdstat error: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        private static string SafeGetDetail(string arrayName)
+        {
+            try
+            {
+                return MdadmService.GetDetail(arrayName) ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[RaidAlertService] GetDetail({arrayName}) error: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        private static bool SafeIsDegraded(string arrayName)
+        {
+            try
+            {
+                return MdadmService.IsDegraded(arrayName);
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[RaidAlertService] IsDegraded({arrayName}) error: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool SafeIsResyncing(string arrayName)
+        {
+            try
+            {
+                return MdadmService.IsResyncing(arrayName);
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[RaidAlertService] IsResyncing({arrayName}) error: {ex.Message}");
+                return false;
+            }
+        }
+
+        // ----------------- LÓGICA DE ALERTA -----------------
+
+        private static void TryAlert(Action<string> onAlert, string message)
+        {
+            var now = DateTime.UtcNow;
+
+            if ((now - _lastAlertTime).TotalSeconds < AlertCooldownSeconds)
+                return;
+
+            _lastAlertTime = now;
+
+            try
+            {
+                onAlert(message);
+                LogService.Write($"[RaidAlertService] ALERT: {message}");
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"[RaidAlertService] onAlert error: {ex.Message}");
+            }
+        }
+
+        // ----------------- PARSEO DE MDSTAT -----------------
+
+        private static bool HasFaultyDisk(string mdstat, string arrayName)
+        {
+            if (string.IsNullOrWhiteSpace(mdstat))
+                return false;
+
+            // mdstat suele tener líneas tipo:
+            // md0 : active raid1 sda1[0] sdb1[1](F)
+            // o "faulty" en la línea del array
+            var lines = mdstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            // Buscar la línea del array
+            var line = lines.FirstOrDefault(l => l.Contains(arrayName + " ", StringComparison.Ordinal) ||
+                                                 l.StartsWith(arrayName + " :", StringComparison.Ordinal));
+            if (line == null)
+                return false;
+
+            // Si contiene "faulty" o "(F)" → disco fallado
+            if (line.Contains("faulty", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (line.Contains("(F)", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         private static string ExtractSpeed(string detail)
         {
-            // Busca "speed=1234K/sec"
-            int idx = detail.IndexOf("speed=", StringComparison.Ordinal);
-            if (idx < 0) return "0";
+            if (string.IsNullOrWhiteSpace(detail))
+                return "0";
 
-            int end = detail.IndexOf("K/sec", idx, StringComparison.Ordinal);
-            if (end < 0) return "0";
+            // mdadm --detail suele tener líneas tipo:
+            // "  Resyncing :  12.3% complete ... speed=12345K/sec"
+            // Buscamos "speed=" y "K/sec"
+            int idx = detail.IndexOf("speed=", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return "0";
 
-            string raw = detail.Substring(idx + 6, end - (idx + 6));
-            return raw.Trim();
+            int end = detail.IndexOf("K/sec", idx, StringComparison.OrdinalIgnoreCase);
+            if (end < 0)
+                return "0";
+
+            var raw = detail.Substring(idx + 6, end - (idx + 6)).Trim();
+
+            // A veces puede venir con decimales o espacios raros → nos quedamos con dígitos
+            var digits = new string(raw.Where(char.IsDigit).ToArray());
+            return string.IsNullOrEmpty(digits) ? "0" : digits;
         }
     }
 }
