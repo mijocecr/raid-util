@@ -142,11 +142,11 @@ public partial class RaidView : UserControl
         // 4) Mostrar resultado
         if (!ok)
         {
-            await ShowConfirm("Error", "Could not assemble stopped arrays.");
+            await ShowInfo("Error", "Could not assemble stopped arrays.");
             return;
         }
 
-        await ShowConfirm("Success", "Arrays assembled correctly.");
+        await ShowInfo("Success", "Arrays assembled correctly.");
 
         // 5) Refrescar arrays
         BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -158,7 +158,7 @@ public partial class RaidView : UserControl
     {
         if (_selectedArray == null)
         {
-            await ShowConfirm("Error", "Select an array first.");
+            await ShowInfo("Error", "Select an array first.");
             return;
         }
 
@@ -200,11 +200,11 @@ public partial class RaidView : UserControl
         // 5) Mostrar resultado
         if (!ok)
         {
-            await ShowConfirm("Error", "Could not initialize the array.");
+            await ShowInfo("Error", "Could not initialize the array.");
             return;
         }
 
-        await ShowConfirm("Success", $"The array {array.Name} was initialized.");
+        await ShowInfo("Success", $"The array {array.Name} was initialized.");
 
         // 6) Refrescar UI
         BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -217,6 +217,18 @@ public partial class RaidView : UserControl
     
     private async Task<bool> ShowConfirm(string title, string message)
     {
+        var dlg = new ConfirmDialog(title, message);
+
+        var owner = this.GetVisualRoot() as Window;
+        if (owner != null)
+            return await dlg.ShowDialog<bool>(owner);
+
+        // fallback
+        return await dlg.ShowDialog<bool>(new Window());
+    }
+    
+    private async Task<bool> ShowInfo(string title, string message)
+    {
         var dlg = new InfoDialog(title, message);
 
         var owner = this.GetVisualRoot() as Window;
@@ -226,6 +238,7 @@ public partial class RaidView : UserControl
         // fallback
         return await dlg.ShowDialog<bool>(new Window());
     }
+
 
 
     public void SetArrays(List<RaidArrayInfo> arrays)
@@ -1796,7 +1809,7 @@ private Window GetWindow()
         Console.WriteLine("Config button clicked.");
         OpenArrayConfigWindow();
     }
-
+/*
   private async Task LoadRaidAsync(bool afterCreate = false)
 {
     LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
@@ -1894,7 +1907,110 @@ private Window GetWindow()
         LogService.Debug("[RAIDVIEW] LoadRaidAsync() EXIT");
     }
 }
+*/
 
+private async Task LoadRaidAsync(bool afterCreate = false)
+{
+    LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
+    LogService.Debug("[RAIDVIEW] LoadRaidAsync() ENTER");
+
+    try
+    {
+        if (IsFakeMode)
+        {
+            LogService.Write("[RAIDVIEW] Fake mode enabled → loading fake arrays.");
+            LoadFakeData();
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop1)
+            {
+                var main1 = desktop1.MainWindow as MainWindow;
+                main1?.UpdateStatus("Fake RAID data loaded.");
+            }
+
+            LogService.Write("[RAIDVIEW] ================= RAID LOAD END (FAKE) =================");
+            return;
+        }
+
+        using (LoadingService.Show("Loading RAID arrays..."))
+        {
+            // ⭐ EJECUTAR EL TRABAJO PESADO EN BACKGROUND
+            var result = await Task.Run(async () =>
+            {
+                var service = new RaidService();
+
+                if (afterCreate)
+                    await Task.Delay(150);
+
+                var arraysTask = service.GetArraysAsync();
+                var disksTask = service.GetAllDisksAsync();
+
+                await Task.WhenAll(arraysTask, disksTask);
+
+                return (arraysTask.Result, disksTask.Result);
+            });
+
+            var arrays = result.Item1 ?? new List<RaidArrayInfo>();
+            var disks = result.Item2 ?? new List<RaidDiskInfo>();
+
+            LogService.Debug($"[RAIDVIEW] Arrays returned: {arrays.Count}");
+            foreach (var a in arrays)
+                LogService.Debug($"[RAIDVIEW] ARRAY → {a.Name} | Level={a.Level} | State={a.State} | Disks={a.Disks.Count}");
+
+            LogService.Debug($"[RAIDVIEW] Disks returned: {disks.Count}");
+            foreach (var d in disks)
+                LogService.Debug($"[RAIDVIEW] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
+
+            // ⭐ Asignar discos a arrays SOLO si vienen vacíos
+            foreach (var array in arrays)
+            {
+                if (array.Disks == null || array.Disks.Count == 0)
+                {
+                    array.Disks = disks
+                        .Where(d => d.ArrayName == array.Name)
+                        .ToList();
+                }
+            }
+
+            // ⭐ Actualizar UI (solo en hilo UI)
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                SetArrays(arrays);
+
+                if (afterCreate && arrays.Count > 0)
+                {
+                    var last = arrays.Last();
+                    last.IsExpanded = true;
+                    BuildUI();
+                }
+
+                if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    var main = desktop.MainWindow as MainWindow;
+                    main?.UpdateStatus("RAID information refreshed.");
+                }
+            });
+        }
+
+        LogService.Write("[RAIDVIEW] ================= RAID LOAD END =================");
+    }
+    catch (Exception ex)
+    {
+        LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
+        LogService.Error(ex.ToString());
+
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var main = desktop.MainWindow as MainWindow;
+            main?.UpdateStatus("Error loading RAID information.");
+        }
+
+        LogService.Write("[RAIDVIEW] ================= RAID LOAD FAILED =================");
+    }
+    finally
+    {
+        LogService.Debug("[RAIDVIEW] LoadRaidAsync() EXIT");
+    }
+}
 
 
     
@@ -2194,7 +2310,7 @@ private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
 
 
 
-   private async Task AddDiskToArrayUI(RaidArrayInfo array)
+ private async Task AddDiskToArrayUI(RaidArrayInfo array)
 {
     LogService.Write($"[RAIDVIEW] AddDiskToArrayUI → {array.Name}");
 
@@ -2203,19 +2319,19 @@ private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
     // 1) Obtener todos los discos detectados por el backend
     var allDisks = await service.GetAllDisksAsync();
 
-    // ⭐ FILTRO REAL basado en tu modelo actual
+    // ⭐ FILTRO REAL basado en tu DiskService actual
     var candidates = allDisks
         .Where(d =>
-            d.State == "Free"                  // Solo discos realmente libres
-        )
-        .Where(d =>
-            d.Type == "disk"                   // No rom, no loop, no lvm, no part
-        )
-        .Where(d =>
-            d.Children == null || d.Children.Count == 0   // No particiones
-        )
-        .Where(d =>
-            string.IsNullOrWhiteSpace(d.ArrayName)        // No pertenece a ningún array
+            !d.IsSystemDisk &&                     // No es disco del sistema
+            !d.IsMounted &&                        // No está montado
+            string.IsNullOrWhiteSpace(d.Filesystem) && // No tiene filesystem
+            !d.IsUsedByRaid &&                     // No está en un array RAID
+            string.IsNullOrWhiteSpace(d.ArrayName) &&  // No pertenece a ningún array
+            d.Status != "FAULTY" &&                // No faulty
+            d.Role != "faulty" &&
+            d.Role != "removed" &&
+            !string.Equals(d.Type, "Virtual", StringComparison.OrdinalIgnoreCase) && // No virtual
+            !d.Name.Any(char.IsDigit)              // Solo discos (sda, sdb, sdc)
         )
         .ToList();
 

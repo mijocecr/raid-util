@@ -29,10 +29,8 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
         .Select(d => d.Name)
         .ToHashSet();
 
-    // 2) lsblk universal
-    string json = await ShellHelper.RunCleanAsync(
-        "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE,PKNAME"
-    );
+    // 2) lsblk universal (sin columnas)
+    string json = await ShellHelper.RunCleanAsync("lsblk -J");
 
     if (string.IsNullOrWhiteSpace(json))
         return result;
@@ -49,6 +47,7 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
 
     // 3) Indexar todos los nodos (discos + particiones)
     var nodes = new Dictionary<string, dynamic>();
+
     foreach (var dev in data.blockdevices)
     {
         nodes[(string)dev.name] = dev;
@@ -60,7 +59,6 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
         }
     }
 
-    // Exponer nodos globalmente
     Nodes = nodes;
 
     // 4) Procesar solo discos físicos
@@ -76,20 +74,33 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
         string fstype = dev.fstype ?? "";
         bool isRotational = ParseRota(dev.rota);
 
-        // ⭐ Children reales del JSON
+        // -----------------------------
+        // CHILDREN (JSON o PKNAME)
+        // -----------------------------
         List<string> children = new();
+
         if (dev.children != null)
         {
             foreach (var child in dev.children)
                 children.Add((string)child.name);
         }
 
-        // ⭐ Fallback: reconstruir children con PKNAME si no hay children
+        // Fallback: reconstruir children con PKNAME
         if (children.Count == 0)
         {
             children = nodes
-                .Where(kv => (string?)kv.Value.pkname == name)
-                .Select(kv => (string)kv.Key)
+                .Where(kv =>
+                {
+                    try
+                    {
+                        return (string?)kv.Value.pkname == name;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                })
+                .Select(kv => kv.Key)
                 .Where(n => n != name)
                 .ToList();
         }
@@ -106,9 +117,9 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
             Icon = DiskIconService.GetIcon(name, model, isRotational)
         };
 
-        // ============================================================
-        // ⭐ FLAGS DE SEGURIDAD
-        // ============================================================
+        // -----------------------------
+        // FLAGS DE SEGURIDAD
+        // -----------------------------
 
         // 1) ¿Está montado el disco completo?
         disk.IsMounted = !string.IsNullOrWhiteSpace(disk.MountPoint);
@@ -133,7 +144,9 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
             disk.MountPoint == "/boot/efi" ||
             disk.Children.Any(c =>
             {
-                var child = nodes[c];
+                if (!nodes.TryGetValue(c, out dynamic child))
+                    return false;
+
                 string mp = child.mountpoint ?? "";
                 return mp == "/" || mp == "/boot" || mp == "/boot/efi";
             });
@@ -143,7 +156,9 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
             disk.Filesystem == "swap" ||
             disk.Children.Any(c =>
             {
-                var child = nodes[c];
+                if (!nodes.TryGetValue(c, out dynamic child))
+                    return false;
+
                 string fs = child.fstype ?? "";
                 return fs == "swap";
             });
@@ -160,6 +175,7 @@ public async Task<List<RaidDiskInfo>> GetAllDisksAsync()
 
     return result;
 }
+
 
 
 
@@ -331,14 +347,20 @@ public async Task<List<string>> ValidateDiskForRaidAsync(string diskName)
         // ============================================================
 
         
+
 public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
 
     // ============================================================
-    // 1) mdadm --detail --scan
+    // 1) mdadm universal (detecta ruta automáticamente)
     // ============================================================
-    var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+    string mdadmPath = await ShellHelper.RunCleanAsync("command -v mdadm");
+    mdadmPath = mdadmPath.Trim();
+    if (string.IsNullOrWhiteSpace(mdadmPath))
+        return arrays;
+
+    var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot($"{mdadmPath} --detail --scan");
     string scan = (stdout + "\n" + stderr).Trim();
 
     Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
@@ -348,7 +370,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         return arrays;
 
     // ============================================================
-    // 2) Parsear cada ARRAY detectado
+    // 2) Parsear cada ARRAY detectado (formato universal)
     // ============================================================
     foreach (var raw in scan.Split('\n'))
     {
@@ -356,14 +378,12 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         if (!line.StartsWith("ARRAY"))
             continue;
 
-        string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
+        // ARRAY /dev/md0 metadata=1.2 name=host:0 UUID=xxxx
+        var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2)
             continue;
 
-        // Path real del array (ej: /dev/md0)
-        string arrayPath = parts[1];
-
-        // Nombre amigable (md0)
+        string arrayPath = tokens[1];
         string arrayName = arrayPath.Split('/').Last();
 
         // ============================================================
@@ -406,20 +426,29 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         };
 
         // ============================================================
-        // 5) Obtener MountPath e IsMounted desde lsblk
+        // 5) Obtener MountPath universal
         // ============================================================
         try
         {
-            string lsblk = await ShellHelper.RunCleanAsync(
-                $"lsblk -J -o NAME,MOUNTPOINT /dev/{arrayName}"
-            );
-
+            string lsblk = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{arrayName}");
             dynamic blk = Newtonsoft.Json.JsonConvert.DeserializeObject(lsblk)!;
 
             string mount = "";
+
             try
             {
-                mount = blk.blockdevices[0].mountpoint ?? "";
+                // Fedora / Arch / openSUSE → mountpoints (array)
+                if (blk.blockdevices[0].mountpoints != null)
+                {
+                    var mps = blk.blockdevices[0].mountpoints;
+                    if (mps.Count > 0)
+                        mount = mps[0] ?? "";
+                }
+                else
+                {
+                    // Debian / Ubuntu → mountpoint (string)
+                    mount = blk.blockdevices[0].mountpoint ?? "";
+                }
             }
             catch
             {
@@ -444,12 +473,8 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
             RaidDiskInfo diskInfo = await GetDiskInfo(devName);
 
-            // ⭐ ROLE REAL (mdadm)
             diskInfo.Role = ParseDiskRole(detail, devName);
-
-            // ⭐ STATE DERIVADO DEL ROLE (lógica correcta)
             diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
-
             diskInfo.ArrayName = arrayName;
 
             info.Disks.Add(diskInfo);
@@ -486,7 +511,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         // ============================================================
         //  PARSERS (SIN CAMBIOS)
         // ============================================================
-
+/*
         private string ParseLevel(string detail)
         {
             foreach (var raw in detail.Split('\n'))
@@ -499,7 +524,9 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             }
             return "UNKNOWN";
         }
-
+        
+        */
+/*
         private string ParseArrayState(string detail)
         {
             if (string.IsNullOrWhiteSpace(detail))
@@ -528,6 +555,58 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
                 return "Failed";
 
             // Estados sanos
+            if (lower.Contains("state : clean") ||
+                lower.Contains("state : active"))
+                return "Healthy";
+
+            return "Unknown";
+        }
+*/
+
+        private string ParseArrayState(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+                return "Unknown";
+
+            string lower = detail.ToLowerInvariant();
+
+            // -----------------------------------------
+            // 1) Estados críticos (FAILED)
+            // -----------------------------------------
+            if (lower.Contains("state : faulty") ||
+                lower.Contains("state : failed") ||
+                lower.Contains("state : inactive") ||
+                lower.Contains("state : stopped"))
+                return "Failed";
+
+            // -----------------------------------------
+            // 2) Estados degradados (DEGRADED)
+            // -----------------------------------------
+            if (lower.Contains("state : clean, degraded") ||
+                lower.Contains("state : degraded") ||
+                lower.Contains("degraded"))
+                return "Degraded";
+
+            // -----------------------------------------
+            // 3) Estados de reconstrucción (REBUILDING)
+            // -----------------------------------------
+            if (lower.Contains("resync=") ||          // /proc/mdstat style
+                lower.Contains("recovery =") ||
+                lower.Contains("rebuild =") ||
+                lower.Contains("recovering") ||
+                lower.Contains("resyncing") ||
+                lower.Contains("checking"))
+                return "Rebuilding";
+
+            // -----------------------------------------
+            // 4) Estado de solo lectura (READ-ONLY)
+            // -----------------------------------------
+            if (lower.Contains("read-only"))
+                return "Read-Only";
+
+            // -----------------------------------------
+            // 5) Estados sanos (HEALTHY)
+            // -----------------------------------------
             if (lower.Contains("state : clean") ||
                 lower.Contains("state : active"))
                 return "Healthy";
@@ -681,6 +760,49 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
     }
 }
 
+private string ParseLevel(string detail)
+{
+    if (string.IsNullOrWhiteSpace(detail))
+        return "UNKNOWN";
+
+    foreach (var raw in detail.Split('\n'))
+    {
+        string line = raw.Trim().ToLowerInvariant();
+
+        // Formatos válidos:
+        // Raid Level : raid1
+        // Level : raid10
+        // Raid Level : -unknown-
+        // Raid Level : container
+        if (line.StartsWith("raid level") || line.StartsWith("level"))
+        {
+            // Extraer después de los dos puntos
+            int idx = line.IndexOf(':');
+            if (idx < 0)
+                continue;
+
+            string level = line[(idx + 1)..].Trim();
+
+            // Normalizar
+            return level switch
+            {
+                "raid0"      => "RAID0",
+                "raid1"      => "RAID1",
+                "raid4"      => "RAID4",
+                "raid5"      => "RAID5",
+                "raid6"      => "RAID6",
+                "raid10"     => "RAID10",
+                "linear"     => "LINEAR",
+                "container"  => "CONTAINER",
+                "multipath"  => "MULTIPATH",
+                "-unknown-"  => "UNKNOWN",
+                _            => level.ToUpperInvariant()
+            };
+        }
+    }
+
+    return "UNKNOWN";
+}
 
 
         
@@ -715,7 +837,7 @@ private string NormalizeFs(string fs)
 }
 
 
-
+/*
 private string ParseDiskRole(string detail, string device)
 {
     if (string.IsNullOrWhiteSpace(detail) || string.IsNullOrWhiteSpace(device))
@@ -773,11 +895,77 @@ private string ParseDiskRole(string detail, string device)
     return "unknown";
 }
 
+*/
+        
+
+
+        private string ParseDiskRole(string detail, string device)
+        {
+            if (string.IsNullOrWhiteSpace(detail) || string.IsNullOrWhiteSpace(device))
+                return "unknown";
+
+            string dev = device.Replace("/dev/", "").Trim();
+
+            foreach (var raw in detail.Split('\n'))
+            {
+                string line = raw.Trim();
+                string lower = line.ToLowerInvariant();
+
+                // Solo líneas que mencionan el dispositivo real
+                if (!lower.Contains($"/dev/{dev}"))
+                    continue;
+
+                // -----------------------------
+                // ORDEN UNIVERSAL DE PRIORIDAD
+                // -----------------------------
+
+                // 1) faulty
+                if (lower.Contains("faulty"))
+                    return "faulty";
+
+                // 2) removed
+                if (lower.Contains("removed"))
+                    return "removed";
+
+                // 3) rebuilding / recovering / resync
+                if (lower.Contains("rebuild") ||
+                    lower.Contains("recover") ||
+                    lower.Contains("resync"))
+                    return "rebuilding";
+
+                // 4) write-mostly (Arch, Fedora)
+                if (lower.Contains("write-mostly"))
+                    return "write-mostly";
+
+                // 5) blocked (openSUSE)
+                if (lower.Contains("blocked"))
+                    return "blocked";
+
+                // 6) spare
+                if (lower.Contains("spare"))
+                    return "spare";
+
+                // 7) in-sync (openSUSE)
+                if (lower.Contains("in-sync"))
+                    return "active";
+
+                // 8) active (evitar confundir con inactive)
+                if (lower.Contains(" active ") ||
+                    lower.Contains(" active,") ||
+                    lower.Contains(" active\t"))
+                    return "active";
+
+                // 9) sync (Arch, Fedora)
+                if (lower.Contains(" sync "))
+                    return "active";
+            }
+
+            return "unknown";
+        }
 
         
-        
 
-
+/*
         private string ParseDiskStateFromRole(string role)
         {
             return role switch
@@ -790,10 +978,95 @@ private string ParseDiskRole(string detail, string device)
                 _            => "UNKNOWN"
             };
         }
+*/
 
+        private string ParseDiskStateFromRole(string role)
+        {
+            if (string.IsNullOrWhiteSpace(role))
+                return "UNKNOWN";
+
+            role = role.Trim().ToLowerInvariant();
+
+            return role switch
+            {
+                // Estados críticos
+                "faulty"        => "FAULTY",
+                "removed"       => "OFFLINE",
+                "blocked"       => "ERROR",
+
+                // Estados de advertencia
+                "rebuilding"    => "WARN",
+                "write-mostly"  => "WARN",
+
+                // Estados sanos
+                "active"        => "OK",
+                "in-sync"       => "OK",
+                "spare"         => "OK",
+
+                // Cualquier otro → desconocido
+                _               => "UNKNOWN"
+            };
+        }
 
         
+        private string ParseTotalSize(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+                return "Unknown";
 
+            foreach (var raw in detail.Split('\n'))
+            {
+                string line = raw.Trim();
+
+                if (!line.StartsWith("Array Size", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // -----------------------------------------
+                // 1) Si hay paréntesis → extraer tamaño humano
+                // -----------------------------------------
+                int idx = line.IndexOf('(');
+                if (idx > 0)
+                {
+                    string inside = line[(idx + 1)..];
+                    int end = inside.IndexOf(')');
+                    if (end > 0)
+                    {
+                        string human = inside[..end].Trim();
+
+                        // Ejemplos válidos:
+                        // "20.0 GiB"
+                        // "20.0 GiB 21474836480 bytes"
+                        // "20.0 GiB 21474836480 bytes, 512K chunk"
+                        var parts = human.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                        if (parts.Length >= 2 && parts[1].ToUpper().Contains("IB"))
+                            return $"{parts[0]} {parts[1]}"; // "20.0 GiB"
+                    }
+                }
+
+                // -----------------------------------------
+                // 2) Si NO hay paréntesis → convertir sectores a GiB
+                // -----------------------------------------
+                // Formato:
+                // Array Size : 20953088
+                var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                string last = tokens.Last();
+
+                if (long.TryParse(last, out long sectors))
+                {
+                    // mdadm usa sectores de 512 bytes
+                    double bytes = sectors * 512.0;
+                    double gib = bytes / (1024 * 1024 * 1024);
+
+                    return $"{gib:F2} GiB";
+                }
+            }
+
+            return "Unknown";
+        }
+
+        
+/*
         private string ParseTotalSize(string detail)
         {
             foreach (var raw in detail.Split('\n'))
@@ -813,7 +1086,7 @@ private string ParseDiskRole(string detail, string device)
             }
             return "Unknown";
         }
-
+*/
         private string ParseUptime(string detail) => "Unknown";
         private int ParseRebuildProgress(string detail) => 0;
         private string ParseRebuildEta(string detail) => "";
@@ -823,6 +1096,65 @@ private string ParseDiskRole(string detail, string device)
         // ============================================================
 
         
+        private async Task<RaidDiskInfo> GetDiskInfo(string device)
+        {
+            string name = device.Replace("/dev/", "").Trim();
+
+            // Normalizar nombres de particiones
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
+                name = name.Substring(0, 3);
+
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
+                name = name.Split('p')[0];
+
+            // -----------------------------------------
+            // 1) lsblk universal (sin columnas)
+            // -----------------------------------------
+            string json = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{name}");
+
+            if (string.IsNullOrWhiteSpace(json))
+                return CreateUnknownDisk(name);
+
+            dynamic data;
+            try { data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!; }
+            catch { return CreateUnknownDisk(name); }
+
+            if (data.blockdevices == null || data.blockdevices.Count == 0)
+                return CreateUnknownDisk(name);
+
+            var dev = data.blockdevices[0];
+
+            // -----------------------------------------
+            // 2) Campos universales
+            // -----------------------------------------
+            string model = dev.model ?? "Unknown";
+            string size = dev.size ?? "Unknown";
+            bool isRotational = ParseRota(dev.rota);
+
+            // -----------------------------------------
+            // 3) Icono universal
+            // -----------------------------------------
+            string icon = DiskIconService.GetIcon(name, model, isRotational);
+
+            // -----------------------------------------
+            // 4) Crear objeto final
+            // -----------------------------------------
+            return new RaidDiskInfo
+            {
+                Name = name,
+                Model = model,
+                Size = size,
+                Icon = icon,
+                IsRotational = isRotational,
+                ArrayName = ""
+            };
+        }
+
+        
+      
+
+        
+     /*   
         private async Task<RaidDiskInfo> GetDiskInfo(string device)
         {
             string name = device.Replace("/dev/", "").Trim();
@@ -865,9 +1197,9 @@ private string ParseDiskRole(string detail, string device)
                 ArrayName = ""
             };
         }
-
+*/
         
-
+/*
         private RaidDiskInfo CreateUnknownDisk(string name)
         {
             return new RaidDiskInfo
@@ -881,7 +1213,20 @@ private string ParseDiskRole(string detail, string device)
             };
         }
 
-        
+        */
+
+        private RaidDiskInfo CreateUnknownDisk(string name)
+        {
+            return new RaidDiskInfo
+            {
+                Name = name,
+                Model = "Unknown",
+                Size = "Unknown",
+                Icon = DiskIconService.GetIcon(name, "Unknown", false),
+                ArrayName = ""
+            };
+        }
+
 
         private string GetStateIcon(string state)
         {
@@ -895,7 +1240,7 @@ private string ParseDiskRole(string detail, string device)
                 _ => "avares://RAID-Util/Assets/Icons/array-caution.png"
             };
         }
-
+/*
         private async Task<string> RunMdadmAsync(string arguments)
         {
             var candidates = new[]
@@ -923,6 +1268,31 @@ private string ParseDiskRole(string detail, string device)
             }
 
             return string.Empty;
+        }
+*/
+
+        private async Task<string> RunMdadmAsync(string arguments)
+        {
+            // Rutas posibles en TODAS las distros modernas
+            string[] candidates =
+            {
+                "/usr/sbin/mdadm",
+                "/sbin/mdadm",
+                "/usr/bin/mdadm",
+                "/bin/mdadm",
+                "mdadm"
+            };
+
+            foreach (var path in candidates)
+            {
+                string cmd = $"{path} {arguments}";
+                var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot(cmd);
+
+                if (exit == 0 && (!string.IsNullOrWhiteSpace(stdout) || !string.IsNullOrWhiteSpace(stderr)))
+                    return stdout + stderr;
+            }
+
+            return "";
         }
 
         
@@ -1527,7 +1897,7 @@ public async Task<string> GetArrayDetailsAsync(string arrayName)
     }
 }
 
-
+/*
         public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string? existingDetail = null)
         {
             var result = new List<string>();
@@ -1586,7 +1956,55 @@ public async Task<string> GetArrayDetailsAsync(string arrayName)
 
             return result;
         }
+*/
 
+        public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string detail)
+        {
+            var result = new List<string>();
+
+            if (string.IsNullOrWhiteSpace(detail))
+                return result;
+
+            // Normalizar arrayName (md0, md/0, md127, etc.)
+            string normalizedArray = arrayName.Replace("/dev/", "").Trim();
+
+            foreach (var raw in detail.Split('\n'))
+            {
+                string line = raw.Trim();
+                string lower = line.ToLowerInvariant();
+
+                // Saltar líneas que no contienen información de disco
+                if (!lower.Contains("/dev/") &&
+                    !System.Text.RegularExpressions.Regex.IsMatch(lower, @"\bsd[a-z]\b") &&
+                    !System.Text.RegularExpressions.Regex.IsMatch(lower, @"nvme[0-9]+n[0-9]+"))
+                {
+                    continue;
+                }
+
+                // Extraer el path del disco
+                // Ejemplos válidos:
+                // /dev/sda
+                // /dev/sdb1
+                // /dev/nvme0n1
+                // /dev/nvme0n1p1
+                var match = System.Text.RegularExpressions.Regex.Match(
+                    line,
+                    @"(/dev/(sd[a-z][0-9]*|nvme[0-9]+n[0-9]+p?[0-9]*))"
+                );
+
+                if (!match.Success)
+                    continue;
+
+                string devPath = match.Groups[1].Value;
+                string devName = devPath.Replace("/dev/", "").Trim();
+
+                // Evitar duplicados
+                if (!result.Contains(devPath))
+                    result.Add(devPath);
+            }
+
+            return result;
+        }
 
         
         

@@ -12,107 +12,98 @@ namespace RAID_Util.Services
         // ============================================================
         // OBTENER TODOS LOS DISCOS FÍSICOS Y PARTICIONES ÚTILES
         // ============================================================
-        
-        
-public static List<RaidDiskInfo> GetAllDisks()
-{
-    var disks = new List<RaidDiskInfo>();
-
-    string json = ShellHelper.EjecutarSinRoot(
-        "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE,PKNAME"
-    ).Stdout;
-
-    if (string.IsNullOrWhiteSpace(json))
-        return disks;
-
-    var parsed = ParseLsblk(json);
-
-    foreach (var d in parsed)
-    {
-        // ⭐ MOSTRAR discos crudos (disk) Y particiones inicializadas (part)
-        if (d.Type != "disk" && d.Type != "part")
-            continue;
-
-        // ⭐ IGNORAR discos del sistema
-        if (SystemDiskDetector.IsSystemDisk(d.Name))
-            continue;
-
-        // ⭐ SOLO ignorar discos que SIGUEN en un array activo
-        bool isActiveRaidMember = MdadmService_IsDiskInArray(d.Name, out string arrayName);
-
-        if (isActiveRaidMember)
-            continue;
-
-        // ⭐ NO ignorar discos iSCSI (FILEIO)
-        if (d.Model.Contains("virtual", StringComparison.OrdinalIgnoreCase) ||
-            d.Model.Contains("loop", StringComparison.OrdinalIgnoreCase) ||
-            d.Model.Contains("zram", StringComparison.OrdinalIgnoreCase) ||
-            d.Model.Contains("mapper", StringComparison.OrdinalIgnoreCase))
-            continue;
-
-        bool isRot =
-            d.Rotational == "1" ||
-            d.Rotational.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-        var info = new RaidDiskInfo
+        public static List<RaidDiskInfo> GetAllDisks()
         {
-            Name = d.Name,
-            Model = d.Model,
-            Size = d.Size,
-            Serial = d.Serial,
-            Filesystem = d.FsType,
-            MountPoint = d.MountPoint,
-            IsMounted = !string.IsNullOrWhiteSpace(d.MountPoint),
-            IsRotational = isRot,
-            Type = GetDiskType(d),
-            Temperature = GetTemperature(d.Name),
+            var disks = new List<RaidDiskInfo>();
 
-            Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot),
+            string json = ShellHelper.EjecutarSinRoot(
+                "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINT,FSTYPE,PKNAME"
+            ).Stdout;
 
-            // RAID
-            IsUsedByRaid = false,
-            ArrayName = "",
-            Role = "none",
-            Status = "OK"
-        };
+            if (string.IsNullOrWhiteSpace(json))
+                return disks;
 
-        // ============================================================
-        // ⭐ DETECTAR DISCOS REMOVIDOS / FAULTY DE RAID
-        // ============================================================
+            var parsed = ParseLsblk(json);
 
-        string mdadmInfo = ShellHelper.EjecutarComoRoot($"mdadm --examine /dev/{d.Name}").Stdout;
-
-        if (!string.IsNullOrWhiteSpace(mdadmInfo))
-        {
-            // Caso 1: Disco REMOVIDO (superbloque borrado pero con GPT protective)
-            if (mdadmInfo.Contains("MBR Magic", StringComparison.OrdinalIgnoreCase) &&
-                mdadmInfo.Contains("type ee", StringComparison.OrdinalIgnoreCase))
+            foreach (var d in parsed)
             {
-                info.Status = "FAULTY";
-                info.Role = "removed";
+                // ⭐ MOSTRAR discos crudos (disk) Y particiones inicializadas (part)
+                if (d.Type != "disk" && d.Type != "part")
+                    continue;
+
+                // ⭐ IGNORAR discos del sistema
+                if (SystemDiskDetector.IsSystemDisk(d.Name))
+                    continue;
+
+                // ⭐ SOLO ignorar discos que SIGUEN en un array activo
+                bool isActiveRaidMember = MdadmService_IsDiskInArray(d.Name, out string arrayName);
+                if (isActiveRaidMember)
+                    continue;
+
+                // ⭐ IGNORAR SOLO dispositivos realmente virtuales del sistema
+                if (d.Name.StartsWith("zram", StringComparison.OrdinalIgnoreCase) ||
+                    d.Name.StartsWith("loop", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                bool isRot =
+                    d.Rotational == "1" ||
+                    d.Rotational.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+                var info = new RaidDiskInfo
+                {
+                    Name = d.Name,
+                    Model = d.Model,
+                    Size = d.Size,
+                    Serial = d.Serial,
+                    Filesystem = d.FsType,
+                    MountPoint = d.MountPoint,
+                    IsMounted = !string.IsNullOrWhiteSpace(d.MountPoint),
+                    IsRotational = isRot,
+                    Type = GetDiskType(d),
+                    Temperature = GetTemperature(d.Name),
+
+                    Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot),
+
+                    // RAID
+                    IsUsedByRaid = false,
+                    ArrayName = "",
+                    Role = "none",
+                    Status = "OK"
+                };
+
+                // ============================================================
+                // ⭐ DETECTAR DISCOS REMOVIDOS / FAULTY DE RAID
+                // ============================================================
+                string mdadmInfo = ShellHelper.EjecutarComoRoot($"mdadm --examine /dev/{d.Name}").Stdout;
+
+                if (!string.IsNullOrWhiteSpace(mdadmInfo))
+                {
+                    // Caso 1: Disco REMOVIDO (superbloque borrado pero con GPT protective)
+                    if (mdadmInfo.Contains("MBR Magic", StringComparison.OrdinalIgnoreCase) &&
+                        mdadmInfo.Contains("type ee", StringComparison.OrdinalIgnoreCase))
+                    {
+                        info.Status = "FAULTY";
+                        info.Role = "removed";
+                    }
+                    // Caso 2: Disco con metadata RAID pero no en ningún array → faulty
+                    else if (mdadmInfo.Contains("Raid Level", StringComparison.OrdinalIgnoreCase))
+                    {
+                        info.Status = "FAULTY";
+                        info.Role = "faulty";
+                    }
+                }
+
+                // ============================================================
+                // ⭐ STATUS FINAL (si no fue marcado como faulty)
+                // ============================================================
+                if (info.Status == "OK")
+                    info.Status = GetDiskStatus(info);
+
+                disks.Add(info);
             }
-            // Caso 2: Disco con metadata RAID pero no en ningún array → faulty
-            else if (mdadmInfo.Contains("Raid Level", StringComparison.OrdinalIgnoreCase))
-            {
-                info.Status = "FAULTY";
-                info.Role = "faulty";
-            }
+
+            return disks;
         }
-
-        // ============================================================
-        // ⭐ STATUS FINAL (si no fue marcado como faulty)
-        // ============================================================
-        if (info.Status == "OK")
-            info.Status = GetDiskStatus(info);
-
-        disks.Add(info);
-    }
-
-    return disks;
-}
-
-
-        
 
         // ============================================================
         // PARSEAR JSON DE LSBKL
@@ -147,9 +138,10 @@ public static List<RaidDiskInfo> GetAllDisks()
         // ============================================================
         private static string GetDiskType(LsblkEntry d)
         {
-            string model = d.Model.ToLower();
+            string model = d.Model?.ToLower() ?? "";
             string name = d.Name.ToLower();
 
+            // ⭐ NVMe siempre primero
             if (name.StartsWith("nvme"))
                 return "NVMe";
 
@@ -159,14 +151,8 @@ public static List<RaidDiskInfo> GetAllDisks()
             if (model.Contains("fileio"))
                 return "iSCSI";
 
-            if (model.Contains("virtual") ||
-                model.Contains("vmware") ||
-                model.Contains("qemu") ||
-                model.Contains("vbox") ||
-                model.Contains("loop") ||
-                model.Contains("mapper") ||
-                model.Contains("nbd") ||
-                model.Contains("zram"))
+            // ⭐ Solo marcar como Virtual si es REALMENTE virtual
+            if (model.Contains("loop") || model.Contains("zram"))
                 return "Virtual";
 
             if (d.Rotational == "1" || d.Rotational.Equals("true", StringComparison.OrdinalIgnoreCase))
@@ -259,13 +245,11 @@ public static List<RaidDiskInfo> GetAllDisks()
         // ============================================================
         // DETECTAR SI UN DISCO ESTÁ EN UN ARRAY RAID
         // ============================================================
-        
         private static bool MdadmService_IsDiskInArray(string diskName, out string arrayName)
         {
             arrayName = string.Empty;
             string disk = diskName.Trim().ToLowerInvariant();
 
-            // Escanear arrays activos
             var scanRes = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
             string scan = (scanRes.Stdout + "\n" + scanRes.Stderr).Trim();
 
@@ -282,10 +266,9 @@ public static List<RaidDiskInfo> GetAllDisks()
                 if (parts.Length < 2)
                     continue;
 
-                string arrayPath = parts[1];          // /dev/md0
-                string name = arrayPath.Split('/').Last(); // md0
+                string arrayPath = parts[1];
+                string name = arrayPath.Split('/').Last();
 
-                // Detalle del array
                 var detailRes = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
                 string detail = (detailRes.Stdout + "\n" + detailRes.Stderr).Trim().ToLowerInvariant();
 
@@ -296,15 +279,12 @@ public static List<RaidDiskInfo> GetAllDisks()
                 {
                     string l = r.Trim().ToLowerInvariant();
 
-                    // Solo líneas que mencionan el disco
                     if (!l.Contains($"/dev/{disk}"))
                         continue;
 
-                    // Si la línea contiene faulty o removed → NO lo consideramos miembro activo
                     if (l.Contains("faulty") || l.Contains("removed"))
                         continue;
 
-                    // Si llega aquí, es miembro activo/spare
                     arrayName = name;
                     return true;
                 }
@@ -312,8 +292,6 @@ public static List<RaidDiskInfo> GetAllDisks()
 
             return false;
         }
-
-        
     }
 
     // ============================================================

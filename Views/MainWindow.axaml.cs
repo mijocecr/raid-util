@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using RAID_Util.Helpers;
 using RAID_Util.Services;
 using RAID_Util.Views;
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
 
     private bool _sudoReady = false;
     private bool _raidLoaded = false;
+    private bool _raidLoading = false;
 
     public MainWindow()
     {
@@ -45,7 +47,7 @@ public partial class MainWindow : Window
 
         LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
 
-        // ⭐ MODO FAKE: no tocar sudo ni mdadm, pero sí inicializar vistas en fake
+        // ⭐ MODO FAKE
         if (RaidViewControl != null && RaidViewControl.IsFakeMode)
         {
             LogService.Write("[MAIN] FakeData mode detected → skipping sudo, mdadm and backend initialization.");
@@ -89,7 +91,9 @@ public partial class MainWindow : Window
             StatusBarText.Text = "Validating password...";
             LogService.Debug("[MAIN] Validating admin password...");
 
-            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("echo OK");
+            // ⭐ sudo test en background para no bloquear UI
+            var sudoResult = await Task.Run(() => ShellHelper.EjecutarComoRoot("echo OK"));
+            var (exit, stdout, stderr) = sudoResult;
 
             LogService.Debug($"[MAIN] sudo test exit={exit}");
             LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
@@ -100,14 +104,6 @@ public partial class MainWindow : Window
             {
                 LogService.Write("[MAIN] Password validated successfully.");
                 _sudoReady = true;
-
-                // ⭐ Inicializar DisksView ahora que sudo está listo
-                if (DisksViewControl != null)
-                {
-                    LogService.Debug("[MAIN] Inicializando DisksView después de validar sudo.");
-                    DisksViewControl.Initialize(_sudoReady, forceFake: false);
-                }
-
                 break;
             }
 
@@ -123,7 +119,10 @@ public partial class MainWindow : Window
         }
 
         StatusBarText.Text = "Checking RAID subsystem...";
-        var (mdExit, mdOut, mdErr) = ShellHelper.EjecutarComoRoot("which mdadm");
+
+        // ⭐ which mdadm también en background
+        var mdResult = await Task.Run(() => ShellHelper.EjecutarComoRoot("which mdadm"));
+        var (mdExit, mdOut, mdErr) = mdResult;
 
         LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
 
@@ -138,6 +137,7 @@ public partial class MainWindow : Window
 
         StatusBarText.Text = "System ready.";
 
+        // ⭐ Timers pueden arrancar ya; las vistas se irán llenando cuando toque
         _timerManager = new TimerManager(
             statusView: StatusViewControl,
             logsView: LogsViewControl,
@@ -163,7 +163,7 @@ public partial class MainWindow : Window
     {
         LogService.Debug($"[MAIN] TabIndexChanged → SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
 
-        // ⭐ Inicializar DisksView si el usuario abre la pestaña Disks
+        // ⭐ Inicializar DisksView SOLO cuando el usuario abre la pestaña Disks
         if (MainTabs.SelectedIndex == 2 && _sudoReady)
         {
             if (DisksViewControl != null)
@@ -179,21 +179,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_raidLoaded)
-        {
-            LogService.Debug("[MAIN] TabIndexChanged → RAID already loaded, skipping.");
-            return;
-        }
-
+        // ⭐ RAID: cargar una sola vez, en background, sin bloquear la UI
         if (MainTabs.SelectedIndex == 1) // RAID tab
         {
-            LogService.Debug("[MAIN] TabIndexChanged → BEFORE LoadRaidAsync()");
+            if (_raidLoaded || _raidLoading)
+            {
+                LogService.Debug("[MAIN] TabIndexChanged → RAID already loaded or loading, skipping.");
+                return;
+            }
+
+            _raidLoading = true;
             StatusBarText.Text = "Loading RAID information...";
 
-            await LoadRaidAsync();
+            LogService.Debug("[MAIN] TabIndexChanged → BEFORE LoadRaidAsync() (fire-and-forget)");
 
-            _raidLoaded = true;
-            LogService.Debug("[MAIN] TabIndexChanged → AFTER LoadRaidAsync()");
+            _ = LoadRaidAsync();
         }
     }
 
@@ -229,12 +229,18 @@ public partial class MainWindow : Window
                 else
                 {
                     LogService.Debug("[MAIN] Sending arrays to RaidViewControl.SetArrays()...");
-                    RaidViewControl.SetArrays(arrays);
+
+                    // ⭐ Asegurar actualización en hilo UI
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        RaidViewControl.SetArrays(arrays);
+                    });
                 }
 
                 StatusBarText.Text = "RAID information loaded.";
             }
 
+            _raidLoaded = true;
             LogService.Write("[MAIN] ================= RAID LOAD END =================");
         }
         catch (Exception ex)
@@ -248,6 +254,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _raidLoading = false;
             LogService.Debug("[MAIN] LoadRaidAsync() EXIT");
         }
     }
