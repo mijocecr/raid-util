@@ -1,19 +1,18 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 
-namespace RAID_Util.Views
-{
-    public partial class IncorrectPasswordDialog : Window
-    {
-        public IncorrectPasswordDialog()
-        {
-            InitializeComponent();
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        }
+namespace RAID_Util.Views;
 
-        private void OnOk(object? sender, RoutedEventArgs e)
-        {
-            Close();
-        }
+public partial class IncorrectPasswordDialog : Window
+{
+    public IncorrectPasswordDialog()
+    {
+        InitializeComponent();
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+    }
+
+    private void OnOk(object? sender, RoutedEventArgs e)
+    {
+        Close();
     }
 }

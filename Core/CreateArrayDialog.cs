@@ -1,23 +1,23 @@
-using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using RAID_Util.Models;
-using System.Collections.Generic;
-using System.Linq;
-using Avalonia.Controls.Primitives;
 using RAID_Util.Views;
 
 namespace RAID_Util.Core;
 
 public class CreateArrayDialog : Window
 {
-    private readonly List<RaidDiskInfo> _disks;
     private readonly List<CheckBox> _diskChecks = new();
-    private ComboBox _levelSelector;
-    private TextBox _nameBox;
-    private TextBlock _summary;
+    private readonly List<RaidDiskInfo> _disks;
+    private readonly ComboBox _levelSelector;
+    private readonly TextBox _nameBox;
+    private readonly TextBlock _summary;
 
     public CreateArrayDialog(List<RaidDiskInfo> disks)
     {
@@ -183,7 +183,7 @@ public class CreateArrayDialog : Window
             .Select(c => (RaidDiskInfo)c.Tag)
             .ToList();
 
-        string level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
+        var level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
 
         if (selected.Count == 0)
         {
@@ -200,11 +200,11 @@ public class CreateArrayDialog : Window
                 return;
             }
 
-            double sum = selected
+            var sum = selected
                 .Select(d => ParseSizeToGB(d.Size))
                 .Sum();
 
-            string sizeText = sum >= 1024
+            var sizeText = sum >= 1024
                 ? $"{sum / 1024.0:F2} TB"
                 : $"{sum:F0} GB";
 
@@ -227,9 +227,9 @@ public class CreateArrayDialog : Window
             return;
         }
 
-        double usableGb = CalculateRaidUsableSize(level, sizesGb);
+        var usableGb = CalculateRaidUsableSize(level, sizesGb);
 
-        string sizeText2 = usableGb >= 1024
+        var sizeText2 = usableGb >= 1024
             ? $"{usableGb / 1024.0:F2} TB"
             : $"{usableGb:F0} GB";
 
@@ -261,23 +261,23 @@ public class CreateArrayDialog : Window
         if (string.IsNullOrWhiteSpace(size))
             return 0;
 
-        string s = size.Trim().ToUpper();
+        var s = size.Trim().ToUpper();
         s = s.Replace(",", ".");
         s = string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
 
         s = s.Replace("GIB", "")
-             .Replace("GI", "")
-             .Replace("GB", "")
-             .Replace("G", "")
-             .Replace("TIB", "")
-             .Replace("TI", "")
-             .Replace("TB", "")
-             .Replace("MIB", "")
-             .Replace("MI", "")
-             .Replace("MB", "");
+            .Replace("GI", "")
+            .Replace("GB", "")
+            .Replace("G", "")
+            .Replace("TIB", "")
+            .Replace("TI", "")
+            .Replace("TB", "")
+            .Replace("MIB", "")
+            .Replace("MI", "")
+            .Replace("MB", "");
 
-        if (!double.TryParse(s, System.Globalization.NumberStyles.Any,
-            System.Globalization.CultureInfo.InvariantCulture, out double value))
+        if (!double.TryParse(s, NumberStyles.Any,
+                CultureInfo.InvariantCulture, out var value))
             return 0;
 
         if (size.ToUpper().Contains("TB"))
@@ -291,15 +291,15 @@ public class CreateArrayDialog : Window
 
     private double CalculateRaidUsableSize(string level, List<double> sizes)
     {
-        double min = sizes.Min();
-        double sum = sizes.Sum();
+        var min = sizes.Min();
+        var sum = sizes.Sum();
 
         return level switch
         {
             "RAID0" => sum,
             "RAID1" => min,
             "RAID5" => sum - min,
-            "RAID6" => sum - (2 * min),
+            "RAID6" => sum - 2 * min,
             "RAID10" => sum / 2,
             _ => 0
         };
@@ -307,8 +307,8 @@ public class CreateArrayDialog : Window
 
     private CreateArrayResult? GetResult()
     {
-        string friendlyName = _nameBox.Text?.Trim() ?? "";
-        string level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
+        var friendlyName = _nameBox.Text?.Trim() ?? "";
+        var level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
 
         var selected = _diskChecks
             .Where(c => c.IsChecked == true)
@@ -322,7 +322,7 @@ public class CreateArrayDialog : Window
             return null;
         }
 
-        string? error = ValidateSelection(level, selected.Count);
+        var error = ValidateSelection(level, selected.Count);
         if (error != null)
         {
             new ConfirmDialog("Invalid configuration", error)
@@ -331,7 +331,7 @@ public class CreateArrayDialog : Window
         }
 
         // Convert UI label to mdadm level
-        string mdadmLevel = level switch
+        var mdadmLevel = level switch
         {
             "JBOD (Linear)" => "linear",
             _ => level

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using RAID_Util.Services;
 
 namespace RAID_Util.Services;
 
@@ -20,8 +19,8 @@ public static class LogService
         {
             EnsureDirectory();
 
-            string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            string line = $"[{timestamp}] {message}";
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var line = $"[{timestamp}] {message}";
 
             lock (_lock)
             {
@@ -57,7 +56,7 @@ public static class LogService
     {
         try
         {
-            string logDir = ConfigManager.Get().LogsPath;
+            var logDir = ConfigManager.Get().LogsPath;
 
             if (!Directory.Exists(logDir))
                 Directory.CreateDirectory(logDir);

@@ -6,7 +6,7 @@
     Height="430"
     CanResize="False"
     Title="Configuration"
-    
+
     Background="{DynamicResource BMWBackgroundBrush}"
     Foreground="{DynamicResource BMWTextBrush}">
 
@@ -14,7 +14,7 @@
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml"/>
+                <ResourceInclude Source="avares://RAID-Util/Styles/BMWColors.axaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Window.Resources>
@@ -34,7 +34,7 @@
                 <TextBlock Text="System Timers"
                            FontSize="16"
                            FontWeight="SemiBold"
-                           Foreground="{DynamicResource BMWTextBrush}"/>
+                           Foreground="{DynamicResource BMWTextBrush}" />
 
                 <StackPanel Spacing="6">
 
@@ -42,42 +42,42 @@
                         <TextBlock Text="General refresh (ms)"
                                    VerticalAlignment="Center"
                                    Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
                         <TextBox x:Name="GeneralRefreshBox"
                                  Width="80"
                                  Background="{DynamicResource BMWInputBrush}"
                                  Foreground="{DynamicResource BMWTextBrush}"
                                  BorderBrush="{DynamicResource BMWBorderBrush}"
                                  BorderThickness="1"
-                                 CornerRadius="6"/>
+                                 CornerRadius="6" />
                     </DockPanel>
 
                     <DockPanel LastChildFill="False">
                         <TextBlock Text="Rebuild refresh (ms)"
                                    VerticalAlignment="Center"
                                    Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
                         <TextBox x:Name="RebuildRefreshBox"
                                  Width="80"
                                  Background="{DynamicResource BMWInputBrush}"
                                  Foreground="{DynamicResource BMWTextBrush}"
                                  BorderBrush="{DynamicResource BMWBorderBrush}"
                                  BorderThickness="1"
-                                 CornerRadius="6"/>
+                                 CornerRadius="6" />
                     </DockPanel>
 
                     <DockPanel LastChildFill="False">
                         <TextBlock Text="Hotplug refresh (ms)"
                                    VerticalAlignment="Center"
                                    Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
                         <TextBox x:Name="HotplugRefreshBox"
                                  Width="80"
                                  Background="{DynamicResource BMWInputBrush}"
                                  Foreground="{DynamicResource BMWTextBrush}"
                                  BorderBrush="{DynamicResource BMWBorderBrush}"
                                  BorderThickness="1"
-                                 CornerRadius="6"/>
+                                 CornerRadius="6" />
                     </DockPanel>
 
                 </StackPanel>
@@ -90,10 +90,10 @@
                 <TextBlock Text="Global Logs"
                            FontSize="16"
                            FontWeight="SemiBold"
-                           Foreground="{DynamicResource BMWTextBrush}"/>
+                           Foreground="{DynamicResource BMWTextBrush}" />
 
                 <TextBlock Text="Logs folder"
-                           Foreground="{DynamicResource BMWTextBrush}"/>
+                           Foreground="{DynamicResource BMWTextBrush}" />
 
                 <DockPanel LastChildFill="False">
                     <TextBox x:Name="LogsPathBox"
@@ -103,7 +103,7 @@
                              Foreground="{DynamicResource BMWTextBrush}"
                              BorderBrush="{DynamicResource BMWBorderBrush}"
                              BorderThickness="1"
-                             CornerRadius="6"/>
+                             CornerRadius="6" />
                     <Button x:Name="BrowseLogsButton"
                             Content="Browse..."
                             Width="90"
@@ -112,7 +112,7 @@
                             Foreground="{DynamicResource BMWTextBrush}"
                             BorderBrush="{DynamicResource BMWAccentBrush}"
                             BorderThickness="1"
-                            CornerRadius="6"/>
+                            CornerRadius="6" />
                 </DockPanel>
 
                 <ComboBox x:Name="LogLevelCombo"
@@ -122,9 +122,9 @@
                           BorderBrush="{DynamicResource BMWBorderBrush}"
                           BorderThickness="1"
                           CornerRadius="6">
-                    <ComboBoxItem Content="Basic"/>
-                    <ComboBoxItem Content="Normal"/>
-                    <ComboBoxItem Content="Detailed"/>
+                    <ComboBoxItem Content="Basic" />
+                    <ComboBoxItem Content="Normal" />
+                    <ComboBoxItem Content="Detailed" />
                 </ComboBox>
 
             </StackPanel>
@@ -147,7 +147,7 @@
                         Foreground="{DynamicResource BMWTextBrush}"
                         BorderBrush="{DynamicResource BMWAccentBrush}"
                         BorderThickness="1"
-                        CornerRadius="6"/>
+                        CornerRadius="6" />
 
                 <Button x:Name="CloseButton"
                         Content="Close"
@@ -158,10 +158,10 @@
                         Grid.Column="1"
                         Background="{DynamicResource BMWSurfaceBrush}"
                         Foreground="{DynamicResource BMWTextBrush}"
-                        
+
                         BorderBrush="{DynamicResource BMWAccentBrush}"
                         BorderThickness="1"
-                        CornerRadius="6"/>
+                        CornerRadius="6" />
             </Grid>
 
         </StackPanel>

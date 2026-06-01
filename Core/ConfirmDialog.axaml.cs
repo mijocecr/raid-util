@@ -80,7 +80,7 @@ public class ConfirmDialog : Window
         Content = panel;
 
         // ⭐ Manejo de teclas
-        this.KeyDown += (s, e) =>
+        KeyDown += (s, e) =>
         {
             if (e.Key == Key.Escape)
             {

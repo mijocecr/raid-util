@@ -56,24 +56,24 @@
     <!-- ============================================
          BRUSHES (estos sí van fuera)
          ============================================ -->
-    <SolidColorBrush x:Key="BMWBackgroundBrush" Color="{DynamicResource BMWBackgroundColor}"/>
-    <SolidColorBrush x:Key="BMWSurfaceBrush" Color="{DynamicResource BMWSurfaceColor}"/>
-    <SolidColorBrush x:Key="BMWSurfaceElevatedBrush" Color="{DynamicResource BMWSurfaceElevatedColor}"/>
-    <SolidColorBrush x:Key="BMWInputBrush" Color="{DynamicResource BMWInputColor}"/>
+    <SolidColorBrush x:Key="BMWBackgroundBrush" Color="{DynamicResource BMWBackgroundColor}" />
+    <SolidColorBrush x:Key="BMWSurfaceBrush" Color="{DynamicResource BMWSurfaceColor}" />
+    <SolidColorBrush x:Key="BMWSurfaceElevatedBrush" Color="{DynamicResource BMWSurfaceElevatedColor}" />
+    <SolidColorBrush x:Key="BMWInputBrush" Color="{DynamicResource BMWInputColor}" />
 
-    <SolidColorBrush x:Key="BMWTextBrush" Color="{DynamicResource BMWTextColor}"/>
-    <SolidColorBrush x:Key="BMWTextDimBrush" Color="{DynamicResource BMWTextDimColor}"/>
+    <SolidColorBrush x:Key="BMWTextBrush" Color="{DynamicResource BMWTextColor}" />
+    <SolidColorBrush x:Key="BMWTextDimBrush" Color="{DynamicResource BMWTextDimColor}" />
 
-    <SolidColorBrush x:Key="BMWAccentBrush" Color="{DynamicResource BMWAccentColor}"/>
-    <SolidColorBrush x:Key="BMWAccentHoverBrush" Color="{DynamicResource BMWAccentHoverColor}"/>
+    <SolidColorBrush x:Key="BMWAccentBrush" Color="{DynamicResource BMWAccentColor}" />
+    <SolidColorBrush x:Key="BMWAccentHoverBrush" Color="{DynamicResource BMWAccentHoverColor}" />
 
-    <SolidColorBrush x:Key="BMWBorderBrush" Color="{DynamicResource BMWBorderColor}"/>
-    <SolidColorBrush x:Key="BMWHoverBrush" Color="{DynamicResource BMWHoverColor}"/>
+    <SolidColorBrush x:Key="BMWBorderBrush" Color="{DynamicResource BMWBorderColor}" />
+    <SolidColorBrush x:Key="BMWHoverBrush" Color="{DynamicResource BMWHoverColor}" />
 
-    <SolidColorBrush x:Key="BMWHealthHealthyBrush" Color="#4CAF50"/>
-    <SolidColorBrush x:Key="BMWHealthWarningBrush" Color="#FFC107"/>
-    <SolidColorBrush x:Key="BMWHealthCriticalBrush" Color="#F44336"/>
-    <SolidColorBrush x:Key="BMWHealthNoneBrush" Color="#9E9E9E"/>
+    <SolidColorBrush x:Key="BMWHealthHealthyBrush" Color="#4CAF50" />
+    <SolidColorBrush x:Key="BMWHealthWarningBrush" Color="#FFC107" />
+    <SolidColorBrush x:Key="BMWHealthCriticalBrush" Color="#F44336" />
+    <SolidColorBrush x:Key="BMWHealthNoneBrush" Color="#9E9E9E" />
 
-    
+
 </ResourceDictionary>

@@ -1,75 +1,72 @@
-using Avalonia.Controls;
-using Avalonia.Interactivity;
-using RAID_Util.Services;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
 using RAID_Util.Helpers;
+using RAID_Util.Services;
 
-namespace RAID_Util.Views.Tabs
+namespace RAID_Util.Views.Tabs;
+
+public partial class LogsView : UserControl
 {
-    public partial class LogsView : UserControl
+    public LogsView()
     {
-        private string LogPath =>
-            Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
+        InitializeComponent();
+        HookEvents();
+    }
 
-        public LogsView()
+    private string LogPath =>
+        Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
+
+    private void HookEvents()
+    {
+        RefreshButton.Click += async (_, _) => await LoadLogsAsync();
+        OpenFullButton.Click += OnOpenFullLog;
+    }
+
+    // ============================================================
+    // CARGAR LOGS (OPTIMIZADO)
+    // ============================================================
+    public async Task LoadLogsAsync()
+    {
+        try
         {
-            InitializeComponent();
-            HookEvents();
+            if (!File.Exists(LogPath))
+            {
+                LogTextBox.Text = "[No log file found]";
+                return;
+            }
+
+            // Leer archivo sin bloquear UI
+            var content = await File.ReadAllTextAsync(LogPath);
+
+            LogTextBox.Text = content;
+
+            // Auto-scroll estable
+            await Task.Yield();
+            LogTextBox.CaretIndex = LogTextBox.Text.Length;
         }
-
-        private void HookEvents()
+        catch (Exception ex)
         {
-            RefreshButton.Click += async (_, _) => await LoadLogsAsync();
-            OpenFullButton.Click += OnOpenFullLog;
+            LogTextBox.Text = $"[Error reading log]\n{ex.Message}";
         }
+    }
 
-        // ============================================================
-        // CARGAR LOGS (OPTIMIZADO)
-        // ============================================================
-        public async Task LoadLogsAsync()
+
+    // ============================================================
+    // ABRIR LOG COMPLETO EN EDITOR
+    // ============================================================
+    private void OnOpenFullLog(object? sender, RoutedEventArgs e)
+    {
+        try
         {
-            try
-            {
-                if (!File.Exists(LogPath))
-                {
-                    LogTextBox.Text = "[No log file found]";
-                    return;
-                }
-
-                // Leer archivo sin bloquear UI
-                string content = await File.ReadAllTextAsync(LogPath);
-
-                LogTextBox.Text = content;
-
-                // Auto-scroll estable
-                await Task.Yield();
-                LogTextBox.CaretIndex = LogTextBox.Text.Length;
-            }
-            catch (Exception ex)
-            {
-                LogTextBox.Text = $"[Error reading log]\n{ex.Message}";
-            }
+            if (File.Exists(LogPath))
+                ShellHelper.OpenFile(LogPath);
         }
-
-        
-        
-        
-        // ============================================================
-        // ABRIR LOG COMPLETO EN EDITOR
-        // ============================================================
-        private void OnOpenFullLog(object? sender, RoutedEventArgs e)
+        catch
         {
-            try
-            {
-                if (File.Exists(LogPath))
-                    ShellHelper.OpenFile(LogPath);
-            }
-            catch
-            {
-                // silencio total
-            }
+            // silencio total
         }
     }
 }

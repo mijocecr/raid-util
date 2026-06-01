@@ -12,9 +12,15 @@ public class LambdaCommand : ICommand
         _action = action;
     }
 
-    public bool CanExecute(object? parameter) => true;
+    public bool CanExecute(object? parameter)
+    {
+        return true;
+    }
 
-    public void Execute(object? parameter) => _action();
+    public void Execute(object? parameter)
+    {
+        _action();
+    }
 
     public event EventHandler? CanExecuteChanged;
 }

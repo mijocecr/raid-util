@@ -32,14 +32,14 @@
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource BMWTextBrush}"
                            HorizontalAlignment="Center"
-                           TextWrapping="Wrap"/>
+                           TextWrapping="Wrap" />
 
                 <ProgressBar IsIndeterminate="True"
                              Width="260"
                              Height="8"
                              Foreground="{DynamicResource BMWAccentBrush}"
                              Background="{DynamicResource BMWTextDimBrush}"
-                             CornerRadius="4"/>
+                             CornerRadius="4" />
 
             </StackPanel>
 

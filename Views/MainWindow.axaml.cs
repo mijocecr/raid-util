@@ -1,27 +1,25 @@
 using System;
 using System.Threading.Tasks;
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using RAID_Util.Core;
 using RAID_Util.Helpers;
+using RAID_Util.Models;
 using RAID_Util.Services;
 using RAID_Util.Views;
-using RAID_Util.Views.Tabs;
-using RAID_Util.Core;
-using RAID_Util.Models;
 
 namespace RAID_Util;
 
 public partial class MainWindow : Window
 {
-    private TimerManager? _timerManager;
-    private AppConfig _config = new AppConfig();
+    private AppConfig _config = new();
+    private bool _raidLoaded;
+    private bool _raidLoading;
 
-    private bool _sudoReady = false;
-    private bool _raidLoaded = false;
-    private bool _raidLoading = false;
+    private bool _sudoReady;
+    private TimerManager? _timerManager;
 
     public MainWindow()
     {
@@ -59,7 +57,7 @@ public partial class MainWindow : Window
             if (DisksViewControl != null)
             {
                 LogService.Debug("[MAIN] Inicializando DisksView en modo fake.");
-                DisksViewControl.Initialize(sudoReady: true, forceFake: true);
+                DisksViewControl.Initialize(true, true);
             }
 
             return;
@@ -72,7 +70,7 @@ public partial class MainWindow : Window
         await Task.Delay(120);
 
         const int maxAttempts = 2;
-        int attempts = 0;
+        var attempts = 0;
 
         while (true)
         {
@@ -139,16 +137,17 @@ public partial class MainWindow : Window
 
         // ⭐ Timers pueden arrancar ya; las vistas se irán llenando cuando toque
         _timerManager = new TimerManager(
-            statusView: StatusViewControl,
-            logsView: LogsViewControl,
-            generalRefreshMs: _config.GeneralRefreshMs,
-            rebuildRefreshMs: _config.RebuildRefreshMs,
-            hotplugRefreshMs: _config.HotplugRefreshMs
+            StatusViewControl,
+            LogsViewControl,
+            _config.GeneralRefreshMs,
+            _config.RebuildRefreshMs,
+            _config.HotplugRefreshMs
         );
 
         _timerManager.StartAll();
 
-        LogService.Debug($"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
+        LogService.Debug(
+            $"[MAIN] OnOpened completed. Current SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
         StatusBarText.Text = "Ready.";
     }
 
@@ -161,17 +160,16 @@ public partial class MainWindow : Window
 
     private async void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
-        LogService.Debug($"[MAIN] TabIndexChanged → SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
+        LogService.Debug(
+            $"[MAIN] TabIndexChanged → SelectedIndex={MainTabs.SelectedIndex}, _sudoReady={_sudoReady}, _raidLoaded={_raidLoaded}");
 
         // ⭐ Inicializar DisksView SOLO cuando el usuario abre la pestaña Disks
         if (MainTabs.SelectedIndex == 2 && _sudoReady)
-        {
             if (DisksViewControl != null)
             {
                 LogService.Debug("[MAIN] Inicializando DisksView desde TabChanged.");
-                DisksViewControl.Initialize(_sudoReady, forceFake: false);
+                DisksViewControl.Initialize(_sudoReady, false);
             }
-        }
 
         if (!_sudoReady)
         {
@@ -213,14 +211,16 @@ public partial class MainWindow : Window
 
                 LogService.Debug($"[MAIN] Arrays returned: {arrays.Count}");
                 foreach (var a in arrays)
-                    LogService.Debug($"[MAIN] ARRAY → {a.Name} | Level={a.Level} | State={a.State} | Disks={a.Disks.Count}");
+                    LogService.Debug(
+                        $"[MAIN] ARRAY → {a.Name} | Level={a.Level} | State={a.State} | Disks={a.Disks.Count}");
 
                 LogService.Debug("[MAIN] Calling RaidService.GetAllDisksAsync()...");
                 var disks = await service.GetAllDisksAsync();
 
                 LogService.Debug($"[MAIN] Disks returned: {disks.Count}");
                 foreach (var d in disks)
-                    LogService.Debug($"[MAIN] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
+                    LogService.Debug(
+                        $"[MAIN] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State} | Rota={d.IsRotational}");
 
                 if (RaidViewControl == null)
                 {
@@ -231,10 +231,7 @@ public partial class MainWindow : Window
                     LogService.Debug("[MAIN] Sending arrays to RaidViewControl.SetArrays()...");
 
                     // ⭐ Asegurar actualización en hilo UI
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        RaidViewControl.SetArrays(arrays);
-                    });
+                    await Dispatcher.UIThread.InvokeAsync(() => { RaidViewControl.SetArrays(arrays); });
                 }
 
                 StatusBarText.Text = "RAID information loaded.";
@@ -265,13 +262,11 @@ public partial class MainWindow : Window
         await win.ShowDialog(this);
 
         if (_timerManager is not null)
-        {
             _timerManager.UpdateIntervals(
                 _config.GeneralRefreshMs,
                 _config.RebuildRefreshMs,
                 _config.HotplugRefreshMs
             );
-        }
     }
 
     private void Set_Status(object? sender, PointerPressedEventArgs e)

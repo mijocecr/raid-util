@@ -1,18 +1,17 @@
 using System;
 using System.Diagnostics;
-using System.IO;
 
 namespace RAID_Util.Helpers;
 
 /// <summary>
-/// Sends desktop notifications to Linux using notify-send.
-/// Supports duration, urgency, and icons.
-/// Falls back to console output if notify-send is not available.
+///     Sends desktop notifications to Linux using notify-send.
+///     Supports duration, urgency, and icons.
+///     Falls back to console output if notify-send is not available.
 /// </summary>
 public static class NotificadorLinux
 {
     /// <summary>
-    /// Sends a desktop notification.
+    ///     Sends a desktop notification.
     /// </summary>
     /// <param name="mensaje">Message to display.</param>
     /// <param name="duracionMs">Duration in milliseconds (default: 5000).</param>
@@ -32,8 +31,8 @@ public static class NotificadorLinux
                 return;
             }
 
-            string iconArg = icono != null ? $"-i \"{icono}\"" : "";
-            string args = $"-t {duracionMs} -u {urgencia} {iconArg} \"RAID Management\" \"{mensaje}\"";
+            var iconArg = icono != null ? $"-i \"{icono}\"" : "";
+            var args = $"-t {duracionMs} -u {urgencia} {iconArg} \"RAID Management\" \"{mensaje}\"";
 
             Process.Start(new ProcessStartInfo
             {
@@ -49,7 +48,7 @@ public static class NotificadorLinux
     }
 
     /// <summary>
-    /// Checks if notify-send is available in the system.
+    ///     Checks if notify-send is available in the system.
     /// </summary>
     private static bool NotifySendDisponible()
     {

@@ -17,7 +17,7 @@
                    FontWeight="Bold"
                    TextWrapping="Wrap"
                    HorizontalAlignment="Center"
-                   Foreground="{DynamicResource BMWTextBrush}"/>
+                   Foreground="{DynamicResource BMWTextBrush}" />
 
         <!-- GRID COMPACTO -->
         <Grid ColumnDefinitions="100, *"
@@ -28,7 +28,7 @@
             <TextBlock Text="Label:"
                        Foreground="{DynamicResource BMWAccentBrush}"
                        VerticalAlignment="Center"
-                       Grid.Row="0" Grid.Column="0"/>
+                       Grid.Row="0" Grid.Column="0" />
 
             <TextBox x:Name="LabelBox"
                      Background="{DynamicResource BMWSurfaceElevatedBrush}"
@@ -36,13 +36,13 @@
                      BorderBrush="{DynamicResource BMWBorderBrush}"
                      Height="24"
                      Watermark="Volume label"
-                     Grid.Row="0" Grid.Column="1"/>
+                     Grid.Row="0" Grid.Column="1" />
 
             <!-- Filesystem -->
             <TextBlock Text="Filesystem:"
                        Foreground="{DynamicResource BMWAccentBrush}"
                        VerticalAlignment="Center"
-                       Grid.Row="1" Grid.Column="0"/>
+                       Grid.Row="1" Grid.Column="0" />
 
             <ComboBox x:Name="FsCombo"
                       Background="{DynamicResource BMWSurfaceElevatedBrush}"
@@ -52,13 +52,13 @@
                       Width="220"
                       Grid.Row="1" Grid.Column="1">
 
-                <ComboBoxItem Content="ext4"/>
-                <ComboBoxItem Content="xfs"/>
-                <ComboBoxItem Content="btrfs"/>
-                <ComboBoxItem Content="f2fs"/>
-                <ComboBoxItem Content="ntfs"/>
-                <ComboBoxItem Content="exfat"/>
-                <ComboBoxItem Content="fat32"/>
+                <ComboBoxItem Content="ext4" />
+                <ComboBoxItem Content="xfs" />
+                <ComboBoxItem Content="btrfs" />
+                <ComboBoxItem Content="f2fs" />
+                <ComboBoxItem Content="ntfs" />
+                <ComboBoxItem Content="exfat" />
+                <ComboBoxItem Content="fat32" />
 
             </ComboBox>
 
@@ -74,12 +74,12 @@
                     Content="Initialize"
                     Width="80"
                     Height="30"
-                    Classes="AccentButton"/>
+                    Classes="AccentButton" />
 
             <Button x:Name="CancelBtn"
                     Content="Cancel"
                     Width="80"
-                    Height="30"/>
+                    Height="30" />
         </StackPanel>
 
     </StackPanel>

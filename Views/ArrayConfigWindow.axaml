@@ -16,7 +16,7 @@
                    TextAlignment="Center"
                    FontWeight="SemiBold"
                    Foreground="{DynamicResource BMWTextBrush}"
-                   Margin="0 0 0 12"/>
+                   Margin="0 0 0 12" />
 
         <!-- MAIN SCROLL CONTENT -->
         <ScrollViewer Grid.Row="1">
@@ -27,26 +27,26 @@
                     <TextBlock Text="Identity"
                                FontSize="14"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWAccentBrush}"/>
+                               Foreground="{DynamicResource BMWAccentBrush}" />
 
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="12" RowSpacing="6">
 
                         <StackPanel Grid.Column="0" Spacing="2">
                             <TextBlock Text="Array name"
                                        FontSize="12"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                                       Foreground="{DynamicResource BMWTextBrush}" />
                             <TextBox x:Name="TxtName"
                                      Height="28"
-                                     Width="180"/>
+                                     Width="180" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Spacing="2">
                             <TextBlock Text="Volume label"
                                        FontSize="12"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                                       Foreground="{DynamicResource BMWTextBrush}" />
                             <TextBox x:Name="TxtFsLabel"
                                      Height="28"
-                                     Width="180"/>
+                                     Width="180" />
                         </StackPanel>
 
                     </Grid>
@@ -57,13 +57,13 @@
                     <TextBlock Text="Mount"
                                FontSize="14"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWAccentBrush}"/>
+                               Foreground="{DynamicResource BMWAccentBrush}" />
 
                     <!-- ⭐ MOUNT POINT + BROWSE BUTTON -->
                     <StackPanel Spacing="4">
                         <TextBlock Text="Mount point"
                                    FontSize="12"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
 
                         <StackPanel Orientation="Horizontal"
                                     Spacing="8"
@@ -75,48 +75,48 @@
                                      IsReadOnly="True"
                                      Background="{DynamicResource BMWInputBrush}"
                                      Foreground="{DynamicResource BMWTextBrush}"
-                                     BorderBrush="{DynamicResource BMWBorderBrush}"/>
+                                     BorderBrush="{DynamicResource BMWBorderBrush}" />
 
                             <Button x:Name="BtnPickMountPoint"
                                     Content="Browse"
-                                    Width="80"/>
+                                    Width="80" />
                         </StackPanel>
                     </StackPanel>
 
                     <TextBlock Text="Mount options"
                                FontSize="12"
                                Margin="0 4 0 0"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
+                               Foreground="{DynamicResource BMWTextBrush}" />
 
                     <!-- ⭐ 2 COLUMNAS -->
                     <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="2">
 
                         <ToggleSwitch x:Name="TgNoAtime"
                                       Content="noatime"
-                                      Grid.Row="0" Grid.Column="0"/>
+                                      Grid.Row="0" Grid.Column="0" />
 
                         <ToggleSwitch x:Name="TgNoDirAtime"
                                       Content="nodiratime"
-                                      Grid.Row="0" Grid.Column="1"/>
+                                      Grid.Row="0" Grid.Column="1" />
 
                         <ToggleSwitch x:Name="TgDiscard"
                                       Content="discard (SSD)"
-                                      Grid.Row="1" Grid.Column="0"/>
+                                      Grid.Row="1" Grid.Column="0" />
 
                         <ToggleSwitch x:Name="TgSync"
                                       Content="sync"
-                                      Grid.Row="1" Grid.Column="1"/>
+                                      Grid.Row="1" Grid.Column="1" />
 
                         <ToggleSwitch x:Name="TgReadOnly"
                                       Content="Read-only (ro)"
-                                      Grid.Row="2" Grid.Column="0"/>
+                                      Grid.Row="2" Grid.Column="0" />
                     </Grid>
 
                     <!-- ⭐ PERMISSIONS -->
                     <StackPanel Spacing="4" Margin="0 6 0 0">
                         <TextBlock Text="Permissions (chmod)"
                                    FontSize="12"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
 
                         <TextBox x:Name="TxtMountPermissions"
                                  Height="28"
@@ -127,13 +127,13 @@
                                  BorderBrush="{DynamicResource BMWBorderBrush}"
                                  HorizontalAlignment="Left"
                                  TextAlignment="Center"
-                                 MaxLength="3"/>
+                                 MaxLength="3" />
                     </StackPanel>
 
                     <!-- ⭐ PERSISTENCIA REAL -->
                     <ToggleSwitch x:Name="TgPersistMount"
                                   Content="Persist mount in /etc/fstab"
-                                  Margin="0 4 0 0"/>
+                                  Margin="0 4 0 0" />
                 </StackPanel>
 
                 <!-- PERFORMANCE -->
@@ -141,28 +141,28 @@
                     <TextBlock Text="Performance"
                                FontSize="14"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWAccentBrush}"/>
+                               Foreground="{DynamicResource BMWAccentBrush}" />
 
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
 
                         <StackPanel Spacing="2" Grid.Column="0">
                             <TextBlock Text="Resync priority"
                                        FontSize="12"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                                       Foreground="{DynamicResource BMWTextBrush}" />
                             <NumericUpDown x:Name="NumResyncPriority"
                                            Minimum="1" Maximum="200000"
                                            Height="28"
-                                           Width="180"/>
+                                           Width="180" />
                         </StackPanel>
 
                         <StackPanel Spacing="2" Grid.Column="1">
                             <TextBlock Text="Speed limit"
                                        FontSize="12"
-                                       Foreground="{DynamicResource BMWTextBrush}"/>
+                                       Foreground="{DynamicResource BMWTextBrush}" />
                             <NumericUpDown x:Name="NumResyncMaxSpeed"
                                            Minimum="100" Maximum="500000"
                                            Height="28"
-                                           Width="180"/>
+                                           Width="180" />
                         </StackPanel>
 
                     </Grid>
@@ -173,21 +173,21 @@
                     <TextBlock Text="Alerts"
                                FontSize="14"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWAccentBrush}"/>
+                               Foreground="{DynamicResource BMWAccentBrush}" />
 
                     <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="2">
 
                         <ToggleSwitch x:Name="TgAlertDegraded"
                                       Content="Alert if degraded"
-                                      Grid.Row="0" Grid.Column="0"/>
+                                      Grid.Row="0" Grid.Column="0" />
 
                         <ToggleSwitch x:Name="TgAlertDiskFail"
                                       Content="Alert on disk failure"
-                                      Grid.Row="0" Grid.Column="1"/>
+                                      Grid.Row="0" Grid.Column="1" />
 
                         <ToggleSwitch x:Name="TgAlertSlowResync"
                                       Content="Alert on slow resync"
-                                      Grid.Row="1" Grid.Column="0"/>
+                                      Grid.Row="1" Grid.Column="0" />
                     </Grid>
                 </StackPanel>
 
@@ -204,12 +204,12 @@
             <Button x:Name="BtnCancel"
                     Content="Cancel"
                     HorizontalContentAlignment="Center"
-                    Width="90" Height="30"/>
+                    Width="90" Height="30" />
 
             <Button x:Name="BtnSave"
                     Content="Save"
                     HorizontalContentAlignment="Center"
-                    Width="90" Height="30"/>
+                    Width="90" Height="30" />
         </StackPanel>
 
     </Grid>

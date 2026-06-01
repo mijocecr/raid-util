@@ -11,15 +11,12 @@ public class MdstatArray
     public string Flags { get; set; } = "";
     public string? RebuildProgress { get; set; }
     public string? RebuildEta { get; set; }
-    
+
     public string Progress { get; set; } = "";
-    
-    
+
+
     public string Status { get; set; } = "";
-    
+
     public string MetadataVersion { get; set; } = "";
     public string Size { get; set; } = "";
-
-    
-
 }

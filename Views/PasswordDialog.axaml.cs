@@ -1,97 +1,96 @@
-using System;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Controls.ApplicationLifetimes;
 using RAID_Util.Services;
 
-namespace RAID_Util.Views
+namespace RAID_Util.Views;
+
+public partial class PasswordDialog : Window
 {
-    public partial class PasswordDialog : Window
+    private bool _closeApp = true;
+    private bool _returningValue;
+
+    public PasswordDialog()
     {
-        private bool _closeApp = true;
-        private bool _returningValue = false;
+        LogService.Debug("[PWD_DIALOG] Inicializando diálogo de contraseña.");
 
-        public PasswordDialog()
+        InitializeComponent();
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+        Closed += (s, e) =>
         {
-            LogService.Debug("[PWD_DIALOG] Inicializando diálogo de contraseña.");
+            LogService.Debug($"[PWD_DIALOG] Closed → closeApp={_closeApp}, returningValue={_returningValue}");
 
-            InitializeComponent();
-            this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-
-            this.Closed += (s, e) =>
+            if (!_returningValue && _closeApp)
             {
-                LogService.Debug($"[PWD_DIALOG] Closed → closeApp={_closeApp}, returningValue={_returningValue}");
+                LogService.Write("[PWD_DIALOG] Cerrando aplicación por cierre del diálogo.");
+                var lifetime = Application.Current?.ApplicationLifetime
+                    as IClassicDesktopStyleApplicationLifetime;
 
-                if (!_returningValue && _closeApp)
-                {
-                    LogService.Write("[PWD_DIALOG] Cerrando aplicación por cierre del diálogo.");
-                    var lifetime = Avalonia.Application.Current?.ApplicationLifetime
-                        as IClassicDesktopStyleApplicationLifetime;
-
-                    lifetime?.Shutdown();
-                }
-            };
-        }
-
-        private void OnAccept(object? sender, RoutedEventArgs e)
-        {
-            string pass = PwdBox.Text ?? "";
-            pass = pass.Trim(); // 🔥 CRÍTICO
-
-            if (string.IsNullOrWhiteSpace(pass))
-            {
-                LogService.Debug("[PWD_DIALOG] Contraseña vacía, mostrando error.");
-                ShowError("Password cannot be empty.");
-                return;
+                lifetime?.Shutdown();
             }
+        };
+    }
 
-            LogService.Write("[PWD_DIALOG] Contraseña aceptada por el usuario.");
+    private void OnAccept(object? sender, RoutedEventArgs e)
+    {
+        var pass = PwdBox.Text ?? "";
+        pass = pass.Trim(); // 🔥 CRÍTICO
 
-            _closeApp = false;
-            _returningValue = true; // 🔥 EVITA CIERRE PREMATURO
-            Close(pass);
-        }
-
-        private void OnCancel(object? sender, RoutedEventArgs e)
+        if (string.IsNullOrWhiteSpace(pass))
         {
-            LogService.Write("[PWD_DIALOG] Cancelado por el usuario. Cerrando aplicación.");
-            _closeApp = true;
-            _returningValue = true;
-            Close(null);
+            LogService.Debug("[PWD_DIALOG] Contraseña vacía, mostrando error.");
+            ShowError("Password cannot be empty.");
+            return;
         }
 
-        private void OnClose(object? sender, RoutedEventArgs e)
+        LogService.Write("[PWD_DIALOG] Contraseña aceptada por el usuario.");
+
+        _closeApp = false;
+        _returningValue = true; // 🔥 EVITA CIERRE PREMATURO
+        Close(pass);
+    }
+
+    private void OnCancel(object? sender, RoutedEventArgs e)
+    {
+        LogService.Write("[PWD_DIALOG] Cancelado por el usuario. Cerrando aplicación.");
+        _closeApp = true;
+        _returningValue = true;
+        Close(null);
+    }
+
+    private void OnClose(object? sender, RoutedEventArgs e)
+    {
+        LogService.Write("[PWD_DIALOG] Botón Close pulsado. Cerrando aplicación.");
+        _closeApp = true;
+        _returningValue = true;
+        Close(null);
+    }
+
+    private void OnPasswordKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
         {
-            LogService.Write("[PWD_DIALOG] Botón Close pulsado. Cerrando aplicación.");
-            _closeApp = true;
-            _returningValue = true;
-            Close(null);
+            LogService.Debug("[PWD_DIALOG] Enter presionado → aceptar.");
+            OnAccept(sender, e);
         }
-
-        private void OnPasswordKeyDown(object? sender, KeyEventArgs e)
+        else if (e.Key == Key.Escape)
         {
-            if (e.Key == Key.Enter)
-            {
-                LogService.Debug("[PWD_DIALOG] Enter presionado → aceptar.");
-                OnAccept(sender, e);
-            }
-            else if (e.Key == Key.Escape)
-            {
-                LogService.Debug("[PWD_DIALOG] Escape presionado → cancelar.");
-                OnCancel(sender, e);
-            }
+            LogService.Debug("[PWD_DIALOG] Escape presionado → cancelar.");
+            OnCancel(sender, e);
         }
+    }
 
-        private void ShowError(string message)
-        {
-            LogService.Debug($"[PWD_DIALOG] Error mostrado: {message}");
+    private void ShowError(string message)
+    {
+        LogService.Debug($"[PWD_DIALOG] Error mostrado: {message}");
 
-            ErrorText.Text = message;
-            ErrorText.IsVisible = true;
+        ErrorText.Text = message;
+        ErrorText.IsVisible = true;
 
-            PwdBox.Text = "";
-            PwdBox.Focus();
-        }
+        PwdBox.Text = "";
+        PwdBox.Focus();
     }
 }

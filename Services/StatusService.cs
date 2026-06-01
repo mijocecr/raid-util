@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using RAID_Util.Models;
@@ -38,7 +39,7 @@ public class StatusService
     {
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
                 FileName = cmd,
                 Arguments = args,
@@ -48,7 +49,7 @@ public class StatusService
                 CreateNoWindow = true
             };
 
-            using var process = new System.Diagnostics.Process
+            using var process = new Process
             {
                 StartInfo = psi,
                 EnableRaisingEvents = false
@@ -77,8 +78,8 @@ public class StatusService
     // ============================================================
 
     /// <summary>
-    /// Devuelve el estado general del sistema RAID:
-    /// Healthy, Warning, Critical o No RAID Detected.
+    ///     Devuelve el estado general del sistema RAID:
+    ///     Healthy, Warning, Critical o No RAID Detected.
     /// </summary>
     public async Task<string> GetOverallRaidHealthAsync()
     {
@@ -87,8 +88,8 @@ public class StatusService
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        bool anyDegraded = false;
-        bool anyRebuilding = false;
+        var anyDegraded = false;
+        var anyRebuilding = false;
 
         foreach (var arr in arrays)
         {
@@ -119,8 +120,8 @@ public class StatusService
     // ============================================================
 
     /// <summary>
-    /// Devuelve un resumen de arrays RAID:
-    /// Total, Healthy, Degraded.
+    ///     Devuelve un resumen de arrays RAID:
+    ///     Total, Healthy, Degraded.
     /// </summary>
     public async Task<string> GetArraysSummaryAsync()
     {
@@ -129,13 +130,13 @@ public class StatusService
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        int total = arrays.Count;
-        int healthy = 0;
-        int degraded = 0;
+        var total = arrays.Count;
+        var healthy = 0;
+        var degraded = 0;
 
         foreach (var arr in arrays)
         {
-            bool isDegraded = false;
+            var isDegraded = false;
 
             if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
                 isDegraded = true;
@@ -153,7 +154,7 @@ public class StatusService
     }
 
     /// <summary>
-    /// Resumen de discos (pendiente de implementación real).
+    ///     Resumen de discos (pendiente de implementación real).
     /// </summary>
     public async Task<string> GetDisksSummaryAsync()
     {
@@ -162,11 +163,11 @@ public class StatusService
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        int total = 0;
-        int active = 0;
-        int faulty = 0;
-        int spare = 0;
-        int smartAlerts = 0;
+        var total = 0;
+        var active = 0;
+        var faulty = 0;
+        var spare = 0;
+        var smartAlerts = 0;
 
         foreach (var arr in arrays)
         {
@@ -201,7 +202,7 @@ public class StatusService
 
 
     /// <summary>
-    /// Devuelve un resumen de reconstrucciones activas.
+    ///     Devuelve un resumen de reconstrucciones activas.
     /// </summary>
     public async Task<string> GetRebuildSummaryAsync()
     {
@@ -221,7 +222,7 @@ public class StatusService
             .OrderByDescending(a =>
             {
                 if (a.RebuildProgress?.EndsWith("%") == true &&
-                    double.TryParse(a.RebuildProgress.TrimEnd('%'), out double val))
+                    double.TryParse(a.RebuildProgress.TrimEnd('%'), out var val))
                     return val;
 
                 return 0;
@@ -236,7 +237,7 @@ public class StatusService
     // ============================================================
 
     /// <summary>
-    /// Devuelve una lista de arrays en estado crítico, degradado o en reconstrucción.
+    ///     Devuelve una lista de arrays en estado crítico, degradado o en reconstrucción.
     /// </summary>
     public async Task<IList<ArrayRiskInfo>> GetArraysAtRiskAsync()
     {
@@ -248,9 +249,9 @@ public class StatusService
 
         foreach (var arr in arrays)
         {
-            bool isDegraded = !string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_");
-            bool isRebuilding = !string.IsNullOrWhiteSpace(arr.RebuildProgress);
-            bool isInactive = !arr.State.Contains("active", StringComparison.OrdinalIgnoreCase);
+            var isDegraded = !string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_");
+            var isRebuilding = !string.IsNullOrWhiteSpace(arr.RebuildProgress);
+            var isInactive = !arr.State.Contains("active", StringComparison.OrdinalIgnoreCase);
 
             if (!isDegraded && !isRebuilding && !isInactive)
                 continue;
@@ -284,7 +285,7 @@ public class StatusService
     // ============================================================
 
     /// <summary>
-    /// Devuelve alertas de discos basadas en mdstat, mdadm y SMART.
+    ///     Devuelve alertas de discos basadas en mdstat, mdadm y SMART.
     /// </summary>
     public async Task<IList<DiskAlertInfo>> GetDiskAlertsAsync()
     {
@@ -293,16 +294,12 @@ public class StatusService
 
         // 1) Alertas basadas en mdstat
         foreach (var arr in arrays)
-        {
             if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
-            {
                 alerts.Add(new DiskAlertInfo
                 {
                     Device = arr.Name,
                     Alert = $"Array {arr.Name} degraded — Flags: {arr.Flags}"
                 });
-            }
-        }
 
         // 2) Alertas basadas en mdadm
         foreach (var arr in arrays)
@@ -312,22 +309,18 @@ public class StatusService
             foreach (var (device, state) in diskStates)
             {
                 if (state.Contains("faulty", StringComparison.OrdinalIgnoreCase))
-                {
                     alerts.Add(new DiskAlertInfo
                     {
                         Device = device,
                         Alert = $"Disk {device} is FAULTY in {arr.Name}"
                     });
-                }
 
                 if (state.Contains("spare", StringComparison.OrdinalIgnoreCase))
-                {
                     alerts.Add(new DiskAlertInfo
                     {
                         Device = device,
                         Alert = $"Disk {device} is SPARE in {arr.Name}"
                     });
-                }
             }
         }
 
@@ -340,13 +333,11 @@ public class StatusService
             {
                 var smart = await GetSmartHealthAsync(device);
                 if (smart != null)
-                {
                     alerts.Add(new DiskAlertInfo
                     {
                         Device = device,
                         Alert = smart
                     });
-                }
             }
         }
 
@@ -358,7 +349,7 @@ public class StatusService
     // ============================================================
 
     /// <summary>
-    /// Genera una lista de eventos RAID basados en el estado actual.
+    ///     Genera una lista de eventos RAID basados en el estado actual.
     /// </summary>
     public async Task<IList<string>> GetRecentEventsAsync()
     {
@@ -385,9 +376,7 @@ public class StatusService
             if (string.IsNullOrWhiteSpace(arr.RebuildProgress) &&
                 (string.IsNullOrWhiteSpace(arr.Flags) || !arr.Flags.Contains("_")) &&
                 arr.State.Contains("active", StringComparison.OrdinalIgnoreCase))
-            {
                 events.Add($"{arr.Name}: Healthy — All disks OK");
-            }
         }
 
         return events;
@@ -425,11 +414,9 @@ public class StatusService
                 current.Level = parts[3];
 
                 // Discos
-                for (int i = 4; i < parts.Length; i++)
-                {
+                for (var i = 4; i < parts.Length; i++)
                     if (parts[i].Contains("["))
                         current.Devices.Add(parts[i]);
-                }
 
                 result.Add(current);
                 continue;
@@ -482,8 +469,8 @@ public class StatusService
             if (trimmed.Contains("/dev/"))
             {
                 var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                string dev = parts.Last();
-                string state = string.Join(' ', parts.Skip(3).Take(parts.Length - 4));
+                var dev = parts.Last();
+                var state = string.Join(' ', parts.Skip(3).Take(parts.Length - 4));
 
                 result.Add((dev, state));
             }
@@ -511,8 +498,4 @@ public class StatusService
 
         return null;
     }
-    
-   
-    
-    
 }

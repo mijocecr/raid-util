@@ -11,13 +11,13 @@
                     Content="Refresh"
                     HorizontalContentAlignment="Center"
                     Width="100"
-                    Classes="accent"/>
+                    Classes="accent" />
 
             <Button x:Name="OpenFullButton"
                     Content="Open Full Log"
                     HorizontalContentAlignment="Center"
                     Width="140"
-                    Classes="neutral"/>
+                    Classes="neutral" />
         </StackPanel>
 
         <!-- Log viewer panel -->
@@ -39,7 +39,7 @@
                     Background="{StaticResource ControlBackgroundBrush}"
                     Foreground="{StaticResource ForegroundBrush}"
                     BorderThickness="0"
-                    TextWrapping="NoWrap"/>
+                    TextWrapping="NoWrap" />
             </ScrollViewer>
 
         </Border>

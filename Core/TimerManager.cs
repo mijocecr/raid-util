@@ -6,12 +6,11 @@ namespace RAID_Util.Core;
 
 public class TimerManager
 {
-    private readonly StatusView? _statusView;
-    private readonly LogsView? _logsView;
-
     private readonly DispatcherTimer _generalTimer;
-    private readonly DispatcherTimer _rebuildTimer;
     private readonly DispatcherTimer _hotplugTimer;
+    private readonly LogsView? _logsView;
+    private readonly DispatcherTimer _rebuildTimer;
+    private readonly StatusView? _statusView;
 
     public TimerManager(
         StatusView? statusView,

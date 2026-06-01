@@ -24,7 +24,7 @@
                     <TextBlock Text="RAID Health Summary"
                                FontSize="20"
                                FontWeight="Bold"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
+                               Foreground="{DynamicResource BMWTextBrush}" />
 
                     <!-- Estado global -->
                     <Border Background="{DynamicResource BMWInputBrush}"
@@ -37,7 +37,7 @@
                                    Text="Checking..."
                                    FontSize="18"
                                    FontWeight="SemiBold"
-                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                   Foreground="{DynamicResource BMWTextBrush}" />
                     </Border>
 
                     <!-- Resumen numérico -->
@@ -46,28 +46,28 @@
                         <DockPanel LastChildFill="False">
                             <TextBlock Text="Arrays:"
                                        Width="150"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
                             <TextBlock x:Name="TxtArraysSummary"
                                        Text="Loading..."
-                                       FontWeight="SemiBold"/>
+                                       FontWeight="SemiBold" />
                         </DockPanel>
 
                         <DockPanel LastChildFill="False">
                             <TextBlock Text="Disks:"
                                        Width="150"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
                             <TextBlock x:Name="TxtDisksSummary"
                                        Text="Loading..."
-                                       FontWeight="SemiBold"/>
+                                       FontWeight="SemiBold" />
                         </DockPanel>
 
                         <DockPanel LastChildFill="False">
                             <TextBlock Text="Rebuilds:"
                                        Width="150"
-                                       Foreground="{DynamicResource BMWTextDimBrush}"/>
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
                             <TextBlock x:Name="TxtRebuildSummary"
                                        Text="Loading..."
-                                       FontWeight="SemiBold"/>
+                                       FontWeight="SemiBold" />
                         </DockPanel>
 
                     </StackPanel>
@@ -91,7 +91,7 @@
                     <TextBlock Text="Arrays at Risk"
                                FontSize="18"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
+                               Foreground="{DynamicResource BMWTextBrush}" />
 
                     <ItemsControl x:Name="ListArraysAtRisk">
                         <ItemsControl.ItemTemplate>
@@ -108,15 +108,15 @@
 
                                         <TextBlock Text="{Binding Name}"
                                                    FontSize="16"
-                                                   FontWeight="Bold"/>
+                                                   FontWeight="Bold" />
 
                                         <TextBlock Text="{Binding Status}"
                                                    FontSize="14"
-                                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
+                                                   Foreground="{DynamicResource BMWTextDimBrush}" />
 
                                         <TextBlock Text="{Binding Details}"
                                                    FontSize="13"
-                                                   Foreground="{DynamicResource BMWTextBrush}"/>
+                                                   Foreground="{DynamicResource BMWTextBrush}" />
 
                                     </StackPanel>
 
@@ -145,7 +145,7 @@
                     <TextBlock Text="Disk Alerts"
                                FontSize="18"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
+                               Foreground="{DynamicResource BMWTextBrush}" />
 
                     <ItemsControl x:Name="ListDiskAlerts">
                         <ItemsControl.ItemTemplate>
@@ -162,11 +162,11 @@
 
                                         <TextBlock Text="{Binding Device}"
                                                    FontSize="15"
-                                                   FontWeight="Bold"/>
+                                                   FontWeight="Bold" />
 
                                         <TextBlock Text="{Binding Alert}"
                                                    FontSize="13"
-                                                   Foreground="{DynamicResource BMWTextDimBrush}"/>
+                                                   Foreground="{DynamicResource BMWTextDimBrush}" />
 
                                     </StackPanel>
 
@@ -195,7 +195,7 @@
                     <TextBlock Text="Recent Events"
                                FontSize="18"
                                FontWeight="SemiBold"
-                               Foreground="{DynamicResource BMWTextBrush}"/>
+                               Foreground="{DynamicResource BMWTextBrush}" />
 
                     <ItemsControl x:Name="ListRecentEvents">
                         <ItemsControl.ItemTemplate>
@@ -204,7 +204,7 @@
                                 <TextBlock Text="{Binding}"
                                            FontSize="13"
                                            Margin="0 4"
-                                           Foreground="{DynamicResource BMWTextBrush}"/>
+                                           Foreground="{DynamicResource BMWTextBrush}" />
 
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

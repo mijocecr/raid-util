@@ -18,7 +18,7 @@ public static class ConfigManager
         Path.Combine(ConfigDir, "config.json");
 
     // Instancia interna real
-    private static AppConfig _config = new AppConfig();
+    private static AppConfig _config = new();
 
     // ============================================================
     // LOAD → devuelve AppConfig
@@ -35,7 +35,7 @@ public static class ConfigManager
                 return _config;
             }
 
-            string json = File.ReadAllText(ConfigPath);
+            var json = File.ReadAllText(ConfigPath);
             var cfg = JsonSerializer.Deserialize<AppConfig>(json);
 
             if (cfg is null)
@@ -68,7 +68,7 @@ public static class ConfigManager
 
             _config = config; // actualizamos instancia interna
 
-            string json = JsonSerializer.Serialize(_config, new JsonSerializerOptions
+            var json = JsonSerializer.Serialize(_config, new JsonSerializerOptions
             {
                 WriteIndented = true
             });
@@ -84,7 +84,10 @@ public static class ConfigManager
     // ============================================================
     // GET → obtener instancia actual
     // ============================================================
-    public static AppConfig Get() => _config;
+    public static AppConfig Get()
+    {
+        return _config;
+    }
 
     // ============================================================
     // DIRECTORIOS

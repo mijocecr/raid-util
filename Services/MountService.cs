@@ -2,10 +2,9 @@ using System;
 using System.IO;
 using RAID_Util.Helpers;
 
-namespace RAID_Util.Services
-{
-    
-    public static class MountService
+namespace RAID_Util.Services;
+
+public static class MountService
 {
     public static bool IsMounted(string mountPoint)
     {
@@ -40,7 +39,7 @@ namespace RAID_Util.Services
         // 4) Detectar filesystem real
         var fsResult = ShellHelper.EjecutarComoRoot($"lsblk -no FSTYPE \"{device}\"");
 
-        string fsType = fsResult.Stdout
+        var fsType = fsResult.Stdout
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]
             .Trim()
             .ToLower();
@@ -48,7 +47,7 @@ namespace RAID_Util.Services
         if (string.IsNullOrWhiteSpace(fsType))
             fsType = "unknown";
 
-        string finalOpts = options;
+        var finalOpts = options;
 
         // 5) FS no POSIX → uid/gid/umask
         if (fsType is "exfat" or "vfat" or "ntfs")
@@ -94,8 +93,4 @@ namespace RAID_Util.Services
         var r = ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
         return r.ExitCode == 0;
     }
-}
-
-    
-    
 }
