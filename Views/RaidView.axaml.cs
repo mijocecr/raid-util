@@ -1629,6 +1629,7 @@ public partial class RaidView : UserControl
         // Actualizar UI
         _arrays.Remove(array);
         _selectedArray = null;
+       await LoadRaidAsync();
     }
 
 

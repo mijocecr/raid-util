@@ -392,60 +392,6 @@ public class RaidService
     }
 
 
-    // ============================================================
-    //  PARSERS (SIN CAMBIOS)
-    // ============================================================
-/*
-        private string ParseLevel(string detail)
-        {
-            foreach (var raw in detail.Split('\n'))
-            {
-                string line = raw.Trim().ToLowerInvariant();
-                if (line.StartsWith("raid level"))
-                {
-                    return line.Replace("raid level :", "").Trim().ToUpper();
-                }
-            }
-            return "UNKNOWN";
-        }
-
-        */
-/*
-        private string ParseArrayState(string detail)
-        {
-            if (string.IsNullOrWhiteSpace(detail))
-                return "Unknown";
-
-            string lower = detail.ToLowerInvariant();
-
-            // PRIMERO: degradado
-            if (lower.Contains("state : clean, degraded") ||
-                lower.Contains("state : degraded"))
-                return "Degraded";
-
-            // Luego: rebuild/resync/recover SOLO si aparece en el estado real
-            // y NO en "Consistency Policy"
-            if (lower.Contains("resync=") ||      // /proc/mdstat style
-                lower.Contains("recovery =") ||
-                lower.Contains("rebuild =") ||
-                lower.Contains("recovering"))
-                return "Rebuilding";
-
-            // Fallos graves
-            if (lower.Contains("state : inactive") ||
-                lower.Contains("state : stopped") ||
-                lower.Contains("state : faulty") ||
-                lower.Contains("state : failed"))
-                return "Failed";
-
-            // Estados sanos
-            if (lower.Contains("state : clean") ||
-                lower.Contains("state : active"))
-                return "Healthy";
-
-            return "Unknown";
-        }
-*/
 
     private string ParseArrayState(string detail)
     {
@@ -801,20 +747,7 @@ public class RaidService
     }
 
 
-/*
-        private string ParseDiskStateFromRole(string role)
-        {
-            return role switch
-            {
-                "faulty"     => "FAULTY",
-                "removed"    => "OFFLINE",
-                "rebuilding" => "WARN",
-                "spare"      => "OK",
-                "active"     => "OK",
-                _            => "UNKNOWN"
-            };
-        }
-*/
+
 
     private string ParseDiskStateFromRole(string role)
     {
@@ -902,27 +835,6 @@ public class RaidService
     }
 
 
-/*
-        private string ParseTotalSize(string detail)
-        {
-            foreach (var raw in detail.Split('\n'))
-            {
-                string line = raw.Trim();
-                if (line.StartsWith("Array Size", StringComparison.OrdinalIgnoreCase))
-                {
-                    int idx = line.IndexOf('(');
-                    if (idx > 0)
-                    {
-                        string inside = line[(idx + 1)..];
-                        int end = inside.IndexOf(')');
-                        if (end > 0)
-                            return inside[..end].Trim();
-                    }
-                }
-            }
-            return "Unknown";
-        }
-*/
     private string ParseUptime(string detail)
     {
         return "Unknown";
@@ -1004,66 +916,6 @@ public class RaidService
     }
 
 
-    /*
-       private async Task<RaidDiskInfo> GetDiskInfo(string device)
-       {
-           string name = device.Replace("/dev/", "").Trim();
-
-           if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
-               name = name.Substring(0, 3);
-
-           if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
-               name = name.Split('p')[0];
-
-           string json = await ShellHelper.RunCleanAsync(
-               $"lsblk -J -o NAME,MODEL,SIZE,ROTA,TYPE /dev/{name}"
-           );
-
-           if (string.IsNullOrWhiteSpace(json))
-               return CreateUnknownDisk(name);
-
-           dynamic data;
-           try { data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!; }
-           catch { return CreateUnknownDisk(name); }
-
-           if (data.blockdevices == null || data.blockdevices.Count == 0)
-               return CreateUnknownDisk(name);
-
-           var dev = data.blockdevices[0];
-
-           string model = dev.model ?? "Unknown";
-           string size = dev.size ?? "Unknown";
-           bool isRotational = ParseRota(dev.rota);
-
-           string icon = DiskIconService.GetIcon(name, model, isRotational);
-
-           return new RaidDiskInfo
-           {
-               Name = name,
-               Model = model,
-               Size = size,
-               Icon = icon,
-               IsRotational = isRotational,
-               ArrayName = ""
-           };
-       }
-*/
-
-/*
-        private RaidDiskInfo CreateUnknownDisk(string name)
-        {
-            return new RaidDiskInfo
-            {
-                Name = name,
-                Model = "Unknown",
-                Size = "Unknown",
-                Icon = DiskIconService.GetIcon(name, "Unknown", false),
-
-                ArrayName = ""
-            };
-        }
-
-        */
 
     private RaidDiskInfo CreateUnknownDisk(string name)
     {
@@ -1090,36 +942,7 @@ public class RaidService
             _ => "avares://RAID-Util/Assets/Icons/array-caution.png"
         };
     }
-/*
-        private async Task<string> RunMdadmAsync(string arguments)
-        {
-            var candidates = new[]
-            {
-                $"/sbin/mdadm {arguments}",
-                $"/usr/sbin/mdadm {arguments}",
-                $"mdadm {arguments}"
-            };
 
-            foreach (var cmd in candidates)
-            {
-                var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot(cmd);
-                string output = (stdout + "\n" + stderr).Trim();
-
-                if (string.IsNullOrWhiteSpace(output))
-                    continue;
-
-                if (output.Contains("not found", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (output.Contains("must be super-user", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                return output;
-            }
-
-            return string.Empty;
-        }
-*/
 
     private async Task<string> RunMdadmAsync(string arguments)
     {
@@ -1284,77 +1107,7 @@ public class RaidService
     }
 }
 
-    
-    
-/*
-    public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
-    {
-        try
-        {
-            // 0) Validación previa de todos los discos
-            foreach (var d in disks)
-            {
-                var errors = ValidateDiskForRaidAsync(d.Name).Result;
-                if (errors.Count > 0)
-                {
-                    LogService.Error($"[CREATE] Validation failed for /dev/{d.Name}:");
-                    foreach (var e in errors)
-                        LogService.Error("[VALIDATION] " + e);
-                    return false;
-                }
-            }
 
-            var mdName = GetNextFreeMdName();
-            var arrayPath = $"/dev/{mdName}";
-            LastCreatedMdName = mdName;
-
-            var mdadmLevel = level.ToLower() switch
-            {
-                "linear" => "linear",
-                "jbod" => "linear",
-                "jbod (linear)" => "linear",
-                _ => level.Replace("RAID", "").Trim()
-            };
-
-            var deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
-
-            var nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
-                ? mdName
-                : friendlyName.Trim();
-
-            var cmd =
-                $"/usr/sbin/mdadm --create {arrayPath} " +
-                $"--verbose " +
-                $"--metadata=1.2 " +
-                $"--name={nameForMdadm} " +
-                $"--level={mdadmLevel} " +
-                $"--raid-devices={disks.Count} " +
-                $"{deviceList} --force --run";
-
-            LogService.Write($"[CREATE] Ejecutando: {cmd}");
-
-            var result = ShellHelper.EjecutarComoRoot(cmd);
-
-            if (result.ExitCode != 0)
-            {
-                LogService.Error("[CREATE] mdadm falló:");
-                LogService.Error(result.Stderr);
-                return false;
-            }
-
-            ShellHelper.EjecutarComoRoot("udevadm settle");
-
-            LogService.Write($"[CREATE] Array creado correctamente → {arrayPath}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("[CREATE] EXCEPCIÓN:");
-            LogService.Error(ex.ToString());
-            return false;
-        }
-    }
-*/
 
     public string GetNextFreeMdName()
     {
@@ -1476,13 +1229,28 @@ public class RaidService
     {
         try
         {
-            // ⭐ VALIDACIÓN CRÍTICA
+            // ⭐ Validación SafeDiskGuard
+            var arrays = await GetArraysAsync();
+            var array = arrays.FirstOrDefault(a => a.Name == arrayName);
+            if (array == null)
+            {
+                LogService.Error($"[EXPAND] Array {arrayName} no encontrado.");
+                return false;
+            }
+
+            if (!SafeDiskGuard.CanExpandArray(array, out var reason))
+            {
+                LogService.Error($"[SAFEGUARD] {reason}");
+                return false;
+            }
+
+            // ⭐ Validación adicional
             if (!await EnsureArraySafeForModification(arrayName))
                 return false;
 
             var dev = $"/dev/{arrayName}";
 
-            // 1) Expandir RAID (grow)
+            // 1) Expandir RAID
             var grow = ShellHelper.EjecutarComoRoot(
                 $"/usr/sbin/mdadm --grow {dev} --raid-devices={newDeviceCount}"
             );
@@ -1505,9 +1273,7 @@ public class RaidService
             }
 
             // 3) Redimensionar filesystem EXT4
-            var resize = ShellHelper.EjecutarComoRoot(
-                $"/sbin/resize2fs {dev}"
-            );
+            var resize = ShellHelper.EjecutarComoRoot($"/sbin/resize2fs {dev}");
 
             if (resize.ExitCode != 0)
             {
@@ -1526,28 +1292,49 @@ public class RaidService
     }
 
 
+
     public async Task<bool> ForceArrayCheckAsync(string arrayName)
     {
+        // ⭐ Validación SafeDiskGuard
+        var arrays = await GetArraysAsync();
+        var array = arrays.FirstOrDefault(a => a.Name == arrayName);
+        if (array == null)
+            return false;
+
+        if (!SafeDiskGuard.CanModifyArray(array, out var reason))
+        {
+            LogService.Error($"[SAFEGUARD] {reason}");
+            return false;
+        }
+
         var cmd = $"/usr/sbin/mdadm --action=check /dev/{arrayName}";
         var result = ShellHelper.EjecutarComoRoot(cmd);
 
         return result.ExitCode == 0;
     }
 
+
     public async Task<bool> ForceArrayRepairAsync(string arrayName)
     {
+        // ⭐ Validación SafeDiskGuard
+        var arrays = await GetArraysAsync();
+        var array = arrays.FirstOrDefault(a => a.Name == arrayName);
+        if (array == null)
+            return false;
+
+        if (!SafeDiskGuard.CanRepairArray(array, out var reason))
+        {
+            LogService.Error($"[SAFEGUARD] {reason}");
+            return false;
+        }
+
         var cmd = $"/usr/sbin/mdadm --action=repair /dev/{arrayName}";
         var result = ShellHelper.EjecutarComoRoot(cmd);
 
         return result.ExitCode == 0;
     }
-/*
-public async Task<(int ExitCode, string Stdout, string Stderr)> StopArrayAsync(string arrayName)
-{
-    string cmd = $"/usr/sbin/mdadm --stop /dev/{arrayName}";
-    return ShellHelper.EjecutarComoRoot(cmd);
-}
-*/
+
+
 
     public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName)
     {
@@ -1561,7 +1348,14 @@ public async Task<(int ExitCode, string Stdout, string Stderr)> StopArrayAsync(s
             if (array == null)
                 return (false, $"Array {arrayName} not found.");
 
-            var arrayPath = array.Path; // /dev/md0
+            // ⭐ Validación SafeDiskGuard
+            if (!SafeDiskGuard.CanStopArray(array, out var reason))
+            {
+                LogService.Error($"[SAFEGUARD] {reason}");
+                return (false, reason);
+            }
+
+            var arrayPath = array.Path;
 
             // 1) Quitar de fstab
             RemoveArrayFromFstab(arrayPath);
@@ -1602,6 +1396,7 @@ public async Task<(int ExitCode, string Stdout, string Stderr)> StopArrayAsync(s
             return (false, "Unexpected error stopping array. Check logs.");
         }
     }
+
 
 
     public async Task<string> GetArrayDetailsAsync(string arrayName)
@@ -1751,54 +1546,6 @@ public async Task<(int ExitCode, string Stdout, string Stderr)> StopArrayAsync(s
             return "";
 
         return result.Stdout.Trim();
-    }
-
-
-    public bool FormatArray(string arrayName, string fs, string label)
-    {
-        try
-        {
-            // ⭐ VALIDACIÓN CRÍTICA
-            if (!EnsureArraySafeForModification(arrayName).Result)
-                return false;
-
-            var cmd = fs switch
-            {
-                "ext4" => string.IsNullOrWhiteSpace(label)
-                    ? $"/usr/sbin/mkfs.ext4 -F /dev/{arrayName}"
-                    : $"/usr/sbin/mkfs.ext4 -F -L \"{label}\" /dev/{arrayName}",
-
-                "xfs" => string.IsNullOrWhiteSpace(label)
-                    ? $"/usr/sbin/mkfs.xfs -f /dev/{arrayName}"
-                    : $"/usr/sbin/mkfs.xfs -f -L \"{label}\" /dev/{arrayName}",
-
-                "btrfs" => string.IsNullOrWhiteSpace(label)
-                    ? $"/usr/sbin/mkfs.btrfs -f /dev/{arrayName}"
-                    : $"/usr/sbin/mkfs.btrfs -f -L \"{label}\" /dev/{arrayName}",
-
-                _ => throw new Exception("Unknown filesystem")
-            };
-
-            LogService.Write($"[FORMAT] Ejecutando: {cmd}");
-
-            var result = ShellHelper.EjecutarComoRoot(cmd);
-
-            if (result.ExitCode != 0)
-            {
-                LogService.Error("[FORMAT] Error:");
-                LogService.Error(result.Stderr);
-                return false;
-            }
-
-            LogService.Write("[FORMAT] Formateo completado.");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("[FORMAT] EXCEPCIÓN:");
-            LogService.Error(ex.ToString());
-            return false;
-        }
     }
 
 

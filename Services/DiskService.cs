@@ -25,9 +25,11 @@ public static class DiskService
 
         var parsed = ParseLsblk(json);
 
+        // Obtener escaneo RAID para detectar arrays inactivos
+        var mdadmScan = ShellHelper.EjecutarComoRoot("mdadm --detail --scan").Stdout;
+
         foreach (var d in parsed)
         {
-            // Mostrar solo disk y part
             if (d.Type != "disk" && d.Type != "part")
                 continue;
 
@@ -81,14 +83,14 @@ public static class DiskService
             if (isSystem)
                 continue;
 
-            // Ignorar discos que están en un array activo
-            var isActiveRaidMember = MdadmService_IsDiskInArray(d.Name, out var arrayName);
-            if (isActiveRaidMember)
-                continue;
-
             // Ignorar virtuales
             if (d.Name.StartsWith("zram", StringComparison.OrdinalIgnoreCase) ||
                 d.Name.StartsWith("loop", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Ignorar discos en RAID activo
+            var isActiveRaidMember = MdadmService_IsDiskInArray(d.Name, out var arrayName);
+            if (isActiveRaidMember)
                 continue;
 
             bool isRot =
@@ -107,8 +109,20 @@ public static class DiskService
                 IsRotational = isRot,
                 Type = GetDiskType(d),
                 Temperature = GetTemperature(d.Name),
-
                 Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot),
+
+                // ============================================================
+                // NUEVO: FLAGS PARA SafeDiskGuard
+                // ============================================================
+                IsUsb = d.Model.Contains("usb", StringComparison.OrdinalIgnoreCase),
+                IsIscsi = d.Model.Contains("fileio", StringComparison.OrdinalIgnoreCase),
+                IsVirtual = d.Model.Contains("virtual", StringComparison.OrdinalIgnoreCase)
+                            || d.Name.StartsWith("loop")
+                            || d.Name.StartsWith("zram"),
+                IsNvme = d.Name.StartsWith("nvme"),
+
+                HasPartitions = d.Children != null && d.Children.Count > 0,
+                HasFileSystem = !string.IsNullOrWhiteSpace(d.FsType),
 
                 // RAID
                 IsUsedByRaid = false,
@@ -118,7 +132,33 @@ public static class DiskService
             };
 
             // ============================================================
-            // DETECTAR DISCOS REMOVIDOS / FAULTY
+            // DETECTAR GPT/MBR (wipefs -n)
+            // ============================================================
+            var wipe = ShellHelper.EjecutarComoRoot($"wipefs -n /dev/{d.Name}").Stdout;
+            info.HasValidPartitionTable =
+                wipe.Contains("gpt", StringComparison.OrdinalIgnoreCase) ||
+                wipe.Contains("dos", StringComparison.OrdinalIgnoreCase) ||
+                wipe.Contains("MBR", StringComparison.OrdinalIgnoreCase);
+
+            // ============================================================
+            // DETECTAR RAID INACTIVO (INACTIVE-ARRAY)
+            // ============================================================
+            info.IsRaidInactiveMember =
+                mdadmScan.Contains("INACTIVE-ARRAY", StringComparison.OrdinalIgnoreCase) &&
+                mdadmScan.Contains(d.Name, StringComparison.OrdinalIgnoreCase);
+
+            // ============================================================
+            // DETECTAR RAID ACTIVO (ya mejorado)
+            // ============================================================
+            info.IsRaidMember = MdadmService_IsDiskInArray(d.Name, out var arrName);
+            if (info.IsRaidMember)
+            {
+                info.ArrayName = arrName;
+                info.IsUsedByRaid = true;
+            }
+
+            // ============================================================
+            // DETECTAR DISCOS FAULTY / REMOVED
             // ============================================================
             var mdadmInfo = ShellHelper.EjecutarComoRoot($"mdadm --examine /dev/{d.Name}").Stdout;
 
@@ -176,7 +216,6 @@ public static class DiskService
             MountPoint = dev.TryGetProperty("mountpoint", out var mp) ? mp.GetString() ?? "" : ""
         };
 
-        // mountpoints (plural)
         if (dev.TryGetProperty("mountpoints", out var mps) && mps.ValueKind == JsonValueKind.Array)
         {
             entry.MountPoints = mps.EnumerateArray()
@@ -185,7 +224,6 @@ public static class DiskService
                 .ToList();
         }
 
-        // children
         if (dev.TryGetProperty("children", out var children) && children.ValueKind == JsonValueKind.Array)
         {
             entry.Children = children.EnumerateArray()
@@ -234,7 +272,6 @@ public static class DiskService
 
         var lines = r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        // NVMe
         foreach (var line in lines)
             if (line.Contains("Temperature:", StringComparison.OrdinalIgnoreCase) &&
                 line.Contains("Celsius", StringComparison.OrdinalIgnoreCase) &&
@@ -246,7 +283,6 @@ public static class DiskService
                         return $"{temp}°C";
             }
 
-        // HDD/SSD atributo 194
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
@@ -301,7 +337,7 @@ public static class DiskService
     }
 
     // ============================================================
-    // DETECTAR SI UN DISCO ESTÁ EN UN ARRAY RAID
+    // DETECTAR SI UN DISCO ESTÁ EN UN ARRAY RAID ACTIVO
     // ============================================================
     private static bool MdadmService_IsDiskInArray(string diskName, out string arrayName)
     {

@@ -55,6 +55,16 @@ public class RaidDiskInfo
     public string MountPoint { get; set; } = string.Empty; // /mnt/data, /, /boot, etc.
     public string Filesystem { get; set; } = string.Empty; // ext4, xfs, btrfs, etc.
     public string Status { get; set; } = string.Empty;
+    public bool IsUsb { get; set; }
+    public bool IsIscsi { get; set; }
+    public bool IsVirtual { get; set; }
+    public bool IsNvme { get; set; }
+    public bool HasPartitions { get; set; }
+    public bool HasFileSystem { get; set; }
+    public bool HasValidPartitionTable { get; set; }
+    public bool IsRaidInactiveMember { get; set; }
+    public bool IsRaidMember { get; set; }
+
 
     // ============================================================
     // DEBUG
