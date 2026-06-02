@@ -12,179 +12,103 @@ public static class DiskService
     // ============================================================
     // OBTENER TODOS LOS DISCOS FÍSICOS Y PARTICIONES ÚTILES
     // ============================================================
+    
     public static List<RaidDiskInfo> GetAllDisks()
+{
+    var disks = new List<RaidDiskInfo>();
+
+    var json = ShellHelper.EjecutarSinRoot(
+        "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINTS,FSTYPE,PKNAME"
+    ).Stdout;
+
+    if (string.IsNullOrWhiteSpace(json))
+        return disks;
+
+    var parsed = ParseLsblk(json);
+
+    var mdadmScan = ShellHelper.EjecutarComoRoot("mdadm --detail --scan").Stdout;
+
+    foreach (var d in parsed)
     {
-        var disks = new List<RaidDiskInfo>();
+        if (d.Type != "disk")
+            continue;
 
-        var json = ShellHelper.EjecutarSinRoot(
-            "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINTS,FSTYPE,PKNAME"
-        ).Stdout;
+        // 1) Discos del sistema
+        bool isSystem = false;
 
-        if (string.IsNullOrWhiteSpace(json))
-            return disks;
-
-        var parsed = ParseLsblk(json);
-
-        // Obtener escaneo RAID para detectar arrays inactivos
-        var mdadmScan = ShellHelper.EjecutarComoRoot("mdadm --detail --scan").Stdout;
-
-        foreach (var d in parsed)
+        if (d.MountPoints != null)
         {
-            if (d.Type != "disk" && d.Type != "part")
-                continue;
-
-            // ============================================================
-            // DETECCIÓN REAL DE DISCO DEL SISTEMA
-            // ============================================================
-            bool isSystem = false;
-
-            // 1) mountpoints del propio disco
-            if (d.MountPoints != null)
+            foreach (var mp in d.MountPoints)
             {
-                foreach (var mp in d.MountPoints)
+                if (mp == "/" || mp == "/boot" || mp == "/boot/efi" ||
+                    mp.StartsWith("/var") || mp.StartsWith("/home"))
                 {
-                    if (mp == "/" ||
-                        mp == "/boot" ||
-                        mp == "/boot/efi" ||
-                        mp.StartsWith("/var") ||
-                        mp.StartsWith("/home"))
-                    {
-                        isSystem = true;
-                        break;
-                    }
+                    isSystem = true;
+                    break;
                 }
             }
-
-            // 2) mountpoints de las particiones
-            if (!isSystem && d.Children != null)
-            {
-                foreach (var child in d.Children)
-                {
-                    if (child.MountPoints != null)
-                    {
-                        foreach (var mp in child.MountPoints)
-                        {
-                            if (mp == "/" ||
-                                mp == "/boot" ||
-                                mp == "/boot/efi" ||
-                                mp.StartsWith("/var") ||
-                                mp.StartsWith("/home"))
-                            {
-                                isSystem = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (isSystem) break;
-                }
-            }
-
-            // Ignorar discos del sistema
-            if (isSystem)
-                continue;
-
-            // Ignorar virtuales
-            if (d.Name.StartsWith("zram", StringComparison.OrdinalIgnoreCase) ||
-                d.Name.StartsWith("loop", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            // Ignorar discos en RAID activo
-            var isActiveRaidMember = MdadmService_IsDiskInArray(d.Name, out var arrayName);
-            if (isActiveRaidMember)
-                continue;
-
-            bool isRot =
-                d.Rotational == "1" ||
-                d.Rotational.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-            var info = new RaidDiskInfo
-            {
-                Name = d.Name,
-                Model = d.Model,
-                Size = d.Size,
-                Serial = d.Serial,
-                Filesystem = d.FsType,
-                MountPoint = d.MountPoint,
-                IsMounted = !string.IsNullOrWhiteSpace(d.MountPoint),
-                IsRotational = isRot,
-                Type = GetDiskType(d),
-                Temperature = GetTemperature(d.Name),
-                Icon = DiskIconService.GetIcon(d.Name, d.Model, isRot),
-
-                // ============================================================
-                // NUEVO: FLAGS PARA SafeDiskGuard
-                // ============================================================
-                IsUsb = d.Model.Contains("usb", StringComparison.OrdinalIgnoreCase),
-                IsIscsi = d.Model.Contains("fileio", StringComparison.OrdinalIgnoreCase),
-                IsVirtual = d.Model.Contains("virtual", StringComparison.OrdinalIgnoreCase)
-                            || d.Name.StartsWith("loop")
-                            || d.Name.StartsWith("zram"),
-                IsNvme = d.Name.StartsWith("nvme"),
-
-                HasPartitions = d.Children != null && d.Children.Count > 0,
-                HasFileSystem = !string.IsNullOrWhiteSpace(d.FsType),
-
-                // RAID
-                IsUsedByRaid = false,
-                ArrayName = "",
-                Role = "none",
-                Status = "OK"
-            };
-
-            // ============================================================
-            // DETECTAR GPT/MBR (wipefs -n)
-            // ============================================================
-            var wipe = ShellHelper.EjecutarComoRoot($"wipefs -n /dev/{d.Name}").Stdout;
-            info.HasValidPartitionTable =
-                wipe.Contains("gpt", StringComparison.OrdinalIgnoreCase) ||
-                wipe.Contains("dos", StringComparison.OrdinalIgnoreCase) ||
-                wipe.Contains("MBR", StringComparison.OrdinalIgnoreCase);
-
-            // ============================================================
-            // DETECTAR RAID INACTIVO (INACTIVE-ARRAY)
-            // ============================================================
-            info.IsRaidInactiveMember =
-                mdadmScan.Contains("INACTIVE-ARRAY", StringComparison.OrdinalIgnoreCase) &&
-                mdadmScan.Contains(d.Name, StringComparison.OrdinalIgnoreCase);
-
-            // ============================================================
-            // DETECTAR RAID ACTIVO (ya mejorado)
-            // ============================================================
-            info.IsRaidMember = MdadmService_IsDiskInArray(d.Name, out var arrName);
-            if (info.IsRaidMember)
-            {
-                info.ArrayName = arrName;
-                info.IsUsedByRaid = true;
-            }
-
-            // ============================================================
-            // DETECTAR DISCOS FAULTY / REMOVED
-            // ============================================================
-            var mdadmInfo = ShellHelper.EjecutarComoRoot($"mdadm --examine /dev/{d.Name}").Stdout;
-
-            if (!string.IsNullOrWhiteSpace(mdadmInfo))
-            {
-                if (mdadmInfo.Contains("MBR Magic", StringComparison.OrdinalIgnoreCase) &&
-                    mdadmInfo.Contains("type ee", StringComparison.OrdinalIgnoreCase))
-                {
-                    info.Status = "FAULTY";
-                    info.Role = "removed";
-                }
-                else if (mdadmInfo.Contains("Raid Level", StringComparison.OrdinalIgnoreCase))
-                {
-                    info.Status = "FAULTY";
-                    info.Role = "faulty";
-                }
-            }
-
-            if (info.Status == "OK")
-                info.Status = GetDiskStatus(info);
-
-            disks.Add(info);
         }
 
-        return disks;
+        if (!isSystem && d.Children != null)
+        {
+            foreach (var child in d.Children)
+            {
+                if (child.MountPoints != null)
+                {
+                    foreach (var mp in child.MountPoints)
+                    {
+                        if (mp == "/" || mp == "/boot" || mp == "/boot/efi" ||
+                            mp.StartsWith("/var") || mp.StartsWith("/home"))
+                        {
+                            isSystem = true;
+                            break;
+                        }
+                    }
+                }
+                if (isSystem) break;
+            }
+        }
+
+        if (isSystem)
+            continue;
+
+        // 2) Ignorar loop/zram
+        if (d.Name.StartsWith("loop") || d.Name.StartsWith("zram"))
+            continue;
+
+        // 3) Detectar RAID
+        bool isActiveRaid = MdadmService_IsDiskInArray(d.Name, out var arrayName);
+        bool isRaidFs = string.Equals(d.FsType, "linux_raid_member", StringComparison.OrdinalIgnoreCase);
+
+        if (isActiveRaid)
+            continue;
+
+        var info = new RaidDiskInfo
+        {
+            Name = d.Name,
+            Model = d.Model,
+            Size = d.Size,
+            Serial = d.Serial,
+            Filesystem = d.FsType,
+            MountPoint = d.MountPoint,
+            IsMounted = !string.IsNullOrWhiteSpace(d.MountPoint),
+            IsRotational = d.Rotational == "1",
+            IsNvme = d.Name.StartsWith("nvme"),
+            HasPartitions = d.Children != null && d.Children.Count > 0,
+            HasFileSystem = !string.IsNullOrWhiteSpace(d.FsType),
+            IsRaidMember = isActiveRaid || isRaidFs,
+            ArrayName = isActiveRaid ? arrayName : "",
+            Status = "OK"
+        };
+
+        disks.Add(info);
     }
+
+    return disks;
+}
+
+
+
 
     // ============================================================
     // PARSEAR JSON DE LSBKL (RECURSIVO)
@@ -339,12 +263,21 @@ public static class DiskService
     // ============================================================
     // DETECTAR SI UN DISCO ESTÁ EN UN ARRAY RAID ACTIVO
     // ============================================================
+    
+    
     private static bool MdadmService_IsDiskInArray(string diskName, out string arrayName)
     {
         arrayName = string.Empty;
-        var disk = diskName.Trim().ToLowerInvariant();
 
-        var scanRes = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+        if (string.IsNullOrWhiteSpace(diskName))
+            return false;
+
+        // Normalizar nombre
+        var disk = diskName.Trim().ToLowerInvariant();
+        if (disk.StartsWith("/dev/"))
+            disk = disk.Substring(5);
+
+        var scanRes = ShellHelper.EjecutarComoRoot("mdadm --detail --scan");
         var scan = (scanRes.Stdout + "\n" + scanRes.Stderr).Trim();
 
         if (string.IsNullOrWhiteSpace(scan))
@@ -353,7 +286,7 @@ public static class DiskService
         foreach (var raw in scan.Split('\n'))
         {
             var line = raw.Trim();
-            if (!line.StartsWith("ARRAY"))
+            if (!line.StartsWith("ARRAY", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -363,29 +296,39 @@ public static class DiskService
             var arrayPath = parts[1];
             var name = arrayPath.Split('/').Last();
 
-            var detailRes = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
-            var detail = (detailRes.Stdout + "\n" + detailRes.Stderr).Trim().ToLowerInvariant();
-
-            if (string.IsNullOrWhiteSpace(detail))
-                continue;
+            var detailRes = ShellHelper.EjecutarComoRoot($"mdadm --detail {arrayPath}");
+            var detail = (detailRes.Stdout + "\n" + detailRes.Stderr);
 
             foreach (var r in detail.Split('\n'))
             {
                 var l = r.Trim().ToLowerInvariant();
-
-                if (!l.Contains($"/dev/{disk}"))
-                    continue;
-
                 if (l.Contains("faulty") || l.Contains("removed"))
                     continue;
 
-                arrayName = name;
-                return true;
+                var tokens = l.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var t in tokens)
+                {
+                    if (!t.StartsWith("/dev/"))
+                        continue;
+
+                    var dev = t.Substring(5);
+                    if (dev == disk)
+                    {
+                        arrayName = name;
+                        return true;
+                    }
+                }
             }
         }
 
         return false;
     }
+
+
+
+
+    
+    
 }
 
 // ============================================================

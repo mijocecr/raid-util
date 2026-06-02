@@ -93,6 +93,7 @@ public partial class RaidView : UserControl
     public RaidView()
     {
         InitializeComponent();
+
         BtnCreateArray.Click += OnCreateArrayClicked;
         BtnDeleteArray.Click += OnDeleteArrayClicked;
         BtnRefreshArrays.Click += OnRefreshArraysClicked;
@@ -104,9 +105,19 @@ public partial class RaidView : UserControl
         BtnConfigArrays.IsEnabled = false;
         BtnInitialize.IsEnabled = false;
 
+        // ⭐ Handlers del menú de discos (correcto)
         foreach (var item in DiskMenu.Items.OfType<MenuItem>())
             item.Click += OnDiskMenuItemClick;
 
+        // ⭐ Handlers del menú de arrays (CORRECTO: solo una vez)
+        foreach (var item in ArrayMenu.Items.OfType<MenuItem>())
+        {
+            item.Click += (_, _) =>
+            {
+                if (_selectedArray != null)
+                    OnMoreMenuClick(_selectedArray, item.Tag?.ToString());
+            };
+        }
 
         Console.WriteLine("[RAIDVIEW] Constructor RaidView ejecutado.");
 
@@ -117,8 +128,6 @@ public partial class RaidView : UserControl
         }
 
         Console.WriteLine("[RAIDVIEW] Modo real: esperando datos desde MainWindow.");
-        // En modo real, los datos llegan vía MainWindow.RaidViewControl.SetArrays(...)
-        // No llamamos a LoadRealData() aquí para no duplicar llamadas a sudo.
     }
 
 
@@ -544,203 +553,203 @@ public partial class RaidView : UserControl
     }
 
     private Border BuildArrayCard(RaidArrayInfo array)
+{
+    // ⭐ Icono (cacheado automáticamente)
+    var icon = LoadImage(array.StateIcon, 150);
+    icon.Margin = new Thickness(4);
+    icon.VerticalAlignment = VerticalAlignment.Center;
+
+    // ⭐ Nombre + nivel
+    var name = new TextBlock
     {
-        // ⭐ Icono (cacheado automáticamente)
-        var icon = LoadImage(array.StateIcon, 150);
-        icon.Margin = new Thickness(4);
-        icon.VerticalAlignment = VerticalAlignment.Center;
+        Text = $"{array.Name} ({array.Level})",
+        FontSize = 22,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+        FontWeight = FontWeight.Bold,
+        Margin = new Thickness(0, 0, 0, 4)
+    };
 
-        // ⭐ Nombre + nivel
-        var name = new TextBlock
-        {
-            Text = $"{array.Name} ({array.Level})",
-            FontSize = 22,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
-            FontWeight = FontWeight.Bold,
-            Margin = new Thickness(0, 0, 0, 4)
-        };
+    // ⭐ Panel de información
+    var info = new StackPanel { Spacing = 2 };
+    info.Children.Add(name);
 
-        // ⭐ Panel de información
-        var info = new StackPanel { Spacing = 2 };
-        info.Children.Add(name);
+    var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
 
-        var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
+    info.Children.Add(new TextBlock { Text = $"State: {array.State}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Disks: {array.Disks.Count} ({array.Disks.Count(d => d.State == "OK")} OK, {array.Disks.Count(d => d.State == "FAULTY")} Faulty)",
+        FontSize = 14,
+        Foreground = dimBrush
+    });
+    info.Children.Add(new TextBlock { Text = $"Size: {array.TotalSize}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock { Text = $"Path: {array.Path}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock
+    {
+        Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {array.ParitySize}",
+        FontSize = 14,
+        Foreground = dimBrush
+    });
 
-        info.Children.Add(new TextBlock { Text = $"State: {array.State}", FontSize = 14, Foreground = dimBrush });
+    if (array.RebuildProgress > 0)
         info.Children.Add(new TextBlock
         {
-            Text =
-                $"Disks: {array.Disks.Count} ({array.Disks.Count(d => d.State == "OK")} OK, {array.Disks.Count(d => d.State == "FAULTY")} Faulty)",
+            Text = $"Rebuild: {array.RebuildProgress}% (ETA {array.RebuildETA})",
             FontSize = 14,
             Foreground = dimBrush
         });
-        info.Children.Add(new TextBlock { Text = $"Size: {array.TotalSize}", FontSize = 14, Foreground = dimBrush });
-        info.Children.Add(new TextBlock { Text = $"Path: {array.Path}", FontSize = 14, Foreground = dimBrush });
-        info.Children.Add(new TextBlock
+
+    // ⭐ Grid principal (icono + info)
+    var grid = new Grid
+    {
+        ColumnDefinitions =
         {
-            Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {array.ParitySize}",
-            FontSize = 14,
-            Foreground = dimBrush
-        });
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star)
+        }
+    };
 
-        if (array.RebuildProgress > 0)
-            info.Children.Add(new TextBlock
-            {
-                Text = $"Rebuild: {array.RebuildProgress}% (ETA {array.RebuildETA})",
-                FontSize = 14,
-                Foreground = dimBrush
-            });
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
 
-        // ⭐ Grid principal (icono + info)
-        var grid = new Grid
+    grid.Children.Add(info);
+    Grid.SetColumn(info, 1);
+
+    // ⭐ Overlay (checkbox + botón More)
+    var overlay = new Grid
+    {
+        RowDefinitions =
         {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Star)
-            }
-        };
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Star)
+        }
+    };
 
-        grid.Children.Add(icon);
-        Grid.SetColumn(icon, 0);
+    var topRightPanel = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Spacing = 6
+    };
 
-        grid.Children.Add(info);
-        Grid.SetColumn(info, 1);
+    // ⭐ Checkbox de selección
+    var chkSelect = new CheckBox
+    {
+        VerticalAlignment = VerticalAlignment.Top,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        IsChecked = _selectedArray == array
+    };
 
-        // ⭐ Overlay (checkbox + botón More)
-        var overlay = new Grid
+    chkSelect.Checked += (_, _) =>
+    {
+        _selectedArray = array;
+        ClearOtherSelections(array);
+        BtnDeleteArray.IsEnabled = true;
+        BtnConfigArrays.IsEnabled = true;
+        BtnInitialize.IsEnabled = true;
+    };
+
+    chkSelect.Unchecked += (_, _) =>
+    {
+        if (_selectedArray == array)
+            _selectedArray = null;
+
+        BtnDeleteArray.IsEnabled = false;
+        BtnConfigArrays.IsEnabled = false;
+        BtnInitialize.IsEnabled = false;
+    };
+
+    topRightPanel.Children.Add(chkSelect);
+
+    // ⭐ Botón More
+    var btnMore = new Button
+    {
+        Content = "More",
+        Classes = { "MoreButton" },
+        VerticalContentAlignment = VerticalAlignment.Center,
+        HorizontalContentAlignment = HorizontalAlignment.Center
+    };
+
+    btnMore.Click += (_, _) =>
+    {
+        _selectedArray = array; // ⭐ NECESARIO
+        ArrayMenu.PlacementTarget = btnMore;
+        ArrayMenu.Open(btnMore);
+    };
+
+
+  
+    topRightPanel.Children.Add(btnMore);
+
+    overlay.Children.Add(topRightPanel);
+    Grid.SetRow(topRightPanel, 0);
+
+    overlay.Children.Add(grid);
+    Grid.SetRow(grid, 1);
+
+    // ⭐ Glow + tarjeta
+    var glowColor = GetArrayGlowColor(array.State);
+    var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
+
+    var glowBorder = new Border
+    {
+        Background = glowBrush,
+        CornerRadius = GlowRadius,
+        Padding = new Thickness(0),
+        Margin = CardMargin
+    };
+
+    var cardBorder = new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        CornerRadius = CardRadius,
+        Cursor = new Cursor(StandardCursorType.Hand),
+        Padding = CardPadding,
+        Child = overlay
+    };
+
+    glowBorder.Child = cardBorder;
+
+    // ⭐ Animación
+    AnimateArrayGlow(glowBorder, glowBrush);
+
+    // ⭐ EXPANDIR / COLAPSAR
+    cardBorder.PointerPressed += (_, _) =>
+    {
+        array.IsExpanded = !array.IsExpanded;
+
+        var parent = ListArrays;
+        var index = parent.Children.IndexOf(glowBorder);
+
+        if (array.IsExpanded)
         {
-            RowDefinitions =
-            {
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Star)
-            }
-        };
+            NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Started");
+            StartMonitoringArray(array, cardBorder);
 
-        var topRightPanel = new StackPanel
+            var expanded = BuildExpandedCard(array);
+            expanded.Tag = $"expanded:{array.Name}";
+            parent.Children.Insert(index + 1, expanded);
+        }
+        else
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Spacing = 6
-        };
+            StopMonitoringArray();
+            NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Stopped");
 
-        // ⭐ Checkbox de selección
-        var chkSelect = new CheckBox
-        {
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            IsChecked = _selectedArray == array
-        };
+            foreach (var child in parent.Children.ToList())
+                if (child is Border b &&
+                    b.Tag is string tag &&
+                    tag == $"expanded:{array.Name}")
+                {
+                    parent.Children.Remove(b);
+                    break;
+                }
+        }
+    };
 
-        chkSelect.Checked += (_, _) =>
-        {
-            _selectedArray = array;
-            ClearOtherSelections(array);
-            BtnDeleteArray.IsEnabled = true;
-            BtnConfigArrays.IsEnabled = true;
-            BtnInitialize.IsEnabled = true;
-        };
+    return glowBorder;
+}
 
-        chkSelect.Unchecked += (_, _) =>
-        {
-            if (_selectedArray == array)
-                _selectedArray = null;
-
-            BtnDeleteArray.IsEnabled = false;
-            BtnConfigArrays.IsEnabled = false;
-            BtnInitialize.IsEnabled = false;
-        };
-
-        topRightPanel.Children.Add(chkSelect);
-
-        // ⭐ Botón More
-        var btnMore = new Button
-        {
-            Content = "More",
-            Classes = { "MoreButton" },
-            VerticalContentAlignment = VerticalAlignment.Center,
-            HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-
-        btnMore.Click += (_, _) =>
-        {
-            ArrayMenu.PlacementTarget = btnMore;
-            ArrayMenu.Open(btnMore);
-        };
-
-        foreach (var item in ArrayMenu.Items.OfType<MenuItem>())
-            item.Click += (_, _) => OnMoreMenuClick(array, item.Tag?.ToString());
-
-        topRightPanel.Children.Add(btnMore);
-
-        overlay.Children.Add(topRightPanel);
-        Grid.SetRow(topRightPanel, 0);
-
-        overlay.Children.Add(grid);
-        Grid.SetRow(grid, 1);
-
-        // ⭐ Glow + tarjeta
-        var glowColor = GetArrayGlowColor(array.State);
-        var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
-
-        var glowBorder = new Border
-        {
-            Background = glowBrush,
-            CornerRadius = GlowRadius,
-            Padding = new Thickness(0),
-            Margin = CardMargin
-        };
-
-        var cardBorder = new Border
-        {
-            Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-            CornerRadius = CardRadius,
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Padding = CardPadding,
-            Child = overlay
-        };
-
-        glowBorder.Child = cardBorder;
-
-        // ⭐ Animación
-        AnimateArrayGlow(glowBorder, glowBrush);
-
-        // ⭐ EXPANDIR / COLAPSAR — VERSIÓN FUNCIONAL
-        cardBorder.PointerPressed += (_, _) =>
-        {
-            array.IsExpanded = !array.IsExpanded;
-
-            var parent = ListArrays;
-            var index = parent.Children.IndexOf(glowBorder);
-
-            if (array.IsExpanded)
-            {
-                NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Started");
-                StartMonitoringArray(array, cardBorder);
-
-                var expanded = BuildExpandedCard(array);
-                expanded.Tag = $"expanded:{array.Name}";
-                parent.Children.Insert(index + 1, expanded);
-            }
-            else
-            {
-                StopMonitoringArray();
-                NotificadorLinux.Enviar($"Monitorizing: {array.Name}\n Stopped");
-
-                foreach (var child in parent.Children.ToList())
-                    if (child is Border b &&
-                        b.Tag is string tag &&
-                        tag == $"expanded:{array.Name}")
-                    {
-                        parent.Children.Remove(b);
-                        break;
-                    }
-            }
-        };
-
-        return glowBorder;
-    }
 
 
 // ⭐ Selección única
@@ -1483,6 +1492,7 @@ public partial class RaidView : UserControl
         {
             new ConfirmDialog("Error", "Failed to create RAID array.")
                 .ShowDialog(parent);
+            
             return;
         }
 
@@ -1987,6 +1997,7 @@ public partial class RaidView : UserControl
     {
         var owner = this.GetVisualRoot() as Window;
 
+        // Confirmación
         var confirm = new InfoDialog(
             "Remove Disk",
             $"Are you sure you want to remove /dev/{diskName} from {array.Name}?"
@@ -1999,15 +2010,26 @@ public partial class RaidView : UserControl
         var loading = new LoadingDialog($"Removing /dev/{diskName}...");
         loading.Show(owner);
 
+        bool removed = false;
+
         try
         {
             var service = new RaidService();
-            var result = await service.RemoveDiskFromArrayAsync(array.Name, diskName);
 
-            if (!result)
+            // 1) Marcar como faulty SIEMPRE antes de remover
+            bool failOk = service.MarkDiskAsFaulty(array.Name, diskName);
+
+            // 2) Intentar remover
+            removed = await service.RemoveDiskFromArrayAsync(array.Name, diskName);
+
+            if (!removed)
             {
-                await ShowConfirm("Error",
-                    $"Could not remove /dev/{diskName} from {array.Name}.\nCheck logs for details.");
+                await ShowConfirm(
+                    "Error removing disk",
+                    $"mdadm could not remove /dev/{diskName} from {array.Name}.\n" +
+                    $"The disk may still be in 'faulty' or 'working' state.\n\n" +
+                    $"Check logs for details."
+                );
                 return;
             }
         }
@@ -2016,41 +2038,39 @@ public partial class RaidView : UserControl
             loading.Close();
         }
 
+        // 3) Refrescar RAID
         await LoadRaidAsync();
 
+        // 4) Notificación
         NotificadorLinux.Enviar(
             $"Disk removed:\n/dev/{diskName} removed from {array.Name}"
         );
     }
 
 
+
+
     private async Task AddDiskToArrayUI(RaidArrayInfo array)
     {
-        LogService.Write($"[RAIDVIEW] AddDiskToArrayUI → {array.Name}");
-
         var service = new RaidService();
-
         var allDisks = await service.GetAllDisksAsync();
 
         var candidates = allDisks
             .Where(d =>
-                !d.IsSystemDisk &&
                 !d.IsMounted &&
-                string.IsNullOrWhiteSpace(d.Filesystem) &&
-                !d.IsUsedByRaid &&
+                !d.HasPartitions &&
+                !d.HasFileSystem &&
+                !d.IsRaidMember &&
                 string.IsNullOrWhiteSpace(d.ArrayName) &&
-                d.Status != "FAULTY" &&
-                d.Role != "faulty" &&
-                d.Role != "removed" &&
-                !string.Equals(d.Type, "Virtual", StringComparison.OrdinalIgnoreCase) &&
-                !d.Name.Any(char.IsDigit)
+                d.Status == "OK" &&
+                !d.Name.StartsWith("loop") &&
+                !d.Name.StartsWith("zram")
             )
             .ToList();
 
         if (candidates.Count == 0)
         {
-            await ShowConfirm("No disks available",
-                "There are no valid free disks to add.");
+            await ShowConfirm("No disks available", "There are no valid free disks to add.");
             return;
         }
 
@@ -2058,41 +2078,14 @@ public partial class RaidView : UserControl
         var owner = this.GetVisualRoot() as Window;
 
         var selectedDisk = await dlg.ShowDialog<string?>(owner ?? new Window());
-
         if (string.IsNullOrWhiteSpace(selectedDisk))
-        {
-            LogService.Write("[RAIDVIEW] AddDiskToArrayUI → cancelado por el usuario.");
             return;
-        }
 
-        NotificadorLinux.Enviar($"Adding /dev/{selectedDisk} to {array.Name}…");
-
-        var ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
-
-        if (!ok)
-        {
-            await ShowConfirm("Error", $"Could not add /dev/{selectedDisk} to {array.Name}.");
-            NotificadorLinux.Enviar($"Failed to add /dev/{selectedDisk}.", 5000, "critical");
-            return;
-        }
-
-        await ShowConfirm("Success", $"/dev/{selectedDisk} added to {array.Name}.");
-        NotificadorLinux.Enviar($"Disk added: /dev/{selectedDisk} → {array.Name}");
-
-        var grow = await ShowConfirm(
-            "Expand RAID Array",
-            $"The disk /dev/{selectedDisk} was added as a spare.\n\n" +
-            $"Do you want to expand {array.Name} to use this disk?"
-        );
-
-        if (grow)
-        {
-            NotificadorLinux.Enviar($"Expanding array {array.Name}…");
-            await ExpandArrayAndResize(array.Name, array.Disks.Count + 1);
-        }
-
+        await service.AddDiskToArrayAsync(array.Name, selectedDisk);
         await LoadRaidAsync();
     }
+
+ 
 
 
     private async Task ExpandArrayAndResize(string arrayName, int newDeviceCount)
