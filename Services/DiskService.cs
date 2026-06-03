@@ -266,63 +266,76 @@ public static class DiskService
     
     
     private static bool MdadmService_IsDiskInArray(string diskName, out string arrayName)
+{
+    arrayName = string.Empty;
+
+    if (string.IsNullOrWhiteSpace(diskName))
+        return false;
+
+    // Normalizar nombre
+    var disk = diskName.Trim().ToLowerInvariant();
+    if (disk.StartsWith("/dev/"))
+        disk = disk.Substring(5);
+
+    var scanRes = ShellHelper.EjecutarComoRoot("mdadm --detail --scan");
+    var scan = (scanRes.Stdout + "\n" + scanRes.Stderr).Trim();
+
+    if (string.IsNullOrWhiteSpace(scan))
+        return false;
+
+    foreach (var raw in scan.Split('\n'))
     {
-        arrayName = string.Empty;
+        var line = raw.Trim();
+        if (!line.StartsWith("ARRAY", StringComparison.OrdinalIgnoreCase))
+            continue;
 
-        if (string.IsNullOrWhiteSpace(diskName))
-            return false;
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+            continue;
 
-        // Normalizar nombre
-        var disk = diskName.Trim().ToLowerInvariant();
-        if (disk.StartsWith("/dev/"))
-            disk = disk.Substring(5);
+        var arrayPath = parts[1];
+        var name = arrayPath.Split('/').Last();
 
-        var scanRes = ShellHelper.EjecutarComoRoot("mdadm --detail --scan");
-        var scan = (scanRes.Stdout + "\n" + scanRes.Stderr).Trim();
+        var detailRes = ShellHelper.EjecutarComoRoot($"mdadm --detail {arrayPath}");
+        var detail = (detailRes.Stdout + "\n" + detailRes.Stderr);
 
-        if (string.IsNullOrWhiteSpace(scan))
-            return false;
-
-        foreach (var raw in scan.Split('\n'))
+        foreach (var r in detail.Split('\n'))
         {
-            var line = raw.Trim();
-            if (!line.StartsWith("ARRAY", StringComparison.OrdinalIgnoreCase))
+            var l = r.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(l))
                 continue;
 
-            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
+            // ⭐ Ignorar discos que mdadm ya NO usa
+            if (l.Contains("removed"))
                 continue;
 
-            var arrayPath = parts[1];
-            var name = arrayPath.Split('/').Last();
+            if (l.Contains("faulty"))
+                continue;
 
-            var detailRes = ShellHelper.EjecutarComoRoot($"mdadm --detail {arrayPath}");
-            var detail = (detailRes.Stdout + "\n" + detailRes.Stderr);
+            // ⭐ Parsear tokens
+            var tokens = l.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var r in detail.Split('\n'))
+            // Si la línea contiene un /dev/XXX, procesarlo
+            foreach (var t in tokens)
             {
-                var l = r.Trim().ToLowerInvariant();
-                if (l.Contains("faulty") || l.Contains("removed"))
+                if (!t.StartsWith("/dev/"))
                     continue;
 
-                var tokens = l.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var t in tokens)
-                {
-                    if (!t.StartsWith("/dev/"))
-                        continue;
+                var dev = t.Substring(5);
 
-                    var dev = t.Substring(5);
-                    if (dev == disk)
-                    {
-                        arrayName = name;
-                        return true;
-                    }
+                // ⭐ Matching EXACTO
+                if (dev == disk)
+                {
+                    arrayName = name;
+                    return true;
                 }
             }
         }
-
-        return false;
     }
+
+    return false;
+}
+
 
 
 
