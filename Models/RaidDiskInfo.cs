@@ -48,6 +48,11 @@ public class RaidDiskInfo
 
     // ⭐ NUEVO: lista de particiones hijas (sda1, sda2…)
     public List<string> Children { get; set; } = new();
+    
+    public string FsType { get; set; } = "";
+    
+    
+
 
     // ============================================================
     // INFORMACIÓN DE MONTADO / FS

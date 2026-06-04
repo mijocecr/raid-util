@@ -25,92 +25,127 @@ public class RaidService
     }
 
 
-
-
-    public async Task<bool> AddDiskToArrayAsync(string arrayName, string diskName)
+public async Task<bool> AddDiskToArrayAsync(string arrayName, string diskName)
+{
+    try
     {
-        try
+        // ⭐ VALIDACIÓN CRÍTICA
+        if (!await EnsureArraySafeForModification(arrayName))
+            return false;
+
+        NotificadorLinux.Enviar($"Preparando para añadir {diskName} a {arrayName}…");
+
+        LogService.Write($"[RAID] AddDiskToArray START → array={arrayName}, disk={diskName}");
+
+        // 0) Esperar a que mdadm esté libre
+        NotificadorLinux.Enviar("Esperando a que mdadm esté libre…");
+
+        if (!await WaitForMdadmIdleAsync())
         {
-            // ⭐ VALIDACIÓN CRÍTICA
-            if (!await EnsureArraySafeForModification(arrayName))
-                return false;
-
-            NotificadorLinux.Enviar($"Preparando para añadir {diskName} a {arrayName}…");
-
-            LogService.Write($"[RAID] AddDiskToArray START → array={arrayName}, disk={diskName}");
-
-            // 0) Esperar a que mdadm esté libre
-            NotificadorLinux.Enviar("Esperando a que mdadm esté libre…");
-
-            if (!await WaitForMdadmIdleAsync())
-            {
-                NotificadorLinux.Enviar("mdadm está ocupado. Operación cancelada.", 5000, "critical");
-                return false;
-            }
-
-            // 1) Validar que el array existe
-            NotificadorLinux.Enviar("Validando array…");
-
-            var arrays = await GetArraysAsync();
-            var array = arrays.FirstOrDefault(a => a.Name == arrayName || a.Path.EndsWith(arrayName));
-            if (array == null)
-            {
-                NotificadorLinux.Enviar($"Array {arrayName} no encontrado.", 5000, "critical");
-                return false;
-            }
-
-            // 2) Validar que el disco no está ya en el array
-            if (array.Disks.Any(d => d.Name == diskName))
-            {
-                NotificadorLinux.Enviar($"El disco {diskName} ya pertenece al array.", 5000, "critical");
-                return false;
-            }
-
-            // 3) Validación previa del disco
-            NotificadorLinux.Enviar("Validando disco…");
-
-            var errors = await ValidateDiskForRaidAsync(diskName);
-            if (errors.Count > 0)
-            {
-                foreach (var e in errors)
-                    LogService.Error("[VALIDATION] " + e);
-
-                NotificadorLinux.Enviar("El disco no es válido para RAID.", 5000, "critical");
-                return false;
-            }
-
-            // 4) Ejecutar mdadm --add
-            NotificadorLinux.Enviar($"Añadiendo /dev/{diskName} al array…");
-
-            var cmd = $"/usr/sbin/mdadm /dev/{arrayName} --add /dev/{diskName}";
-            var result = ShellHelper.EjecutarComoRoot(cmd);
-
-            if (result.ExitCode != 0)
-            {
-                NotificadorLinux.Enviar("Error al añadir el disco al array.", 5000, "critical");
-                return false;
-            }
-
-            // 5) Esperar a que udev y mdadm terminen
-            NotificadorLinux.Enviar("Finalizando operación…");
-
-            ShellHelper.EjecutarComoRoot("udevadm settle");
-            await WaitForMdadmIdleAsync();
-
-            // 6) Refrescar arrays
-            await GetArraysAsync();
-
-            NotificadorLinux.Enviar($"Disco {diskName} añadido correctamente a {arrayName}.");
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            NotificadorLinux.Enviar("Error inesperado al añadir el disco.", 5000, "critical");
-            LogService.Error(ex.ToString());
+            NotificadorLinux.Enviar("mdadm está ocupado. Operación cancelada.", 5000, "critical");
             return false;
         }
+
+        // 1) Validar que el array existe
+        NotificadorLinux.Enviar("Validando array…");
+
+        var arrays = await GetArraysAsync();
+        var array = arrays.FirstOrDefault(a => a.Name == arrayName || a.Path.EndsWith(arrayName));
+        if (array == null)
+        {
+            NotificadorLinux.Enviar($"Array {arrayName} no encontrado.", 5000, "critical");
+            return false;
+        }
+
+        // 2) Validar que el disco no está ya en el array
+        if (array.Disks.Any(d => d.Name == diskName))
+        {
+            NotificadorLinux.Enviar($"El disco {diskName} ya pertenece al array.", 5000, "critical");
+            return false;
+        }
+
+        // 3) Validación previa del disco
+        NotificadorLinux.Enviar("Validando disco…");
+
+        var errors = await ValidateDiskForRaidAsync(diskName);
+        if (errors.Count > 0)
+        {
+            foreach (var e in errors)
+                LogService.Error("[VALIDATION] " + e);
+
+            NotificadorLinux.Enviar("El disco no es válido para RAID.", 5000, "critical");
+            return false;
+        }
+
+        // 4) Ejecutar mdadm --add
+        NotificadorLinux.Enviar($"Añadiendo /dev/{diskName} al array…");
+
+        var cmd = $"/usr/sbin/mdadm /dev/{arrayName} --add /dev/{diskName}";
+        var result = ShellHelper.EjecutarComoRoot(cmd);
+
+        if (result.ExitCode != 0)
+        {
+            NotificadorLinux.Enviar("Error al añadir el disco al array.", 5000, "critical");
+            return false;
+        }
+
+        // 5) Esperar a que udev y mdadm terminen
+        NotificadorLinux.Enviar("Finalizando operación…");
+
+        ShellHelper.EjecutarComoRoot("udevadm settle");
+        await WaitForMdadmIdleAsync();
+
+        // ⭐ 6) Esperar a que el array esté healthy
+        NotificadorLinux.Enviar("Esperando a que el array esté healthy…");
+
+        var healthy = await WaitForArrayHealthy(arrayName);
+
+        if (!healthy)
+        {
+            NotificadorLinux.Enviar("El disco fue añadido, pero el array sigue degradado.", 5000, "warning");
+        }
+        else
+        {
+            NotificadorLinux.Enviar($"Disco {diskName} añadido correctamente a {arrayName}.");
+        }
+
+        return true;
     }
+    catch (Exception ex)
+    {
+        NotificadorLinux.Enviar("Error inesperado al añadir el disco.", 5000, "critical");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
+
+public async Task<bool> WaitForArrayHealthy(string arrayName)
+{
+    for (int i = 0; i < 300; i++) // ~30 segundos
+    {
+        var r = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail /dev/{arrayName}");
+        if (r.ExitCode != 0)
+        {
+            await Task.Delay(200);
+            continue;
+        }
+
+        var text = r.Stdout.ToLower();
+
+        bool isClean = text.Contains("state : clean");
+        bool isDegraded = text.Contains("degraded");
+
+        if (isClean && !isDegraded)
+            return true;
+
+        await Task.Delay(200);
+    }
+
+    return false;
+}
+
+
 
 
     private async Task<bool> WaitForMdadmIdleAsync(int timeoutSeconds = 20)
@@ -138,6 +173,9 @@ public class RaidService
         return false;
     }
 
+    
+
+    
 
     public async Task<List<string>> ValidateDiskForRaidAsync(string diskName)
     {
@@ -887,8 +925,81 @@ public class RaidService
             _ => "auto"
         };
     }
+    
+    
+    private string ParseDiskRole(string detail, string device)
+    {
+        if (string.IsNullOrWhiteSpace(detail) || string.IsNullOrWhiteSpace(device))
+            return "unknown";
+
+        var dev = device.Replace("/dev/", "").Trim();
+        var lines = detail.Split('\n');
+
+        // ⭐ Detectar si el array tiene un slot "removed"
+        bool arrayHasRemovedSlot = lines.Any(l => l.ToLowerInvariant().Contains(" removed"));
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            var lower = line.ToLowerInvariant();
+
+            // Solo líneas que mencionan el dispositivo real
+            if (!lower.Contains($"/dev/{dev}"))
+                continue;
+
+            // 1) faulty → pero si hay removed en el array, este disco ya no pertenece
+            if (lower.Contains("faulty"))
+            {
+                if (arrayHasRemovedSlot)
+                    return "removed";   // ⭐ FIX CLAVE
+
+                return "faulty";
+            }
+
+            // 2) removed (mdadm nunca pone /dev/sdX aquí, pero lo dejamos por compatibilidad)
+            if (lower.Contains("removed"))
+                return "removed";
+
+            // 3) rebuilding / recovering / resync
+            if (lower.Contains("rebuild") ||
+                lower.Contains("recover") ||
+                lower.Contains("resync"))
+                return "rebuilding";
+
+            // 4) write-mostly
+            if (lower.Contains("write-mostly"))
+                return "write-mostly";
+
+            // 5) blocked
+            if (lower.Contains("blocked"))
+                return "blocked";
+
+            // 6) spare
+            if (lower.Contains("spare"))
+                return "spare";
+
+            // 7) in-sync
+            if (lower.Contains("in-sync"))
+                return "active";
+
+            // 8) active
+            if (lower.Contains(" active ") ||
+                lower.Contains(" active,") ||
+                lower.Contains(" active\t"))
+                return "active";
+
+            // 9) sync
+            if (lower.Contains(" sync "))
+                return "active";
+        }
+
+        return "unknown";
+    }
 
 
+    
+
+/*
     private string ParseDiskRole(string detail, string device)
     {
         if (string.IsNullOrWhiteSpace(detail) || string.IsNullOrWhiteSpace(device))
@@ -952,7 +1063,7 @@ public class RaidService
 
         return "unknown";
     }
-
+*/
 
 
 
@@ -1063,64 +1174,89 @@ public class RaidService
 
 
     private async Task<RaidDiskInfo> GetDiskInfo(string device)
+{
+    var name = device.Replace("/dev/", "").Trim();
+
+    // Normalizar nombres de particiones
+    if (Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
+        name = name.Substring(0, 3);
+
+    if (Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
+        name = name.Split('p')[0];
+
+    // -----------------------------------------
+    // 1) lsblk universal
+    // -----------------------------------------
+    var json = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{name}");
+
+    if (string.IsNullOrWhiteSpace(json))
+        return CreateUnknownDisk(name);
+
+    dynamic data;
+    try
     {
-        var name = device.Replace("/dev/", "").Trim();
-
-        // Normalizar nombres de particiones
-        if (Regex.IsMatch(name, @"^sd[a-z][0-9]+$"))
-            name = name.Substring(0, 3);
-
-        if (Regex.IsMatch(name, @"^nvme[0-9]+n[0-9]+p[0-9]+$"))
-            name = name.Split('p')[0];
-
-        // -----------------------------------------
-        // 1) lsblk universal (sin columnas)
-        // -----------------------------------------
-        var json = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{name}");
-
-        if (string.IsNullOrWhiteSpace(json))
-            return CreateUnknownDisk(name);
-
-        dynamic data;
-        try
-        {
-            data = JsonConvert.DeserializeObject(json)!;
-        }
-        catch
-        {
-            return CreateUnknownDisk(name);
-        }
-
-        if (data.blockdevices == null || data.blockdevices.Count == 0)
-            return CreateUnknownDisk(name);
-
-        var dev = data.blockdevices[0];
-
-        // -----------------------------------------
-        // 2) Campos universales
-        // -----------------------------------------
-        string model = dev.model ?? "Unknown";
-        string size = dev.size ?? "Unknown";
-        bool isRotational = ParseRota(dev.rota);
-
-        // -----------------------------------------
-        // 3) Icono universal
-        // -----------------------------------------
-        var icon = DiskIconService.GetIcon(name, model, isRotational);
-
-        // -----------------------------------------
-        // 4) Crear objeto final
-        // -----------------------------------------
-        return new RaidDiskInfo
-        {
-            Name = name,
-            Model = model,
-            Size = size,
-            Icon = icon,
-            IsRotational = isRotational,
-            ArrayName = ""
-        };
+        data = JsonConvert.DeserializeObject(json)!;
     }
+    catch
+    {
+        return CreateUnknownDisk(name);
+    }
+
+    if (data.blockdevices == null || data.blockdevices.Count == 0)
+        return CreateUnknownDisk(name);
+
+    var dev = data.blockdevices[0];
+
+    // -----------------------------------------
+    // 2) Campos universales
+    // -----------------------------------------
+    string model = dev.model ?? "Unknown";
+    string size = dev.size ?? "Unknown";
+    bool isRotational = ParseRota(dev.rota);
+
+    // -----------------------------------------
+    // 3) Detectar fstype y children
+    // -----------------------------------------
+    string fstype = dev.fstype ?? "";
+    string arrayName = "";
+    List<string> children = new();
+
+    if (dev.children != null)
+    {
+        foreach (var c in dev.children)
+        {
+            string childName = c.name ?? "";
+            children.Add(childName);
+
+            // Si el hijo es un mdX → pertenece a un array
+            if (childName.StartsWith("md"))
+                arrayName = childName;
+        }
+    }
+
+    // -----------------------------------------
+    // 4) Icono universal
+    // -----------------------------------------
+    var icon = DiskIconService.GetIcon(name, model, isRotational);
+
+    // -----------------------------------------
+    // 5) Crear objeto final
+    // -----------------------------------------
+    return new RaidDiskInfo
+    {
+        Name = name,
+        Model = model,
+        Size = size,
+        Icon = icon,
+        IsRotational = isRotational,
+
+        // ⭐ NUEVO:
+        FsType = fstype,
+        Children = children,
+        ArrayName = arrayName
+    };
+}
+
 
 
 
@@ -1392,7 +1528,7 @@ public class RaidService
             _ => true
         };
 
-        // 2) FAIL si aplica
+        // ⭐ 2) FAIL si aplica
         if (supportsFail)
         {
             LogService.Write($"[RAID] Marking disk as faulty: /dev/{diskName}");
@@ -1401,27 +1537,68 @@ public class RaidService
             );
         }
 
-        // ⭐ 3) FORZAR AL KERNEL A LIBERAR EL DISCO (CLAVE EN VMWARE/NVME)
-        LogService.Write($"[RAID] Forcing kernel to release /dev/{diskName}");
-        ShellHelper.EjecutarComoRoot(
-            $"echo 1 > /sys/block/{diskName}/device/delete"
-        );
+        // ⭐ 3) Detectar si hay un spare bloqueando el remove
+        var spare = DetectSpareDevice(detail.Stdout);
+        if (!string.IsNullOrWhiteSpace(spare) && spare != diskName)
+        {
+            LogService.Write($"[RAID] Spare detected ({spare}) → removing spare first.");
+            ShellHelper.EjecutarComoRoot(
+                $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{spare}"
+            );
+            ShellHelper.EjecutarComoRoot("udevadm settle");
+        }
 
-        ShellHelper.EjecutarComoRoot("udevadm settle");
-
-        // 4) REMOVE (ahora sí funciona)
-        LogService.Write($"[RAID] Removing disk from array: /dev/{diskName}");
-        var remove = ShellHelper.EjecutarComoRoot(
+        // ⭐ 4) Intento normal de remove
+        LogService.Write($"[RAID] Attempting normal remove: /dev/{diskName}");
+        var remove1 = ShellHelper.EjecutarComoRoot(
             $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{diskName}"
         );
 
-        if (remove.ExitCode != 0)
+        if (remove1.ExitCode == 0)
         {
-            LogService.Error($"[RAID] RemoveDiskFromArrayAsync FAILED: {remove.Stderr}");
-            return false;
+            LogService.Write("[RAID] Normal remove succeeded.");
+        }
+        else
+        {
+            LogService.Write("[RAID] Normal remove FAILED → checking lsblk children.");
+
+            // ⭐ 5) Verificar si el disco sigue enganchado al array
+            if (DiskStillAttached(diskName))
+            {
+                LogService.Write("[RAID] Disk still attached → forcing kernel release.");
+
+                // ⭐ 6) Forzar liberación del kernel
+                ShellHelper.EjecutarComoRoot(
+                    $"echo 1 > /sys/block/{diskName}/device/delete"
+                );
+
+                ShellHelper.EjecutarComoRoot("udevadm settle");
+
+                // ⭐ 7) Reescanear SCSI
+                for (int host = 0; host < 10; host++)
+                {
+                    string path = $"/sys/class/scsi_host/host{host}/scan";
+                    if (File.Exists(path))
+                        ShellHelper.EjecutarComoRoot($"echo \"- - -\" > {path}");
+                }
+
+                ShellHelper.EjecutarComoRoot("udevadm settle");
+            }
+
+            // ⭐ 8) Reintento final de remove
+            LogService.Write("[RAID] Retrying remove after kernel release...");
+            var remove2 = ShellHelper.EjecutarComoRoot(
+                $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{diskName}"
+            );
+
+            if (remove2.ExitCode != 0)
+            {
+                LogService.Error($"[RAID] RemoveDiskFromArrayAsync FAILED: {remove2.Stderr}");
+                return false;
+            }
         }
 
-        // 5) Limpieza de metadata
+        // ⭐ 9) Limpieza de metadata
         LogService.Write($"[RAID] Cleaning metadata on /dev/{diskName}");
         ShellHelper.EjecutarComoRoot($"/sbin/mdadm --zero-superblock /dev/{diskName}");
         ShellHelper.EjecutarComoRoot($"/usr/sbin/wipefs -a /dev/{diskName}");
@@ -1438,6 +1615,32 @@ public class RaidService
         return false;
     }
 }
+
+
+// =====================================================================================
+// ⭐ FUNCIONES AUXILIARES
+// =====================================================================================
+
+private string DetectSpareDevice(string mdadmDetail)
+{
+    foreach (var line in mdadmDetail.Split('\n'))
+    {
+        if (line.Contains(" spare ") && line.Contains("/dev/"))
+        {
+            var parts = line.Trim().Split(' ');
+            return parts[^1].Replace("/dev/", "").Trim();
+        }
+    }
+    return "";
+}
+
+private bool DiskStillAttached(string diskName)
+{
+    var lsblk = ShellHelper.RunCleanAsync($"lsblk -J /dev/{diskName}").Result;
+    return lsblk.Contains("\"children\"");
+}
+
+
 
 
 

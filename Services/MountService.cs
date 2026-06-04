@@ -22,18 +22,18 @@ public static class MountService
     }
 
     // ============================================================
-    // ⭐ MONTAR (versión estable post-mkfs)
+    // ⭐ MONTAR (versión estable y segura)
     // ============================================================
     public static bool Mount(string device, string mountPoint, string options = "defaults")
     {
         // 1) Crear directorio
         ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
 
-        // 2) Si ya está montado → desmontar SIEMPRE (udev puede haber montado en RO)
+        // 2) Si ya está montado → desmontar SIEMPRE
         if (IsMounted(mountPoint))
             ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
 
-        // 3) Esperar a que el FS esté listo
+        // 3) Esperar a udev
         ShellHelper.EjecutarComoRoot("udevadm settle");
 
         // 4) Detectar filesystem real
@@ -44,8 +44,12 @@ public static class MountService
             .Trim()
             .ToLower();
 
+        // ⭐ NO MONTAR si NO hay filesystem
         if (string.IsNullOrWhiteSpace(fsType))
-            fsType = "unknown";
+        {
+            LogService.Error($"[MOUNT] ERROR: El dispositivo {device} NO tiene filesystem. Abortando montaje.");
+            return false;
+        }
 
         var finalOpts = options;
 
@@ -70,7 +74,10 @@ public static class MountService
         );
 
         if (r.ExitCode != 0)
+        {
+            LogService.Error($"[MOUNT] ERROR al montar {device}: {r.Stderr}");
             return false;
+        }
 
         // 7) Permisos correctos para POSIX FS
         if (fsType is "ext4" or "xfs" or "btrfs" or "f2fs")

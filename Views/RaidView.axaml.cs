@@ -1963,6 +1963,7 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         var service = new RaidService();
         var allDisks = await service.GetAllDisksAsync();
 
+        // ⭐ Filtrado robusto de discos realmente libres
         var candidates = allDisks
             .Where(d =>
                 !d.IsMounted &&
@@ -1972,13 +1973,17 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
                 string.IsNullOrWhiteSpace(d.ArrayName) &&
                 d.Status == "OK" &&
                 !d.Name.StartsWith("loop") &&
-                !d.Name.StartsWith("zram")
+                !d.Name.StartsWith("zram") &&
+                d.FsType != "linux_raid_member" &&
+                (d.Children == null || d.Children.Count == 0) &&
+                d.Role == "none"
             )
             .ToList();
 
         if (candidates.Count == 0)
         {
-            await ShowConfirm("No disks available", "There are no valid free disks to add.");
+            await ShowConfirm("No disks available",
+                "There are no valid free disks to add.");
             return;
         }
 
@@ -1989,12 +1994,26 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         if (string.IsNullOrWhiteSpace(selectedDisk))
             return;
 
-        // ⭐ SOLO agregar disco → queda como SPARE
-        await service.AddDiskToArrayAsync(array.Name, selectedDisk);
+        // ⭐ Mantener el diálogo abierto con USING
+        using (LoadingService.Show("Adding disk to array..."))
+        {
+            // ⭐ AddDiskToArrayAsync YA espera a que el array esté healthy
+            var ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
 
-        // ⭐ NO expandir, NO preguntar, NO reshape
+            if (!ok)
+            {
+                await ShowConfirm("Error", "Failed to add disk to array.");
+                return;
+            }
+        }
+
+        // ⭐ Refrescar UI (fuera del using)
         await LoadRaidAsync();
     }
+
+    
+   
+    
 
     private bool ArrayAllowsExpansion(RaidArrayInfo array)
     {
