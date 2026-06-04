@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -1022,12 +1024,36 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             break;
         }
 
-        case "faulty":
+       /* case "faulty":
         {
             ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --fail /dev/{disk.Name}");
             await LoadRaidAsync();
             break;
+        }*/
+        
+        
+        case "faulty":
+        {
+            // RAID linear y RAID0 NO soportan --fail
+            if (array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
+                array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase))
+            {
+                // En estos niveles, lo más parecido a "faulty" es "remove"
+                ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --remove /dev/{disk.Name}");
+
+                // Recargar vista
+                await LoadRaidAsync();
+                break;
+            }
+
+            // RAID1/5/6/10 → sí soportan --fail
+            ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --fail /dev/{disk.Name}");
+
+            // Recargar vista
+            await LoadRaidAsync();
+            break;
         }
+
 
         case "spare":
         {
@@ -1443,57 +1469,95 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             _ => "0 GB"
         };
     }
-
+    
     private async Task<bool> CreateRealArray(CreateArrayResult result)
     {
+        var parent = GetWindow();
         var service = new RaidService();
 
-        var ok = await Task.Run(() =>
-            service.CreateArray(result.Level, result.Disks, result.FriendlyName)
-        );
-
-        if (!ok)
-            return false;
-
-        var ready = await Task.Run(() =>
-            service.WaitForArray(service.LastCreatedMdName)
-        );
-
-        if (!ready)
+        using (LoadingService.Show("Creating RAID array...", parent))
         {
-            new ConfirmDialog("Warning",
-                    $"Array created, but /dev/{service.LastCreatedMdName} did not appear in time.")
-                .ShowDialog(GetWindow());
-            return false;
+            await Task.Delay(50);
+
+            // 1) Crear array
+            LoadingService.Update("Executing mdadm...");
+            var ok = await Task.Run(() =>
+                service.CreateArray(result.Level, result.Disks, result.FriendlyName)
+            );
+
+            if (!ok)
+            {
+                LoadingService.Update("Error creating array.");
+                await Task.Delay(1200);
+                return false;
+            }
+
+            // 2) Esperar a que aparezca /dev/mdX
+            LoadingService.Update("Detecting new array...");
+            var mdName = service.LastCreatedMdName;
+
+            var ready = await Task.Run(() =>
+                service.WaitForArray(mdName)
+            );
+
+            if (!ready)
+            {
+                LoadingService.Update("Array created, but device did not appear.");
+                await Task.Delay(1200);
+
+                new ConfirmDialog("Warning",
+                        $"Array created, but /dev/{mdName} did not appear in time.")
+                    .ShowDialog(parent);
+
+                return false;
+            }
+
+            // 3) Persistir en mdadm.conf
+            LoadingService.Update("Updating mdadm.conf...");
+
+            var persisted = await Task.Run(() =>
+                service.PersistArrayToMdadmConf()
+            );
+
+            if (!persisted)
+            {
+                LoadingService.Update("Array created, but mdadm.conf was not updated.");
+                await Task.Delay(1200);
+
+                new ConfirmDialog("Warning",
+                        "Array created, but could not update mdadm.conf. Check logs.")
+                    .ShowDialog(parent);
+            }
+
+            // 4) Finalización
+            LoadingService.Update("Array ready.");
+            await Task.Delay(600);
         }
 
-        var persisted = await Task.Run(() =>
-            service.PersistArrayToMdadmConf()
-        );
-
-        if (!persisted)
-            new ConfirmDialog("Warning",
-                    "Array created, but could not update mdadm.conf. Check logs.")
-                .ShowDialog(GetWindow());
-
         await LoadRaidAsync();
-
         return true;
     }
+
+
 
     private async void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
     {
         if (_selectedArray == null)
         {
             Console.WriteLine("[DELETE] No array selected.");
+            await ShowInfo("No array selected", "Please select an array before deleting.");
             return;
         }
 
         var array = _selectedArray;
 
-        var dialog = new ConfirmDialog($"Delete array {array.Name}?", "This action cannot be undone.");
-        var result = await dialog.ShowDialog<bool>(GetWindow());
+        // Confirmación
+        var dialog = new ConfirmDialog(
+            $"Delete array {array.Name}?",
+            "This action cannot be undone."
+        );
 
+        var result = await dialog.ShowDialog<bool>(GetWindow());
         if (!result)
         {
             Console.WriteLine("[DELETE] Cancelled.");
@@ -1502,6 +1566,7 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
 
         Console.WriteLine($"[DELETE] REAL delete for {array.Name}");
 
+        // Fake mode
         if (IsFakeMode)
         {
             _arrays.Remove(array);
@@ -1510,22 +1575,41 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             return;
         }
 
+        bool ok;
+
         using (LoadingService.Show("Deleting array..."))
         {
             var service = new RaidService();
-            var ok = await Task.Run(() => service.DeleteArrayAsync(array));
 
-            if (!ok)
-            {
-                Console.WriteLine("[DELETE] ERROR deleting array.");
-                return;
-            }
+            ok = await Task.Run(() => service.DeleteArrayAsync(array));
         }
 
+        // ⭐ Interpretación clara del resultado
+        if (!ok)
+        {
+            await ShowInfo(
+                "Deletion incomplete",
+                "The array could not be fully deleted. Some operations failed.\n\n" +
+                "Please check the logs for more details."
+            );
+            return;
+        }
+
+        // ⭐ Éxito real
+        await ShowInfo(
+            "Array deleted",
+            $"The array {array.Name} has been successfully deleted."
+        );
+
+        // Actualizar UI
         _arrays.Remove(array);
         _selectedArray = null;
         await LoadRaidAsync();
     }
+
+
+    
+
 
     private Window GetWindow()
     {
@@ -1548,7 +1632,7 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         OpenArrayConfigWindow();
     }
     
-    private async Task LoadRaidAsync(bool afterCreate = false)
+  private async Task LoadRaidAsync(bool afterCreate = false)
 {
     LogService.Write("[RAIDVIEW] ================= RAID LOAD START =================");
     LogService.Debug("[RAIDVIEW] LoadRaidAsync() ENTER");
@@ -1603,6 +1687,71 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
                     array.Disks = disks.Where(d => d.ArrayName == array.Name).ToList();
             }
 
+            // ⭐ FALLBACK ROBUSTO → si no hay arrays válidos (sin discos)
+            if (!arrays.Any(a => a.Disks.Count > 0))
+            {
+                LogService.Write("[RAIDVIEW] No valid arrays detected → applying robust fallback.");
+
+                arrays.Clear();
+
+                if (File.Exists("/proc/mdstat"))
+                {
+                    var md = File.ReadAllText("/proc/mdstat");
+                    var matches = Regex.Matches(md, @"(md\d+)");
+
+                    if (matches.Count > 0)
+                    {
+                        foreach (Match m in matches)
+                        {
+                            var name = m.Value;
+
+                            arrays.Add(new RaidArrayInfo
+                            {
+                                Name = name,
+                                Path = "/dev/" + name,
+                                Level = "Unknown",
+                                State = "Rebuilding",
+                                StateIcon = GetStateIcon("Rebuilding"),
+                                Disks = new List<RaidDiskInfo>(),
+                                MountPath = "",
+                                IsMounted = false,
+                                TotalSize = "Unknown",
+                                UsableSize = "Unknown",
+                                ParitySize = "N/A",
+                                AverageTemp = 0,
+                                DiskSummary = "Unknown",
+                                Uptime = "Unknown",
+                                RebuildProgress = 0,
+                                RebuildETA = "Unknown"
+                            });
+                        }
+                    }
+                    else
+                    {
+                        // ⭐ fallback mínimo para no dejar la UI vacía
+                        arrays.Add(new RaidArrayInfo
+                        {
+                            Name = "mdX",
+                            Path = "/dev/mdX",
+                            Level = "Unknown",
+                            State = "Unknown",
+                            StateIcon = GetStateIcon("Rebuilding"),
+                            Disks = new List<RaidDiskInfo>(),
+                            MountPath = "",
+                            IsMounted = false,
+                            TotalSize = "Unknown",
+                            UsableSize = "Unknown",
+                            ParitySize = "N/A",
+                            AverageTemp = 0,
+                            DiskSummary = "Unknown",
+                            Uptime = "Unknown",
+                            RebuildProgress = 0,
+                            RebuildETA = "Unknown"
+                        });
+                    }
+                }
+            }
+
             // ⭐ Actualizar UI en el hilo principal
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -1638,8 +1787,22 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
     }
 }
 
-    
+
  
+private string GetStateIcon(string state)
+{
+    return state switch
+    {
+        "Healthy"    => "avares://RAID-Util/Assets/Icons/array-ok.png",
+        "Degraded"   => "avares://RAID-Util/Assets/Icons/array-caution.png",
+        "Rebuilding" => "avares://RAID-Util/Assets/Icons/array-caution.png",
+        "Resync"     => "avares://RAID-Util/Assets/Icons/array-caution.png",
+        "ReadOnly"   => "avares://RAID-Util/Assets/Icons/array-readonly.png",
+        "Faulty"     => "avares://RAID-Util/Assets/Icons/array-error.png",
+        _            => "avares://RAID-Util/Assets/Icons/array-caution.png"
+    };
+}
+
 
     //-------------Boton More------------------//
 
@@ -1741,8 +1904,18 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
                 }
 
                 await service.StartArrayResyncAsync(array.Name);
-                await ShowConfirm("Success", "Resync started.");
+
+                // ⭐ Abrir diálogo modal de progreso
+                var ownerrs = this.GetVisualRoot() as Window;
+                var dlgrb = new RebuildDialog(array.Name);
+
+                if (ownerrs != null)
+                    await dlgrb.ShowDialog(ownerrs);
+                else
+                    await dlgrb.ShowDialog(new Window());
+
                 break;
+
 
             case "check":
 

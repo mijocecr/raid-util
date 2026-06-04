@@ -17,6 +17,7 @@ public class RaidArrayInfo
     // NUEVO: progreso de rebuild (0–100)
     public int RebuildProgress { get; set; } = 0;
 
+
     // NUEVO: tamaño total del array
     public string TotalSize { get; set; } = "";
 

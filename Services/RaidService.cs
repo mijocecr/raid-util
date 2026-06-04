@@ -271,7 +271,7 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     // ============================================================
     //  LECTURA DE ARRAYS (SIN CAMBIOS)
     // ============================================================
-
+/*
     public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
@@ -428,11 +428,11 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
         // 7.1) FILTRO CLAVE: no mostrar discos faulty/removed en el array
         //      (coherente con MdadmService_IsDiskInArray)
         // ============================================================
-        info.Disks = info.Disks
-            .Where(d =>
-                !d.Role.Equals("faulty", StringComparison.OrdinalIgnoreCase) &&
-                !d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        info.Disks = info.Disks;
+         //   .Where(d =>
+           //     !d.Role.Equals("faulty", StringComparison.OrdinalIgnoreCase) &&
+             //  !d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
+            //.ToList();
 
         arrays.Add(info);
     }
@@ -455,12 +455,9 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
 
     return arrays;
-}
+}*/
 
-    
-    
-/*
-    public async Task<List<RaidArrayInfo>> GetArraysAsync()
+public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
 
@@ -501,122 +498,164 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
     Console.WriteLine(scan);
 
-    if (string.IsNullOrWhiteSpace(scan))
-        return arrays;
-
     // ============================================================
     // 3) Parsear cada ARRAY detectado
     // ============================================================
-    foreach (var raw in scan.Split('\n'))
+    if (!string.IsNullOrWhiteSpace(scan))
     {
-        var line = raw.Trim();
-        if (!line.StartsWith("ARRAY"))
-            continue;
-
-        var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length < 2)
-            continue;
-
-        var arrayPath = tokens[1];
-        var arrayName = arrayPath.Split('/').Last();
-
-        // ============================================================
-        // 4) Obtener detalle real del array
-        // ============================================================
-        var detail = await RunMdadmAsync($"--detail {arrayPath}");
-
-        Console.WriteLine("=== DETAIL OUTPUT ===");
-        Console.WriteLine(detail);
-        Console.WriteLine("=====================");
-
-        if (string.IsNullOrWhiteSpace(detail))
-            continue;
-
-        var state = ParseArrayState(detail);
-        var level = ParseLevel(detail);
-
-        // ============================================================
-        // 5) Obtener discos del array
-        // ============================================================
-        var diskNames = await GetDisksInArrayAsync(arrayName, detail);
-
-        var info = new RaidArrayInfo
+        foreach (var raw in scan.Split('\n'))
         {
-            Name = arrayName,
-            Path = arrayPath,
-            Level = level,
-            State = state,
-            StateIcon = GetStateIcon(state),
-            Disks = new List<RaidDiskInfo>(),
+            var line = raw.Trim();
+            if (!line.StartsWith("ARRAY"))
+                continue;
 
-            TotalSize = ParseTotalSize(detail),
-            UsableSize = ParseTotalSize(detail),
-            ParitySize = "N/A",
-            AverageTemp = 0,
-            DiskSummary = $"{diskNames.Count}× Disk",
-            Uptime = ParseUptime(detail),
-            RebuildProgress = ParseRebuildProgress(detail),
-            RebuildETA = ParseRebuildEta(detail)
-        };
+            var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length < 2)
+                continue;
 
-        // ============================================================
-        // 6) Obtener MountPath universal
-        // ============================================================
-        try
-        {
-            var lsblk = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{arrayName}");
-            dynamic blk = JsonConvert.DeserializeObject(lsblk)!;
+            var arrayPath = tokens[1];
+            var arrayName = arrayPath.Split('/').Last();
 
-            var mount = "";
+            // ============================================================
+            // 4) Obtener detalle real del array
+            // ============================================================
+            var detail = await RunMdadmAsync($"--detail {arrayPath}");
 
+            Console.WriteLine("=== DETAIL OUTPUT ===");
+            Console.WriteLine(detail);
+            Console.WriteLine("=====================");
+
+            if (string.IsNullOrWhiteSpace(detail))
+                continue;
+
+            var state = ParseArrayState(detail);
+            var level = ParseLevel(detail);
+
+            // ============================================================
+            // 5) Obtener discos del array
+            // ============================================================
+            var diskNames = await GetDisksInArrayAsync(arrayName, detail);
+
+            var info = new RaidArrayInfo
+            {
+                Name = arrayName,
+                Path = arrayPath,
+                Level = level,
+                State = state,
+                StateIcon = GetStateIcon(state),
+                Disks = new List<RaidDiskInfo>(),
+
+                TotalSize = ParseTotalSize(detail),
+                UsableSize = ParseTotalSize(detail),
+                ParitySize = "N/A",
+                AverageTemp = 0,
+                DiskSummary = $"{diskNames.Count}× Disk",
+                Uptime = ParseUptime(detail),
+                RebuildProgress = ParseRebuildProgress(detail),
+                RebuildETA = ParseRebuildEta(detail)
+            };
+
+            // ============================================================
+            // 6) Obtener MountPath universal
+            // ============================================================
             try
             {
-                if (blk.blockdevices[0].mountpoints != null)
+                var lsblk = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{arrayName}");
+                dynamic blk = JsonConvert.DeserializeObject(lsblk)!;
+
+                var mount = "";
+
+                try
                 {
-                    var mps = blk.blockdevices[0].mountpoints;
-                    if (mps.Count > 0)
-                        mount = mps[0] ?? "";
+                    if (blk.blockdevices[0].mountpoints != null)
+                    {
+                        var mps = blk.blockdevices[0].mountpoints;
+                        if (mps.Count > 0)
+                            mount = mps[0] ?? "";
+                    }
+                    else
+                    {
+                        mount = blk.blockdevices[0].mountpoint ?? "";
+                    }
                 }
-                else
+                catch
                 {
-                    mount = blk.blockdevices[0].mountpoint ?? "";
+                    mount = "";
                 }
+
+                info.MountPath = mount;
+                info.IsMounted = !string.IsNullOrWhiteSpace(mount);
             }
             catch
             {
-                mount = "";
+                info.MountPath = "";
+                info.IsMounted = false;
             }
 
-            info.MountPath = mount;
-            info.IsMounted = !string.IsNullOrWhiteSpace(mount);
+            // ============================================================
+            // 7) Obtener información detallada de cada disco
+            // ============================================================
+            foreach (var dev in diskNames)
+            {
+                var devName = dev.Split('/').Last();
+
+                var diskInfo = await GetDiskInfo(devName);
+
+                diskInfo.Role = ParseDiskRole(detail, devName);
+                diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
+                diskInfo.ArrayName = arrayName;
+
+                info.Disks.Add(diskInfo);
+            }
+
+            arrays.Add(info);
         }
-        catch
-        {
-            info.MountPath = "";
-            info.IsMounted = false;
-        }
-
-        // ============================================================
-        // 7) Obtener información detallada de cada disco
-        // ============================================================
-        foreach (var dev in diskNames)
-        {
-            var devName = dev.Split('/').Last();
-
-            var diskInfo = await GetDiskInfo(devName);
-
-            diskInfo.Role = ParseDiskRole(detail, devName);
-            diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
-            diskInfo.ArrayName = arrayName;
-
-            info.Disks.Add(diskInfo);
-        }
-
-        arrays.Add(info);
     }
 
     // ============================================================
-    // 8) Trazas finales
+    // ⭐ 9) FALLBACK: si mdadm no detecta arrays, pero /proc/mdstat sí
+    // ============================================================
+    //if (arrays.Count == 0 && File.Exists("/proc/mdstat"))
+     
+    if (!arrays.Any(a => a.Disks.Count > 0) && File.Exists("/proc/mdstat"))
+
+    {
+        var md = File.ReadAllText("/proc/mdstat");
+
+        if (md.Contains("md"))
+        {
+            Console.WriteLine("[RAID] Fallback: array detectado en /proc/mdstat pero no en mdadm --detail --scan");
+
+            var matches = Regex.Matches(md, @"(md\d+)");
+            foreach (Match m in matches)
+            {
+                var name = m.Value;
+
+                arrays.Add(new RaidArrayInfo
+                {
+                    Name = name,
+                    Path = "/dev/" + name,
+                    Level = "Unknown",
+                    State = "Rebuilding",
+                    StateIcon = GetStateIcon("Rebuilding"),
+                    Disks = new List<RaidDiskInfo>(),
+                    MountPath = "",
+                    IsMounted = false,
+                    TotalSize = "Unknown",
+                    UsableSize = "Unknown",
+                    ParitySize = "N/A",
+                    AverageTemp = 0,
+                    DiskSummary = "Unknown",
+                    Uptime = "Unknown",
+                    RebuildProgress = 0,
+                    RebuildETA = "Unknown"
+                });
+            }
+        }
+    }
+
+    // ============================================================
+    // 10) Trazas finales
     // ============================================================
     Console.WriteLine("=== ARRAYS DETECTADOS ===");
     foreach (var arr in arrays)
@@ -633,9 +672,10 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
 
     return arrays;
-}*/
+}
 
 
+   
 
 
     private string ParseArrayState(string detail)
@@ -688,6 +728,8 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
 
         return "Unknown";
     }
+
+
 
 
     public bool AutoAssemble()
@@ -1313,58 +1355,106 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
 
 
     public async Task<bool> DeleteArrayAsync(RaidArrayInfo array)
+{
+    try
     {
-        try
+        var arrayPath = array.Path; // /dev/md0
+        var name = array.Name;
+
+        LogService.Write($"[RAID] DELETE START → {name} ({arrayPath})");
+
+        // ⭐ USER WARNING
+        NotificadorLinux.Enviar($"Deleting RAID array {name}… This may take a moment.");
+
+        // 0) Ensure safe environment
+        if (!await EnsureArraySafeForModification(name))
         {
-            var arrayPath = array.Path; // /dev/md0
-            var name = array.Name;
-
-            LogService.Write($"[RAID] DELETE START → {name} ({arrayPath})");
-
-            // 0) Asegurar entorno seguro
-            if (!await EnsureArraySafeForModification(name))
-            {
-                LogService.Error("[RAID] DELETE ABORTED: EnsureArraySafeForModification failed.");
-                return false;
-            }
-
-            // 1. Stop array (por si sigue activo)
-            LogService.Write($"[RAID] Stopping array {arrayPath}");
-            var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
-            if (stop.ExitCode != 0) LogService.Error($"[RAID] STOP FAILED: {stop.Stderr}");
-
-            // 2. Remove array
-            LogService.Write($"[RAID] Removing array {arrayPath}");
-            var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
-            if (remove.ExitCode != 0) LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
-
-            // 3. Wipe superblocks
-            foreach (var d in array.Disks)
-            {
-                LogService.Write($"[RAID] Wiping superblock on {d.Name}");
-                var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
-
-                if (wipe.ExitCode != 0)
-                    LogService.Error($"[RAID] ZERO-SB FAILED on {d.Name}: {wipe.Stderr}");
-            }
-
-            // 4. Update mdadm.conf
-            LogService.Write("[RAID] Updating mdadm.conf");
-            ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
-
-            // 5. Sync filesystem
-            ShellHelper.EjecutarComoRoot("sync");
-
-            LogService.Write($"[RAID] DELETE OK → {name}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("[RAID] DELETE FAILED:");
-            LogService.Error(ex.ToString());
+            var msg = "Array cannot be deleted because it is not in a safe state.";
+            NotificadorLinux.Enviar(msg, 5000, "critical");
+            LogService.Error("[RAID] DELETE ABORTED: EnsureArraySafeForModification failed.");
             return false;
         }
+
+        // 1. Stop array
+        NotificadorLinux.Enviar($"Stopping array {name}…");
+        LogService.Write($"[RAID] Stopping array {arrayPath}");
+
+        var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
+        if (stop.ExitCode != 0)
+        {
+            var msg = $"Failed to stop array {name}.";
+            NotificadorLinux.Enviar(msg, 5000, "critical");
+            LogService.Error($"[RAID] STOP FAILED: {stop.Stderr}");
+            return false;
+        }
+
+        // 2. Remove array (manejar caso RAID0/LINEAR donde mdX desaparece tras --stop)
+        NotificadorLinux.Enviar($"Removing array {name}…");
+        LogService.Write($"[RAID] Removing array {arrayPath}");
+
+        var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
+
+        if (remove.ExitCode != 0)
+        {
+            // ⭐ Caso esperado: mdadm --stop ya eliminó /dev/mdX
+            if (remove.Stderr.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
+            {
+                LogService.Write("[RAID] REMOVE skipped: md device already removed after --stop.");
+            }
+            else
+            {
+                var msg = $"Failed to remove array {name}.";
+                NotificadorLinux.Enviar(msg, 5000, "critical");
+                LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
+                return false;
+            }
+        }
+
+        // 3. Wipe superblocks
+        NotificadorLinux.Enviar("Cleaning RAID metadata from member disks…");
+
+        foreach (var d in array.Disks)
+        {
+            LogService.Write($"[RAID] Wiping superblock on {d.Name}");
+            var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
+
+            if (wipe.ExitCode != 0)
+            {
+                var msg = $"Failed to wipe RAID metadata on disk {d.Name}.";
+                NotificadorLinux.Enviar(msg, 5000, "warning");
+                LogService.Error($"[RAID] ZERO-SB FAILED on {d.Name}: {wipe.Stderr}");
+            }
+        }
+
+        // 4. Update mdadm.conf
+        NotificadorLinux.Enviar("Updating mdadm configuration…");
+        LogService.Write("[RAID] Updating mdadm.conf");
+
+        ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
+
+        // 5. Sync filesystem
+        ShellHelper.EjecutarComoRoot("sync");
+
+        // ⭐ SUCCESS MESSAGE
+        var success = $"Array {name} has been successfully deleted.";
+        NotificadorLinux.Enviar(success, 5000, "info");
+
+        LogService.Write($"[RAID] DELETE OK → {name}");
+        return true;
     }
+    catch (Exception ex)
+    {
+        var msg = "Unexpected error while deleting the RAID array.";
+        NotificadorLinux.Enviar(msg, 5000, "critical");
+
+        LogService.Error("[RAID] DELETE FAILED:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
+
+    
     
     public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
 {
@@ -2060,7 +2150,7 @@ private bool DiskStillAttached(string diskName)
         }
     }
 
-    public async Task<bool> EnsureArraySafeForModification(string arrayName)
+    public async Task<bool> EnsureArraySafeForModification(string arrayName, bool allowFstab = false)
     {
         var dev = $"/dev/{arrayName}";
 
@@ -2071,7 +2161,7 @@ private bool DiskStillAttached(string diskName)
         if (!string.IsNullOrWhiteSpace(mounts))
         {
             NotificadorLinux.Enviar(
-                $"{dev} está montado. No se puede modificar un array montado.",
+                $"{dev} está montado. Debe desmontarse antes de modificar el array.",
                 7000, "critical");
             return false;
         }
@@ -2080,7 +2170,7 @@ private bool DiskStillAttached(string diskName)
         var fstab = await ShellHelper.RunCleanAsync(
             $"grep -E '^/dev/{arrayName}\\b' /etc/fstab || true");
 
-        if (!string.IsNullOrWhiteSpace(fstab))
+        if (!allowFstab && !string.IsNullOrWhiteSpace(fstab))
         {
             NotificadorLinux.Enviar(
                 $"{dev} está en /etc/fstab. Debe eliminarse antes de modificar el array.",
@@ -2090,6 +2180,7 @@ private bool DiskStillAttached(string diskName)
 
         return true;
     }
+
 
 
     public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string detail)

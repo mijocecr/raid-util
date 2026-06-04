@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="RAID_Util.Views.RebuildDialog"
+        Width="420"
+        Height="240"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="RAID Rebuild Progress">
+
+    <StackPanel Margin="20" Spacing="12">
+
+        <TextBlock Name="TitleText" FontSize="18" FontWeight="Bold"/>
+
+        <ProgressBar Name="ProgressBar" Minimum="0" Maximum="100" Height="20"/>
+
+        <TextBlock Name="PercentText" FontSize="14"/>
+        <TextBlock Name="SpeedText" FontSize="14"/>
+        <TextBlock Name="EtaText" FontSize="14"/>
+
+        <Button Content="Cerrar" HorizontalAlignment="Right" Name="CloseButton"/>
+
+    </StackPanel>
+</Window>
