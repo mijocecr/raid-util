@@ -457,16 +457,16 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     return arrays;
 }*/
 
+
 public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
 
     // ============================================================
-    // 1) mdadm universal (DEBIAN + ARCH + UBUNTU + FEDORA + MANJARO)
+    // 1) Detectar mdadm universal
     // ============================================================
     string mdadmPath = (await ShellHelper.RunCleanAsync("command -v mdadm")).Trim();
 
-    // Debian: mdadm está en /usr/sbin, fuera del PATH del usuario
     if (string.IsNullOrWhiteSpace(mdadmPath))
     {
         var which = ShellHelper.EjecutarComoRoot("which mdadm");
@@ -474,7 +474,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             mdadmPath = which.Stdout.Trim();
     }
 
-    // Fallbacks universales
     if (string.IsNullOrWhiteSpace(mdadmPath))
     {
         if (File.Exists("/usr/sbin/mdadm"))
@@ -485,12 +484,12 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
     if (string.IsNullOrWhiteSpace(mdadmPath))
     {
-        Console.WriteLine("[RAID] mdadm no encontrado en el sistema.");
+        Console.WriteLine("[RAID] mdadm no encontrado.");
         return arrays;
     }
 
     // ============================================================
-    // 2) Ejecutar mdadm --detail --scan
+    // 2) mdadm --detail --scan
     // ============================================================
     var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot($"{mdadmPath} --detail --scan");
     var scan = (stdout + "\n" + stderr).Trim();
@@ -499,7 +498,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
     Console.WriteLine(scan);
 
     // ============================================================
-    // 3) Parsear cada ARRAY detectado
+    // 3) Parsear arrays detectados
     // ============================================================
     if (!string.IsNullOrWhiteSpace(scan))
     {
@@ -517,7 +516,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             var arrayName = arrayPath.Split('/').Last();
 
             // ============================================================
-            // 4) Obtener detalle real del array
+            // 4) mdadm --detail
             // ============================================================
             var detail = await RunMdadmAsync($"--detail {arrayPath}");
 
@@ -530,11 +529,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
             var state = ParseArrayState(detail);
             var level = ParseLevel(detail);
-
-            // ============================================================
-            // 5) Obtener discos del array
-            // ============================================================
-            var diskNames = await GetDisksInArrayAsync(arrayName, detail);
 
             var info = new RaidArrayInfo
             {
@@ -549,14 +543,36 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
                 UsableSize = ParseTotalSize(detail),
                 ParitySize = "N/A",
                 AverageTemp = 0,
-                DiskSummary = $"{diskNames.Count}× Disk",
+                DiskSummary = "0× Disk",
                 Uptime = ParseUptime(detail),
                 RebuildProgress = ParseRebuildProgress(detail),
                 RebuildETA = ParseRebuildEta(detail)
             };
 
             // ============================================================
-            // 6) Obtener MountPath universal
+            // 5) Obtener discos desde mdadm --detail (robusto)
+            // ============================================================
+            // Solo discos reales: sdX, nvmeXpY, etc. NO md0
+            var diskMatches = Regex.Matches(detail, @"\/dev\/(sd[a-z]\d*|nvme\d+n\d+p\d+)");
+
+            foreach (Match m in diskMatches)
+            {
+                var devPath = m.Value;
+                var devName = devPath.Split('/').Last();
+
+                var diskInfo = await GetDiskInfo(devName);
+
+                diskInfo.Role = ParseDiskRole(detail, devName);
+                diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
+                diskInfo.ArrayName = arrayName;
+
+                info.Disks.Add(diskInfo);
+            }
+
+            info.DiskSummary = $"{info.Disks.Count}× Disk";
+
+            // ============================================================
+            // 6) MountPath universal
             // ============================================================
             try
             {
@@ -592,60 +608,67 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
                 info.IsMounted = false;
             }
 
-            // ============================================================
-            // 7) Obtener información detallada de cada disco
-            // ============================================================
-            foreach (var dev in diskNames)
-            {
-                var devName = dev.Split('/').Last();
-
-                var diskInfo = await GetDiskInfo(devName);
-
-                diskInfo.Role = ParseDiskRole(detail, devName);
-                diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
-                diskInfo.ArrayName = arrayName;
-
-                info.Disks.Add(diskInfo);
-            }
-
             arrays.Add(info);
         }
     }
 
     // ============================================================
-    // ⭐ 9) FALLBACK: si mdadm no detecta arrays, pero /proc/mdstat sí
+    // 7) FALLBACK ROBUSTO → SOLO DISCOS, NO ARRAYS FALSOS
     // ============================================================
-    //if (arrays.Count == 0 && File.Exists("/proc/mdstat"))
-     
     if (!arrays.Any(a => a.Disks.Count > 0) && File.Exists("/proc/mdstat"))
-
     {
+        Console.WriteLine("[RAID] Fallback: no arrays válidos → detectando desde /proc/mdstat");
+
         var md = File.ReadAllText("/proc/mdstat");
+        arrays.Clear();
 
-        if (md.Contains("md"))
+        foreach (var raw in md.Split('\n'))
         {
-            Console.WriteLine("[RAID] Fallback: array detectado en /proc/mdstat pero no en mdadm --detail --scan");
+            var line = raw.Trim();
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
 
-            var matches = Regex.Matches(md, @"(md\d+)");
-            foreach (Match m in matches)
+            // Línea tipo: "md0 : active raid1 sda1[0] sdb1[1]"
+            var mArray = Regex.Match(line, @"^(md\d+)\s*:");
+            if (!mArray.Success)
+                continue;
+
+            var arrayName = mArray.Groups[1].Value;
+            var arrayPath = "/dev/" + arrayName;
+
+            // Discos reales de esa línea
+            var diskMatches = Regex.Matches(line, @"(sd[a-z]\d*|nvme\d+n\d+p\d+)");
+            var disks = new List<RaidDiskInfo>();
+
+            foreach (Match dm in diskMatches)
             {
-                var name = m.Value;
+                var devName = dm.Value;
 
+                var diskInfo = await GetDiskInfo(devName);
+                diskInfo.ArrayName = arrayName;
+                diskInfo.Role = "active";
+                diskInfo.State = "active";
+
+                disks.Add(diskInfo);
+            }
+
+            if (disks.Count > 0)
+            {
                 arrays.Add(new RaidArrayInfo
                 {
-                    Name = name,
-                    Path = "/dev/" + name,
+                    Name = arrayName,
+                    Path = arrayPath,
                     Level = "Unknown",
                     State = "Rebuilding",
                     StateIcon = GetStateIcon("Rebuilding"),
-                    Disks = new List<RaidDiskInfo>(),
+                    Disks = disks,
                     MountPath = "",
                     IsMounted = false,
                     TotalSize = "Unknown",
                     UsableSize = "Unknown",
                     ParitySize = "N/A",
                     AverageTemp = 0,
-                    DiskSummary = "Unknown",
+                    DiskSummary = $"{disks.Count}× Disk",
                     Uptime = "Unknown",
                     RebuildProgress = 0,
                     RebuildETA = "Unknown"
@@ -654,25 +677,10 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         }
     }
 
-    // ============================================================
-    // 10) Trazas finales
-    // ============================================================
-    Console.WriteLine("=== ARRAYS DETECTADOS ===");
-    foreach (var arr in arrays)
-    {
-        Console.WriteLine($"ARRAY: {arr.Name}  Level={arr.Level}  State={arr.State}");
-        Console.WriteLine($"  MountPath={arr.MountPath}  IsMounted={arr.IsMounted}");
-        Console.WriteLine($"  Discos detectados: {arr.Disks.Count}");
-
-        foreach (var d in arr.Disks)
-            Console.WriteLine($"    - {d.Name}  Role={d.Role}  State={d.State}  Size={d.Size}  Model={d.Model}");
-    }
-
-    Console.WriteLine("=========================");
-    Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
-
     return arrays;
 }
+
+
 
 
    

@@ -1680,77 +1680,9 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             foreach (var d in disks)
                 LogService.Debug($"[RAIDVIEW] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State}");
 
-            // ⭐ Asociar discos a arrays si vienen vacíos
-            foreach (var array in arrays)
-            {
-                if (array.Disks == null || array.Disks.Count == 0)
-                    array.Disks = disks.Where(d => d.ArrayName == array.Name).ToList();
-            }
-
-            // ⭐ FALLBACK ROBUSTO → si no hay arrays válidos (sin discos)
-            if (!arrays.Any(a => a.Disks.Count > 0))
-            {
-                LogService.Write("[RAIDVIEW] No valid arrays detected → applying robust fallback.");
-
-                arrays.Clear();
-
-                if (File.Exists("/proc/mdstat"))
-                {
-                    var md = File.ReadAllText("/proc/mdstat");
-                    var matches = Regex.Matches(md, @"(md\d+)");
-
-                    if (matches.Count > 0)
-                    {
-                        foreach (Match m in matches)
-                        {
-                            var name = m.Value;
-
-                            arrays.Add(new RaidArrayInfo
-                            {
-                                Name = name,
-                                Path = "/dev/" + name,
-                                Level = "Unknown",
-                                State = "Rebuilding",
-                                StateIcon = GetStateIcon("Rebuilding"),
-                                Disks = new List<RaidDiskInfo>(),
-                                MountPath = "",
-                                IsMounted = false,
-                                TotalSize = "Unknown",
-                                UsableSize = "Unknown",
-                                ParitySize = "N/A",
-                                AverageTemp = 0,
-                                DiskSummary = "Unknown",
-                                Uptime = "Unknown",
-                                RebuildProgress = 0,
-                                RebuildETA = "Unknown"
-                            });
-                        }
-                    }
-                    else
-                    {
-                        // ⭐ fallback mínimo para no dejar la UI vacía
-                        arrays.Add(new RaidArrayInfo
-                        {
-                            Name = "mdX",
-                            Path = "/dev/mdX",
-                            Level = "Unknown",
-                            State = "Unknown",
-                            StateIcon = GetStateIcon("Rebuilding"),
-                            Disks = new List<RaidDiskInfo>(),
-                            MountPath = "",
-                            IsMounted = false,
-                            TotalSize = "Unknown",
-                            UsableSize = "Unknown",
-                            ParitySize = "N/A",
-                            AverageTemp = 0,
-                            DiskSummary = "Unknown",
-                            Uptime = "Unknown",
-                            RebuildProgress = 0,
-                            RebuildETA = "Unknown"
-                        });
-                    }
-                }
-            }
+            // ⭐ NO HACER FALLBACK AQUÍ
+            // El backend ya devuelve arrays correctos o fallback correcto.
+            // La vista solo debe mostrar lo que venga del backend.
 
             // ⭐ Actualizar UI en el hilo principal
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -1786,6 +1718,7 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         LogService.Debug("[RAIDVIEW] LoadRaidAsync() EXIT");
     }
 }
+
 
 
  
