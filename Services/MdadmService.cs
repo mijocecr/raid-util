@@ -10,12 +10,20 @@ public static class MdadmService
     // ============================================================
     // OBTENER DETALLE REAL DEL ARRAY
     // ============================================================
+  
     public static string GetDetail(string arrayName)
     {
-        var device = $"/dev/{arrayName}";
-        var result = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail \"{device}\"");
+        // Normalizar
+        if (!arrayName.StartsWith("/dev/"))
+            arrayName = "/dev/" + arrayName;
+
+        var result = ShellHelper.EjecutarComoRoot(
+            $"/usr/sbin/mdadm --detail \"{arrayName}\""
+        );
+
         return (result.Stdout + "\n" + result.Stderr).Trim();
     }
+
 
     // ============================================================
     // CAMBIAR VELOCIDAD DE RESYNC

@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
@@ -423,6 +426,7 @@ public partial class RaidView : UserControl
 
     private bool _isBuildingUI = false;
 
+    
     private void BuildUI()
     {
         if (_isBuildingUI)
@@ -458,6 +462,13 @@ public partial class RaidView : UserControl
 
         foreach (var array in _arrays)
         {
+            // ⭐ Asegurar que los discos del array están actualizados
+            //    (el backend ya devolvió la lista correcta en LoadRaidAsync)
+            array.Disks = array.Disks?
+                .Where(d => d.ArrayName != null &&
+                            d.ArrayName.Equals(array.Name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
             Console.WriteLine($"[RAIDVIEW] Dibujando array {array.Name} con {array.Disks?.Count ?? 0} discos.");
 
             var card = BuildArrayCard(array);
@@ -932,38 +943,55 @@ public partial class RaidView : UserControl
     };
 
     // ⭐ Menú contextual por-disco
-    var menu = new ContextMenu
-    {
-        Items =
-        {
-            new MenuItem { Header = "SMART Info", Tag = "smart" },
-            new MenuItem { Header = "Mark as Faulty", Tag = "faulty" },
-            new MenuItem { Header = "Set as Spare", Tag = "spare" },
-            new MenuItem { Header = "Remove from Array", Tag = "remove" }
-        }
-    };
+    var menu = new ContextMenu();
 
-    // ⭐ Normalizar rol
+    // Normalizar rol
     var roleNorm = disk.Role?.Trim().ToLowerInvariant() ?? "";
     var allows = ArrayAllowsExpansion(array);
+    bool raid0_or_linear =
+        array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
+        array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
 
     Console.WriteLine($"[DISK MENU] RoleNorm='{roleNorm}' AllowsExpansion={allows}");
 
-    // ⭐ Convert Spare → Active
-    if (roleNorm.Contains("spare") && allows)
-    {
-        Console.WriteLine("[DISK MENU] → Añadiendo opción Convert Spare to Active");
-        menu.Items.Add(new MenuItem
-        {
-            Header = "Convert Spare to Active",
-            Tag = "convert_spare"
-        });
-    }
-    else
-    {
-        Console.WriteLine("[DISK MENU] → NO se añade Convert Spare to Active");
-    }
+    // ============================================================
+    // SMART siempre disponible
+    // ============================================================
+    menu.Items.Add(new MenuItem { Header = "SMART Info", Tag = "smart" });
 
+    // ============================================================
+    // Mark as Faulty
+    // ============================================================
+    if (roleNorm != "faulty" && roleNorm != "removed" && !raid0_or_linear)
+        menu.Items.Add(new MenuItem { Header = "Mark as Faulty", Tag = "faulty" });
+
+    // ============================================================
+    // Set as Spare
+    // ============================================================
+    if (roleNorm == "active" && allows)
+        menu.Items.Add(new MenuItem { Header = "Set as Spare", Tag = "spare" });
+
+    // ============================================================
+    // Convert Spare → Active
+    // ============================================================
+    if (roleNorm == "spare" && allows)
+        menu.Items.Add(new MenuItem { Header = "Convert Spare to Active", Tag = "convert_spare" });
+
+    // ============================================================
+    // Recover Faulty → Active
+    // ============================================================
+    if (roleNorm == "faulty" && allows)
+        menu.Items.Add(new MenuItem { Header = "Recover Faulty Disk (Make Active)", Tag = "recover_faulty" });
+
+    // ============================================================
+    // Remove from Array
+    // ============================================================
+    if (roleNorm != "removed")
+        menu.Items.Add(new MenuItem { Header = "Remove from Array", Tag = "remove" });
+
+    // ============================================================
+    // Eventos
+    // ============================================================
     foreach (var item in menu.Items.OfType<MenuItem>())
         item.Click += async (_, _) => { await OnDiskMenuClick(array, disk, item.Tag?.ToString()); };
 
@@ -1009,10 +1037,15 @@ public partial class RaidView : UserControl
     };
 }
 
+
+
 private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, string? action)
 {
     switch (action)
     {
+        // ============================================================
+        // SMART INFO
+        // ============================================================
         case "smart":
         {
             var result = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
@@ -1024,37 +1057,29 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             break;
         }
 
-       /* case "faulty":
-        {
-            ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --fail /dev/{disk.Name}");
-            await LoadRaidAsync();
-            break;
-        }*/
-        
-        
+        // ============================================================
+        // MARK AS FAULTY
+        // ============================================================
         case "faulty":
         {
             // RAID linear y RAID0 NO soportan --fail
             if (array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
                 array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase))
             {
-                // En estos niveles, lo más parecido a "faulty" es "remove"
                 ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --remove /dev/{disk.Name}");
-
-                // Recargar vista
                 await LoadRaidAsync();
                 break;
             }
 
             // RAID1/5/6/10 → sí soportan --fail
             ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --fail /dev/{disk.Name}");
-
-            // Recargar vista
             await LoadRaidAsync();
             break;
         }
 
-
+        // ============================================================
+        // SET AS SPARE
+        // ============================================================
         case "spare":
         {
             ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --set-spare /dev/{disk.Name}");
@@ -1062,18 +1087,29 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             break;
         }
 
+        // ============================================================
+        // REMOVE FROM ARRAY (con limpieza automática)
+        // ============================================================
+      
         case "remove":
         {
-            await RemoveDiskFromArrayUI(array, disk.Name);
+            Console.WriteLine($"[MENU] Remove clicked → disk.Name='{disk.Name}'");
+
+            string normalized = RaidService.NormalizeDev(disk.Name);
+            Console.WriteLine($"[MENU] Normalized disk path → '{normalized}'");
+
+            await RemoveDiskFromArrayUI(array, normalized);
             break;
         }
 
-        // ⭐ NUEVO: Convert Spare → Active
+
+        // ============================================================
+        // CONVERT SPARE → ACTIVE
+        // ============================================================
         case "convert_spare":
         {
             Console.WriteLine($"[DISK ACTION] Convert Spare to Active: {disk.Name}");
 
-            // Contar discos activos reales
             int active = array.Disks.Count(d =>
                 d.Role?.ToLowerInvariant().Contains("active") == true);
 
@@ -1107,60 +1143,114 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             await LoadRaidAsync();
             break;
         }
+
+        // ============================================================
+        // ⭐ RECOVER FAULTY → ACTIVE
+        // ============================================================
+        case "recover_faulty":
+        {
+            Console.WriteLine($"[DISK ACTION] Recover Faulty Disk: {disk.Name}");
+
+            // 1) Remove del array (aunque esté faulty)
+            ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --remove /dev/{disk.Name}");
+
+            // 2) Re-add para iniciar rebuild
+            ShellHelper.EjecutarComoRoot($"mdadm /dev/{array.Name} --add /dev/{disk.Name}");
+
+            // 3) Refrescar vista
+            await LoadRaidAsync();
+
+            NotificadorLinux.Enviar(
+                $"Disk recovered:\n/dev/{disk.Name} re-added to {array.Name}\nRebuild started."
+            );
+
+            break;
+        }
     }
 }
 
 
-    
+private Border BuildStatusDot(string state)
+{
+    // Normalizamos por si llega en minúsculas
+    state = state?.Trim().ToUpperInvariant() ?? "UNKNOWN";
 
-    private Border BuildStatusDot(string smartState)
+    // Color base según estado
+    Color color = state switch
     {
-        var color = smartState switch
+        "OK"         => Color.FromRgb(0, 200, 0),      // Verde
+        "WARN"       => Color.FromRgb(255, 200, 0),    // Amarillo
+        "REBUILDING" => Color.FromRgb(255, 200, 0),    // Amarillo (animado)
+        "SYNCING"    => Color.FromRgb(255, 200, 0),    // Amarillo (animado)
+        "FAULTY"     => Color.FromRgb(220, 0, 0),      // Rojo
+        "MISSING"    => Color.FromRgb(120, 120, 120),  // Gris
+        "UNKNOWN"    => Color.FromRgb(90, 90, 90),     // Gris tenue
+        _            => Color.FromRgb(90, 90, 90)
+    };
+
+    // Glow exterior
+    var glow = new Border
+    {
+        Width = 28,
+        Height = 28,
+        CornerRadius = new CornerRadius(14),
+        Background = new SolidColorBrush(color) { Opacity = 0.35 },
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    // Punto interior
+    var dot = new Border
+    {
+        Width = 16,
+        Height = 16,
+        CornerRadius = new CornerRadius(8),
+        Background = new SolidColorBrush(color),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    // Contenedor
+    var container = new Grid
+    {
+        Width = 28,
+        Height = 28
+    };
+
+    container.Children.Add(glow);
+    container.Children.Add(dot);
+
+    // Animaciones según estado
+    Dispatcher.UIThread.Post(() =>
+    {
+        switch (state)
         {
-            "OK" => Color.FromRgb(0, 200, 0),
-            "WARN" => Color.FromRgb(255, 200, 0),
-            "FAULTY" => Color.FromRgb(220, 0, 0),
-            _ => Color.FromRgb(255, 200, 0)
-        };
+            case "WARN":
+                AnimateWarning(glow, dot);
+                break;
 
-        var glow = new Border
-        {
-            Width = 28,
-            Height = 28,
-            CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(color) { Opacity = 0.35 },
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+            case "REBUILDING":
+            case "SYNCING":
+                AnimateRebuild(glow, dot);
+                break;
 
-        var dot = new Border
-        {
-            Width = 16,
-            Height = 16,
-            CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(color),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+            case "FAULTY":
+                AnimateSOS(glow, dot);
+                break;
+        }
+    });
 
-        var container = new Grid
-        {
-            Width = 28,
-            Height = 28
-        };
+    return new Border
+    {
+        Child = container,
+        Background = Brushes.Transparent
+    };
+}
 
-        container.Children.Add(glow);
-        container.Children.Add(dot);
 
-        if (smartState == "WARN" || smartState == "FAULTY")
-            Dispatcher.UIThread.Post(() => { AnimateSmartDot(glow, dot, smartState); });
 
-        return new Border
-        {
-            Child = container,
-            Background = Brushes.Transparent
-        };
-    }
+
+    
 
     private void StartMonitoringArray(RaidArrayInfo array, Border cardBorder)
     {
@@ -1218,63 +1308,127 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         _monitoringArrayName = null;
     }
 
-    private async void AnimateWarning(Border dot, Border glow)
+    private void AnimateWarning(Border glow, Border dot)
     {
-        var b1 = (SolidColorBrush)dot.Background;
-        var b2 = (SolidColorBrush)glow.Background;
+        var animation = new Animation
+        {
+            Duration = TimeSpan.FromSeconds(1),
+            IterationCount = IterationCount.Infinite,
+            Easing = new SineEaseInOut()
+        };
 
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.35)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0.5),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.15)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(1),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.35)
+            }
+        });
+
+        animation.RunAsync(glow);
+    }
+    
+    private void AnimateRebuild(Border glow, Border dot)
+    {
+        var animation = new Animation
+        {
+            Duration = TimeSpan.FromSeconds(0.8),
+            IterationCount = IterationCount.Infinite,
+            Easing = new SineEaseInOut()
+        };
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.35)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0.5),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.05)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(1),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.35)
+            }
+        });
+
+        animation.RunAsync(glow);
+    }
+
+    
+
+    private async void AnimateSOS(Border glow, Border dot)
+    {
         while (true)
         {
-            b1.Opacity = 0.4;
-            b2.Opacity = 0.15;
-            await Task.Delay(500);
+            // corto x3
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.35;
+                await Task.Delay(150);
+                glow.Opacity = 0.05;
+                await Task.Delay(150);
+            }
 
-            b1.Opacity = 1.0;
-            b2.Opacity = 0.35;
-            await Task.Delay(500);
+            // largo x3
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.35;
+                await Task.Delay(400);
+                glow.Opacity = 0.05;
+                await Task.Delay(400);
+            }
+
+            // corto x3
+            for (int i = 0; i < 3; i++)
+            {
+                glow.Opacity = 0.35;
+                await Task.Delay(150);
+                glow.Opacity = 0.05;
+                await Task.Delay(150);
+            }
+
+            await Task.Delay(800);
         }
     }
 
-    private async void AnimateSOS(Border dot, Border glow)
-    {
-        var b1 = (SolidColorBrush)dot.Background;
-        var b2 = (SolidColorBrush)glow.Background;
+    
+    
+    
+    
 
-        while (true)
-        {
-            for (var i = 0; i < 3; i++)
-            {
-                b1.Opacity = 1;
-                b2.Opacity = 0.35;
-                await Task.Delay(200);
-                b1.Opacity = 0.2;
-                b2.Opacity = 0.1;
-                await Task.Delay(200);
-            }
-
-            for (var i = 0; i < 3; i++)
-            {
-                b1.Opacity = 1;
-                b2.Opacity = 0.35;
-                await Task.Delay(600);
-                b1.Opacity = 0.2;
-                b2.Opacity = 0.1;
-                await Task.Delay(600);
-            }
-
-            for (var i = 0; i < 3; i++)
-            {
-                b1.Opacity = 1;
-                b2.Opacity = 0.35;
-                await Task.Delay(200);
-                b1.Opacity = 0.2;
-                b2.Opacity = 0.1;
-                await Task.Delay(200);
-            }
-
-            await Task.Delay(1000);
-        }
-    }
+    
 
     private Image LoadImage(string uriString, int size)
     {
@@ -1680,20 +1834,19 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
             foreach (var d in disks)
                 LogService.Debug($"[RAIDVIEW] DISK → {d.Name} | Array={d.ArrayName} | Role={d.Role} | State={d.State}");
 
-            // ⭐ NO HACER FALLBACK AQUÍ
-            // El backend ya devuelve arrays correctos o fallback correcto.
-            // La vista solo debe mostrar lo que venga del backend.
-
             // ⭐ Actualizar UI en el hilo principal
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 SetArrays(arrays);
 
+                // ⭐ Siempre reconstruir la UI
+                BuildUI();
+
+                // ⭐ Si es afterCreate, expandir el último array
                 if (afterCreate && arrays.Count > 0)
                 {
                     var last = arrays.Last();
                     last.IsExpanded = true;
-                    BuildUI();
                 }
 
                 if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -1718,6 +1871,7 @@ private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, strin
         LogService.Debug("[RAIDVIEW] LoadRaidAsync() EXIT");
     }
 }
+
 
 
 
@@ -1937,7 +2091,7 @@ private string GetStateIcon(string state)
                 break;
             }
 
-     case "reshape":
+    case "reshape":
 {
     Console.WriteLine("==============================================================");
     Console.WriteLine($"[RESHAPE] Array={array.Name}");
@@ -1959,7 +2113,6 @@ private string GetStateIcon(string state)
         return;
     }
 
-    // ⭐ Contar roles reales
     int active = array.Disks.Count(d =>
         d.Role?.ToLowerInvariant().Contains("active") == true);
 
@@ -2000,12 +2153,40 @@ private string GetStateIcon(string state)
     await ShowConfirm("Reshape started",
         $"The array {array.Name} is now reshaping.");
 
+    // ⭐ Esperar reshape
+    Console.WriteLine("[RESHAPE] Esperando reshape...");
+    await Task.Run(() =>
+    {
+        while (true)
+        {
+            var stat = File.ReadAllText("/proc/mdstat");
+            if (!stat.Contains("reshape"))
+                break;
+
+            Thread.Sleep(2000);
+        }
+    });
+
+    Console.WriteLine("[RESHAPE] Reshape completado.");
+
+    // ⭐ Detectar filesystem real
+    string fs = DetectArrayFileSystem(array.Name);
+    Console.WriteLine($"[RESHAPE] Filesystem detectado: {fs}");
+
+    if (!string.IsNullOrWhiteSpace(fs))
+    {
+        Console.WriteLine("[RESHAPE] Ejecutando resize del filesystem...");
+        ResizeArrayFileSystem(array.Name, fs);
+        Console.WriteLine("[RESHAPE] Filesystem expandido correctamente.");
+    }
+
     Console.WriteLine("[RESHAPE] Recargando RAID...");
     await LoadRaidAsync();
 
     Console.WriteLine("[RESHAPE] FIN");
     break;
 }
+
 
             
             
@@ -2014,108 +2195,271 @@ private string GetStateIcon(string state)
                 break;
         }
     }
+    
+    private string DetectArrayFileSystem(string arrayName)
+    {
+        // arrayName viene como "md0" o "/dev/md0"
+        if (!arrayName.StartsWith("/dev/"))
+            arrayName = "/dev/" + arrayName;
 
-    private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
+        var blkid = ShellHelper.EjecutarComoRoot($"blkid {arrayName}");
+        if (blkid.ExitCode != 0)
+            return null;
+
+        // Ejemplo blkid:
+        // /dev/md0: UUID="..." TYPE="ext4"
+        foreach (var part in blkid.Stdout.Split(' '))
+        {
+            if (part.StartsWith("TYPE="))
+            {
+                return part.Replace("TYPE=", "")
+                    .Replace("\"", "")
+                    .Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private void ResizeArrayFileSystem(string arrayName, string fsType)
+    {
+        if (!arrayName.StartsWith("/dev/"))
+            arrayName = "/dev/" + arrayName;
+
+        switch (fsType.ToLowerInvariant())
+        {
+            case "ext4":
+            case "ext3":
+            case "ext2":
+                ShellHelper.EjecutarComoRoot($"resize2fs {arrayName}");
+                break;
+
+            case "xfs":
+                // Para XFS se necesita el punto de montaje
+                var mount = ShellHelper.EjecutarSinRoot($"findmnt -n -o TARGET {arrayName}");
+                if (mount.ExitCode == 0 && !string.IsNullOrWhiteSpace(mount.Stdout))
+                {
+                    string mp = mount.Stdout.Trim();
+                    ShellHelper.EjecutarComoRoot($"xfs_growfs {mp}");
+                }
+                break;
+
+            case "btrfs":
+                // BTRFS necesita el punto de montaje
+                var m2 = ShellHelper.EjecutarSinRoot($"findmnt -n -o TARGET {arrayName}");
+                if (m2.ExitCode == 0 && !string.IsNullOrWhiteSpace(m2.Stdout))
+                {
+                    string mp = m2.Stdout.Trim();
+                    ShellHelper.EjecutarComoRoot($"btrfs filesystem resize max {mp}");
+                }
+                break;
+
+            default:
+                LogService.Write($"[RESHAPE] Filesystem '{fsType}' no soportado para auto-resize.");
+                break;
+        }
+    }
+
+    
+    
+private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
+{
+    Console.WriteLine("====================================================");
+    Console.WriteLine($"[UI] RemoveDiskFromArrayUI ENTER → array={array?.Name}, diskName={diskName}");
+    Console.WriteLine("====================================================");
+
+    try
     {
         var owner = this.GetVisualRoot() as Window;
+        Console.WriteLine($"[UI] owner={owner}");
 
-        var confirm = new InfoDialog(
-            "Remove Disk",
-            $"Are you sure you want to remove /dev/{diskName} from {array.Name}?"
+        // ⭐ Normalizar SIEMPRE a /dev/sdX
+        string normalized = RaidService.NormalizeDev(diskName);
+        Console.WriteLine($"[UI] normalized (initial) = {normalized}");
+
+        // ⭐ Buscar el disco real en el array
+        var disk = array.Disks.FirstOrDefault(d =>
+            d.Name == diskName ||
+            d.PkName == diskName ||
+            RaidService.NormalizeDev(d.Name) == normalized ||
+            RaidService.NormalizeDev(d.PkName) == normalized
         );
 
+        Console.WriteLine($"[UI] disk found? {disk != null}");
+
+        if (disk != null)
+        {
+            Console.WriteLine($"[UI] Disk info → Name={disk.Name}, PkName={disk.PkName}");
+            normalized = RaidService.NormalizeDev(disk.PkName ?? disk.Name);
+        }
+
+        Console.WriteLine($"[UI] FINAL normalized disk path → {normalized}");
+
+        // ⭐ Confirmación
+        var confirm = new ConfirmDialog(
+            "Remove Disk",
+            $"Are you sure you want to remove {normalized} from {array.Name}?"
+        );
+
+        Console.WriteLine("[UI] Showing confirm dialog...");
         var ok = await confirm.ShowDialog<bool>(owner ?? new Window());
+        Console.WriteLine($"[UI] confirm result = {ok}");
+
         if (!ok)
+        {
+            Console.WriteLine("[UI] User cancelled remove.");
             return;
+        }
 
-        var loading = new LoadingDialog($"Removing /dev/{diskName}...");
+        // ⭐ Loading
+        var loading = new LoadingDialog($"Removing {normalized}...");
+        Console.WriteLine("[UI] Showing loading dialog...");
         loading.Show(owner);
-
-        bool removed = false;
 
         try
         {
             var service = new RaidService();
 
-            bool failOk = service.MarkDiskAsFaulty(array.Name, diskName);
+            Console.WriteLine($"[UI] Calling backend RemoveDiskFromArrayAsync({array.Name}, {normalized})");
 
-            removed = await service.RemoveDiskFromArrayAsync(array.Name, diskName);
+            bool removed = await service.RemoveDiskFromArrayAsync(array.Name, normalized);
+
+            Console.WriteLine($"[UI] Backend returned removed = {removed}");
 
             if (!removed)
             {
+                Console.WriteLine("[UI] Remove FAILED → showing error dialog.");
+
                 await ShowConfirm(
                     "Error removing disk",
-                    $"mdadm could not remove /dev/{diskName} from {array.Name}.\n" +
-                    $"The disk may still be in 'faulty' or 'working' state.\n\n" +
+                    $"mdadm could not remove {normalized} from {array.Name}.\n" +
                     $"Check logs for details."
                 );
                 return;
             }
+
+            Console.WriteLine("[UI] Remove OK → refreshing RAID...");
+            await LoadRaidAsync();
+            Console.WriteLine("[UI] RAID refreshed.");
         }
         finally
         {
             loading.Close();
+            Console.WriteLine("[UI] Loading dialog closed.");
         }
 
-        await LoadRaidAsync();
+        Console.WriteLine("[UI] RemoveDiskFromArrayUI END → sending notification.");
 
         NotificadorLinux.Enviar(
-            $"Disk removed:\n/dev/{diskName} removed from {array.Name}"
+            $"Disk removed and cleaned:\n{normalized} removed from {array.Name}"
         );
     }
-
-    private async Task AddDiskToArrayUI(RaidArrayInfo array)
+    catch (Exception ex)
     {
-        var service = new RaidService();
-        var allDisks = await service.GetAllDisksAsync();
+        Console.WriteLine("[UI] EXCEPTION in RemoveDiskFromArrayUI:");
+        Console.WriteLine(ex.ToString());
+    }
+}
 
-        // ⭐ Filtrado robusto de discos realmente libres
-        var candidates = allDisks
-            .Where(d =>
-                !d.IsMounted &&
-                !d.HasPartitions &&
-                !d.HasFileSystem &&
-                !d.IsRaidMember &&
-                string.IsNullOrWhiteSpace(d.ArrayName) &&
-                d.Status == "OK" &&
-                !d.Name.StartsWith("loop") &&
-                !d.Name.StartsWith("zram") &&
-                d.FsType != "linux_raid_member" &&
-                (d.Children == null || d.Children.Count == 0) &&
-                d.Role == "none"
-            )
+
+    
+
+
+
+
+
+
+    
+    private List<RaidDiskInfo> GetDisksForArray(RaidArrayInfo array, List<RaidDiskInfo> allDisks)
+    {
+        if (array == null)
+            return new List<RaidDiskInfo>();
+
+        // ⭐ Discos cuyo ArrayName coincide con el array actual
+        var disks = allDisks
+            .Where(d => d.ArrayName != null &&
+                        d.ArrayName.Equals(array.Name, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        if (candidates.Count == 0)
-        {
-            await ShowConfirm("No disks available",
-                "There are no valid free disks to add.");
-            return;
-        }
-
-        var dlg = new SelectDiskDialog(candidates);
-        var owner = this.GetVisualRoot() as Window;
-
-        var selectedDisk = await dlg.ShowDialog<string?>(owner ?? new Window());
-        if (string.IsNullOrWhiteSpace(selectedDisk))
-            return;
-
-        // ⭐ Mantener el diálogo abierto con USING
-        using (LoadingService.Show("Adding disk to array..."))
-        {
-            // ⭐ AddDiskToArrayAsync YA espera a que el array esté healthy
-            var ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
-
-            if (!ok)
-            {
-                await ShowConfirm("Error", "Failed to add disk to array.");
-                return;
-            }
-        }
-
-        // ⭐ Refrescar UI (fuera del using)
-        await LoadRaidAsync();
+        return disks;
     }
+
+    
+    
+    private async Task AddDiskToArrayUI(RaidArrayInfo array)
+{
+    var service = new RaidService();
+    var allDisks = await service.GetAllDisksAsync();
+
+    // ============================================================
+    // ⭐ Filtro correcto de discos agregables
+    // ============================================================
+    var candidates = allDisks
+        .Where(d =>
+            !d.IsMounted &&                     // No montado
+            !d.IsRaidMember &&                  // No pertenece a un array activo
+            !d.Name.StartsWith("loop") &&
+            !d.Name.StartsWith("zram") &&
+            d.Status == "OK" &&                 // SMART OK
+            !d.IsSystemDisk                     // No es el disco del sistema
+        )
+        .ToList();
+
+    // ============================================================
+    // ⭐ Si el array está en rebuild → NO permitir añadir discos
+    // ============================================================
+    if (array.State.Contains("recovering", StringComparison.OrdinalIgnoreCase) ||
+        array.State.Contains("rebuilding", StringComparison.OrdinalIgnoreCase) ||
+        array.RebuildProgress > 0)
+    {
+        await ShowConfirm(
+            "Array is rebuilding",
+            "You cannot add disks while the array is rebuilding.\n\n" +
+            "Wait until the rebuild completes."
+        );
+        return;
+    }
+
+    if (candidates.Count == 0)
+    {
+        await ShowConfirm(
+            "No disks available",
+            "There are no valid free disks to add."
+        );
+        return;
+    }
+
+    // ============================================================
+    // ⭐ Selección de disco
+    // ============================================================
+    var dlg = new SelectDiskDialog(candidates);
+    var owner = this.GetVisualRoot() as Window;
+
+    var selectedDisk = await dlg.ShowDialog<string?>(owner ?? new Window());
+    if (string.IsNullOrWhiteSpace(selectedDisk))
+        return;
+
+    // ============================================================
+    // ⭐ Añadir disco al array
+    // ============================================================
+    using (LoadingService.Show("Adding disk to array..."))
+    {
+        var ok = await service.AddDiskToArrayAsync(array.Name, selectedDisk);
+
+        if (!ok)
+        {
+            await ShowConfirm("Error", "Failed to add disk to array.");
+            return;
+        }
+    }
+
+    // ============================================================
+    // ⭐ Refrescar UI
+    // ============================================================
+    await LoadRaidAsync();
+}
+
+
 
     
    

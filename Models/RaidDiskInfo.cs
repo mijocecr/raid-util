@@ -69,7 +69,7 @@ public class RaidDiskInfo
     public bool HasValidPartitionTable { get; set; }
     public bool IsRaidInactiveMember { get; set; }
     public bool IsRaidMember { get; set; }
-
+    public string PkName { get; set; }
 
     // ============================================================
     // DEBUG

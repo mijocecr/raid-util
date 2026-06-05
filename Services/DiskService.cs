@@ -12,7 +12,107 @@ public static class DiskService
     // ============================================================
     // OBTENER TODOS LOS DISCOS FÍSICOS Y PARTICIONES ÚTILES
     // ============================================================
+  
     
+public static List<RaidDiskInfo> GetAllDisks()
+{
+    var disks = new List<RaidDiskInfo>();
+
+    var json = ShellHelper.EjecutarSinRoot(
+        "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,MOUNTPOINTS,FSTYPE,PKNAME"
+    ).Stdout;
+
+    if (string.IsNullOrWhiteSpace(json))
+        return disks;
+
+    var parsed = ParseLsblk(json);
+
+    foreach (var d in parsed)
+    {
+        if (d.Type != "disk")
+            continue;
+
+        // 1) Ignorar loop/zram
+        if (d.Name.StartsWith("loop") || d.Name.StartsWith("zram"))
+            continue;
+
+        // 2) Detectar si es disco del sistema
+        bool isSystem = false;
+
+        if (d.MountPoints != null)
+        {
+            foreach (var mp in d.MountPoints)
+            {
+                if (mp == "/" || mp == "/boot" || mp == "/boot/efi" ||
+                    mp.StartsWith("/var") || mp.StartsWith("/home"))
+                {
+                    isSystem = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isSystem && d.Children != null)
+        {
+            foreach (var child in d.Children)
+            {
+                if (child.MountPoints != null)
+                {
+                    foreach (var mp in child.MountPoints)
+                    {
+                        if (mp == "/" || mp == "/boot" || mp == "/boot/efi" ||
+                            mp.StartsWith("/var") || mp.StartsWith("/home"))
+                        {
+                            isSystem = true;
+                            break;
+                        }
+                    }
+                }
+                if (isSystem) break;
+            }
+        }
+
+        if (isSystem)
+            continue;
+
+        // 3) Detectar RAID (pero NO excluirlo)
+        bool isActiveRaid = MdadmService_IsDiskInArray(d.Name, out var arrayName);
+        bool isRaidFs = string.Equals(d.FsType, "linux_raid_member", StringComparison.OrdinalIgnoreCase);
+
+        var info = new RaidDiskInfo
+        {
+            Name = d.Name,
+            Model = d.Model,
+            Size = d.Size,
+            Serial = d.Serial,
+            Filesystem = d.FsType,
+            MountPoint = d.MountPoint,
+            IsMounted = !string.IsNullOrWhiteSpace(d.MountPoint),
+            IsRotational = d.Rotational == "1",
+            IsNvme = d.Name.StartsWith("nvme"),
+            HasPartitions = d.Children != null && d.Children.Count > 0,
+            HasFileSystem = !string.IsNullOrWhiteSpace(d.FsType),
+
+            // RAID
+            IsRaidMember = isActiveRaid || isRaidFs,
+            ArrayName = isActiveRaid ? arrayName : "",
+
+            // ⭐ NUEVO: nombre real del disco
+            PkName = d.PkName,
+
+            Status = "OK"
+        };
+
+        disks.Add(info);
+    }
+
+    return disks;
+}
+
+
+    
+    
+    /* 
     public static List<RaidDiskInfo> GetAllDisks()
 {
     var disks = new List<RaidDiskInfo>();
@@ -107,7 +207,7 @@ public static class DiskService
     return disks;
 }
 
-
+*/
 
 
     // ============================================================
@@ -355,6 +455,7 @@ public class LsblkEntry
     public string Model { get; set; } = "";
     public string Serial { get; set; } = "";
     public string Rotational { get; set; } = "";
+    public string PkName { get; set; }
 
     public List<string>? MountPoints { get; set; }
     public List<LsblkEntry>? Children { get; set; }

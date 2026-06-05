@@ -550,19 +550,50 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             };
 
             // ============================================================
-            // 5) Obtener discos desde mdadm --detail (robusto)
+            // 5) PARSER ROBUSTO DE DISK TABLE
             // ============================================================
-            // Solo discos reales: sdX, nvmeXpY, etc. NO md0
-            var diskMatches = Regex.Matches(detail, @"\/dev\/(sd[a-z]\d*|nvme\d+n\d+p\d+)");
+            var lines = detail.Split('\n')
+                              .Where(l => Regex.IsMatch(l, @"(active|faulty|spare|removed)"))
+                              .ToList();
 
-            foreach (Match m in diskMatches)
+            var processed = new HashSet<string>();
+
+            foreach (var l in lines)
             {
-                var devPath = m.Value;
-                var devName = devPath.Split('/').Last();
+                var m = Regex.Match(l, @"\/dev\/(sd[a-z]\d*|nvme\d+n\d+p\d+)");
+                if (!m.Success)
+                    continue;
+
+                var devName = m.Groups[1].Value;
+
+                if (processed.Contains(devName))
+                    continue;
+
+                processed.Add(devName);
 
                 var diskInfo = await GetDiskInfo(devName);
 
-                diskInfo.Role = ParseDiskRole(detail, devName);
+                // Rol real según la línea
+                if (l.Contains("faulty"))
+                    diskInfo.Role = "faulty";
+                else if (l.Contains("spare"))
+                    diskInfo.Role = "spare";
+                else if (l.Contains("active"))
+                    diskInfo.Role = "active";
+                else if (l.Contains("removed"))
+                    diskInfo.Role = "removed";
+
+                // ⭐ FIX: si aparece removed PERO existe una línea faulty → es faulty
+                if (diskInfo.Role == "removed" &&
+                    detail.Contains($"faulty   /dev/{devName}"))
+                {
+                    diskInfo.Role = "faulty";
+                }
+
+                // Ocultar removed real
+                if (diskInfo.Role == "removed")
+                    continue;
+
                 diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
                 diskInfo.ArrayName = arrayName;
 
@@ -613,7 +644,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
     }
 
     // ============================================================
-    // 7) FALLBACK ROBUSTO → SOLO DISCOS, NO ARRAYS FALSOS
+    // 7) FALLBACK ROBUSTO
     // ============================================================
     if (!arrays.Any(a => a.Disks.Count > 0) && File.Exists("/proc/mdstat"))
     {
@@ -628,7 +659,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            // Línea tipo: "md0 : active raid1 sda1[0] sdb1[1]"
             var mArray = Regex.Match(line, @"^(md\d+)\s*:");
             if (!mArray.Success)
                 continue;
@@ -636,7 +666,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             var arrayName = mArray.Groups[1].Value;
             var arrayPath = "/dev/" + arrayName;
 
-            // Discos reales de esa línea
             var diskMatches = Regex.Matches(line, @"(sd[a-z]\d*|nvme\d+n\d+p\d+)");
             var disks = new List<RaidDiskInfo>();
 
@@ -679,6 +708,8 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
     return arrays;
 }
+
+
 
 
 
@@ -997,11 +1028,11 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             if (!lower.Contains($"/dev/{dev}"))
                 continue;
 
-            // 1) faulty → pero si hay removed en el array, este disco ya no pertenece
+            // 1) faulty → si hay removed en el array, este disco YA NO pertenece
             if (lower.Contains("faulty"))
             {
                 if (arrayHasRemovedSlot)
-                    return "removed";   // ⭐ FIX CLAVE
+                    return "removed";   // ⭐ FIX CLAVE: este disco ya no está en el array
 
                 return "faulty";
             }
@@ -1045,6 +1076,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
         return "unknown";
     }
+
 
 
     
@@ -1116,7 +1148,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 */
 
 
-
     private string ParseDiskStateFromRole(string role)
     {
         if (string.IsNullOrWhiteSpace(role))
@@ -1127,23 +1158,35 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         return role switch
         {
             // Estados críticos
-            "faulty" => "FAULTY",
-            "removed" => "OFFLINE",
-            "blocked" => "ERROR",
+            "faulty"        => "FAULTY",
+            "failed"        => "FAULTY",
+            "error"         => "FAULTY",
+            "blocked"       => "FAULTY",
 
-            // Estados de advertencia
-            "rebuilding" => "WARN",
-            "write-mostly" => "WARN",
+            // Estados que indican ausencia física o lógica
+            "removed"       => "MISSING",
+            "missing"       => "MISSING",
+
+            // Estados de advertencia / transición
+            "rebuilding"    => "REBUILDING",
+            "recovering"    => "REBUILDING",
+            "resync"        => "SYNCING",
+            "sync"          => "SYNCING",
+            "write-mostly"  => "WARN",
 
             // Estados sanos
-            "active" => "OK",
-            "in-sync" => "OK",
-            "spare" => "OK",
+            "active"        => "OK",
+            "in-sync"       => "OK",
+            "clean"         => "OK",
+            "spare"         => "OK",
 
             // Cualquier otro → desconocido
-            _ => "UNKNOWN"
+            _               => "UNKNOWN"
         };
     }
+
+
+    
 
 
     private string ParseTotalSize(string detail)
@@ -1592,23 +1635,43 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         return result.ExitCode == 0;
     }
 
-   public async Task<bool> RemoveDiskFromArrayAsync(string arrayName, string diskName)
+    public static string NormalizeDev(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return name;
+
+        name = name.Trim();
+
+        if (!name.StartsWith("/dev/"))
+            name = "/dev/" + name;
+
+        return name;
+    }
+
+    
+    
+   
+public async Task<bool> RemoveDiskFromArrayAsync(string arrayName, string diskName)
 {
     try
     {
-        // ⭐ VALIDACIÓN CRÍTICA
+        // ⭐ Normalizar a rutas completas
+        arrayName = NormalizeDev(arrayName);
+        diskName  = NormalizeDev(diskName);
+        var shortName = Path.GetFileName(diskName);
+
         if (!await EnsureArraySafeForModification(arrayName))
             return false;
 
         LogService.Write($"[RAID] RemoveDiskFromArrayAsync START → array={arrayName}, disk={diskName}");
 
         // 1) Detectar nivel RAID
-        var detail = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail /dev/{arrayName}");
+        var detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayName}");
         var raidLevel = "unknown";
 
-        if (detail.ExitCode == 0)
+        if (detailExec.ExitCode == 0)
         {
-            foreach (var line in detail.Stdout.Split('\n'))
+            foreach (var line in detailExec.Stdout.Split('\n'))
             {
                 if (line.Trim().StartsWith("Raid Level"))
                 {
@@ -1620,59 +1683,72 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
         var supportsFail = raidLevel switch
         {
-            "raid0" => false,
-            "linear" => false,
-            "multipath" => false,
-            _ => true
+            "raid0"      => false,
+            "linear"     => false,
+            "multipath"  => false,
+            _            => true
         };
 
-        // ⭐ 2) FAIL si aplica
-        if (supportsFail)
+        var detailText = detailExec.Stdout;
+
+        // 2) FAIL solo si aún no está faulty
+        if (supportsFail && !detailText.Contains($"faulty   {diskName}") && !detailText.Contains($"faulty   /dev/{shortName}"))
         {
-            LogService.Write($"[RAID] Marking disk as faulty: /dev/{diskName}");
-            ShellHelper.EjecutarComoRoot(
-                $"/usr/sbin/mdadm /dev/{arrayName} --fail /dev/{diskName}"
-            );
+            LogService.Write($"[RAID] Marking disk as faulty: {diskName}");
+            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayName} --fail {diskName}");
+            ShellHelper.EjecutarComoRoot("udevadm settle");
+            await Task.Delay(300);
         }
 
-        // ⭐ 3) Detectar si hay un spare bloqueando el remove
-        var spare = DetectSpareDevice(detail.Stdout);
-        if (!string.IsNullOrWhiteSpace(spare) && spare != diskName)
+        // 3) Releer detail
+        detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayName}");
+        detailText = detailExec.Stdout;
+
+        // 4) Detectar spare y quitarlo primero si no es el disco objetivo
+        var spare = DetectSpareDevice(detailText);
+        if (!string.IsNullOrWhiteSpace(spare) && NormalizeDev(spare) != diskName)
         {
-            LogService.Write($"[RAID] Spare detected ({spare}) → removing spare first.");
-            ShellHelper.EjecutarComoRoot(
-                $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{spare}"
-            );
+            var spareDev = NormalizeDev(spare);
+            LogService.Write($"[RAID] Spare detected ({spareDev}) → removing spare first.");
+            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayName} --remove {spareDev}");
             ShellHelper.EjecutarComoRoot("udevadm settle");
         }
 
-        // ⭐ 4) Intento normal de remove
-        LogService.Write($"[RAID] Attempting normal remove: /dev/{diskName}");
-        var remove1 = ShellHelper.EjecutarComoRoot(
-            $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{diskName}"
-        );
+        // 5) Decidir estrategia de remove
+        bool hasFaultyLine =
+            detailText.Contains($"faulty   {diskName}") ||
+            detailText.Contains($"faulty   /dev/{shortName}");
 
-        if (remove1.ExitCode == 0)
+        bool hasRemovedSlot = detailText.Contains(" removed");
+
+        string removeCmd;
+
+        if (hasFaultyLine && hasRemovedSlot)
         {
-            LogService.Write("[RAID] Normal remove succeeded.");
+            // Caso típico que te pasa: faulty sin slot y un "removed" en la tabla
+            LogService.Write("[RAID] Detected faulty device with removed slot → using '--remove failed'.");
+            removeCmd = $"/usr/sbin/mdadm {arrayName} --remove failed";
         }
         else
         {
-            LogService.Write("[RAID] Normal remove FAILED → checking lsblk children.");
+            LogService.Write("[RAID] Using normal remove by device path.");
+            removeCmd = $"/usr/sbin/mdadm {arrayName} --remove {diskName}";
+        }
 
-            // ⭐ 5) Verificar si el disco sigue enganchado al array
-            if (DiskStillAttached(diskName))
+        LogService.Write($"[RAID] Attempting remove: {removeCmd}");
+        var remove1 = ShellHelper.EjecutarComoRoot(removeCmd);
+
+        if (remove1.ExitCode != 0)
+        {
+            LogService.Write($"[RAID] First remove FAILED (code={remove1.ExitCode}) → checking lsblk children.");
+
+            if (DiskStillAttached(shortName))
             {
                 LogService.Write("[RAID] Disk still attached → forcing kernel release.");
 
-                // ⭐ 6) Forzar liberación del kernel
-                ShellHelper.EjecutarComoRoot(
-                    $"echo 1 > /sys/block/{diskName}/device/delete"
-                );
-
+                ShellHelper.EjecutarComoRoot($"echo 1 > /sys/block/{shortName}/device/delete");
                 ShellHelper.EjecutarComoRoot("udevadm settle");
 
-                // ⭐ 7) Reescanear SCSI
                 for (int host = 0; host < 10; host++)
                 {
                     string path = $"/sys/class/scsi_host/host{host}/scan";
@@ -1683,11 +1759,10 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
                 ShellHelper.EjecutarComoRoot("udevadm settle");
             }
 
-            // ⭐ 8) Reintento final de remove
             LogService.Write("[RAID] Retrying remove after kernel release...");
-            var remove2 = ShellHelper.EjecutarComoRoot(
-                $"/usr/sbin/mdadm /dev/{arrayName} --remove /dev/{diskName}"
-            );
+
+            // Reintentar con la misma estrategia
+            var remove2 = ShellHelper.EjecutarComoRoot(removeCmd);
 
             if (remove2.ExitCode != 0)
             {
@@ -1696,11 +1771,10 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             }
         }
 
-        // ⭐ 9) Limpieza de metadata
-        LogService.Write($"[RAID] Cleaning metadata on /dev/{diskName}");
-        ShellHelper.EjecutarComoRoot($"/sbin/mdadm --zero-superblock /dev/{diskName}");
-        ShellHelper.EjecutarComoRoot($"/usr/sbin/wipefs -a /dev/{diskName}");
-
+        // 6) Limpieza de metadatos
+        LogService.Write($"[RAID] Cleaning metadata on {diskName}");
+        ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --zero-superblock {diskName}");
+        ShellHelper.EjecutarComoRoot($"/usr/sbin/wipefs -a {diskName}");
         ShellHelper.EjecutarComoRoot("udevadm settle");
 
         LogService.Write("[RAID] RemoveDiskFromArrayAsync OK → disk cleaned and removed.");
@@ -1713,6 +1787,10 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         return false;
     }
 }
+
+
+
+
 
 
 // =====================================================================================
