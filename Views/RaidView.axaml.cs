@@ -173,8 +173,10 @@ public partial class RaidView : UserControl
             ok = await Task.Run(async () =>
             {
                 var service = new RaidService();
+
+                // ⭐ FIX UNIVERSAL: usar array.Path
                 return await service.InitializeArrayAsync(
-                    array.Name,
+                    array.Path,          // <── ESTE ES EL ÚNICO CAMBIO
                     result.Filesystem,
                     result.Label
                 );
@@ -194,6 +196,9 @@ public partial class RaidView : UserControl
         await ShowInfo("Success", $"The array {array.Name} was initialized.");
         BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     }
+
+
+
 
     private async Task<bool> ShowConfirm(string title, string message)
     {

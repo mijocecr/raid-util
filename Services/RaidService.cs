@@ -271,191 +271,7 @@ public async Task<bool> WaitForArrayHealthy(string arrayName)
     // ============================================================
     //  LECTURA DE ARRAYS (SIN CAMBIOS)
     // ============================================================
-/*
-    public async Task<List<RaidArrayInfo>> GetArraysAsync()
-{
-    var arrays = new List<RaidArrayInfo>();
 
-    // ============================================================
-    // 1) mdadm universal (DEBIAN + ARCH + UBUNTU + FEDORA + MANJARO)
-    // ============================================================
-    string mdadmPath = (await ShellHelper.RunCleanAsync("command -v mdadm")).Trim();
-
-    // Debian: mdadm está en /usr/sbin, fuera del PATH del usuario
-    if (string.IsNullOrWhiteSpace(mdadmPath))
-    {
-        var which = ShellHelper.EjecutarComoRoot("which mdadm");
-        if (which.ExitCode == 0)
-            mdadmPath = which.Stdout.Trim();
-    }
-
-    // Fallbacks universales
-    if (string.IsNullOrWhiteSpace(mdadmPath))
-    {
-        if (File.Exists("/usr/sbin/mdadm"))
-            mdadmPath = "/usr/sbin/mdadm";
-        else if (File.Exists("/sbin/mdadm"))
-            mdadmPath = "/sbin/mdadm";
-    }
-
-    if (string.IsNullOrWhiteSpace(mdadmPath))
-    {
-        Console.WriteLine("[RAID] mdadm no encontrado en el sistema.");
-        return arrays;
-    }
-
-    // ============================================================
-    // 2) Ejecutar mdadm --detail --scan
-    // ============================================================
-    var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot($"{mdadmPath} --detail --scan");
-    var scan = (stdout + "\n" + stderr).Trim();
-
-    Console.WriteLine("[RAID] mdadm --detail --scan OUTPUT:");
-    Console.WriteLine(scan);
-
-    if (string.IsNullOrWhiteSpace(scan))
-        return arrays;
-
-    // ============================================================
-    // 3) Parsear cada ARRAY detectado
-    // ============================================================
-    foreach (var raw in scan.Split('\n'))
-    {
-        var line = raw.Trim();
-        if (!line.StartsWith("ARRAY"))
-            continue;
-
-        var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length < 2)
-            continue;
-
-        var arrayPath = tokens[1];
-        var arrayName = arrayPath.Split('/').Last();
-
-        // ============================================================
-        // 4) Obtener detalle real del array
-        // ============================================================
-        var detail = await RunMdadmAsync($"--detail {arrayPath}");
-
-        Console.WriteLine("=== DETAIL OUTPUT ===");
-        Console.WriteLine(detail);
-        Console.WriteLine("=====================");
-
-        if (string.IsNullOrWhiteSpace(detail))
-            continue;
-
-        var state = ParseArrayState(detail);
-        var level = ParseLevel(detail);
-
-        // ============================================================
-        // 5) Obtener discos del array
-        // ============================================================
-        var diskNames = await GetDisksInArrayAsync(arrayName, detail);
-
-        var info = new RaidArrayInfo
-        {
-            Name = arrayName,
-            Path = arrayPath,
-            Level = level,
-            State = state,
-            StateIcon = GetStateIcon(state),
-            Disks = new List<RaidDiskInfo>(),
-
-            TotalSize = ParseTotalSize(detail),
-            UsableSize = ParseTotalSize(detail),
-            ParitySize = "N/A",
-            AverageTemp = 0,
-            DiskSummary = $"{diskNames.Count}× Disk",
-            Uptime = ParseUptime(detail),
-            RebuildProgress = ParseRebuildProgress(detail),
-            RebuildETA = ParseRebuildEta(detail)
-        };
-
-        // ============================================================
-        // 6) Obtener MountPath universal
-        // ============================================================
-        try
-        {
-            var lsblk = await ShellHelper.RunCleanAsync($"lsblk -J /dev/{arrayName}");
-            dynamic blk = JsonConvert.DeserializeObject(lsblk)!;
-
-            var mount = "";
-
-            try
-            {
-                if (blk.blockdevices[0].mountpoints != null)
-                {
-                    var mps = blk.blockdevices[0].mountpoints;
-                    if (mps.Count > 0)
-                        mount = mps[0] ?? "";
-                }
-                else
-                {
-                    mount = blk.blockdevices[0].mountpoint ?? "";
-                }
-            }
-            catch
-            {
-                mount = "";
-            }
-
-            info.MountPath = mount;
-            info.IsMounted = !string.IsNullOrWhiteSpace(mount);
-        }
-        catch
-        {
-            info.MountPath = "";
-            info.IsMounted = false;
-        }
-
-        // ============================================================
-        // 7) Obtener información detallada de cada disco
-        // ============================================================
-        foreach (var dev in diskNames)
-        {
-            var devName = dev.Split('/').Last();
-
-            var diskInfo = await GetDiskInfo(devName);
-
-            diskInfo.Role = ParseDiskRole(detail, devName);
-            diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
-            diskInfo.ArrayName = arrayName;
-
-            info.Disks.Add(diskInfo);
-        }
-
-        // ============================================================
-        // 7.1) FILTRO CLAVE: no mostrar discos faulty/removed en el array
-        //      (coherente con MdadmService_IsDiskInArray)
-        // ============================================================
-        info.Disks = info.Disks;
-         //   .Where(d =>
-           //     !d.Role.Equals("faulty", StringComparison.OrdinalIgnoreCase) &&
-             //  !d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
-            //.ToList();
-
-        arrays.Add(info);
-    }
-
-    // ============================================================
-    // 8) Trazas finales
-    // ============================================================
-    Console.WriteLine("=== ARRAYS DETECTADOS ===");
-    foreach (var arr in arrays)
-    {
-        Console.WriteLine($"ARRAY: {arr.Name}  Level={arr.Level}  State={arr.State}");
-        Console.WriteLine($"  MountPath={arr.MountPath}  IsMounted={arr.IsMounted}");
-        Console.WriteLine($"  Discos detectados: {arr.Disks.Count}");
-
-        foreach (var d in arr.Disks)
-            Console.WriteLine($"    - {d.Name}  Role={d.Role}  State={d.State}  Size={d.Size}  Model={d.Model}");
-    }
-
-    Console.WriteLine("=========================");
-    Console.WriteLine($"[RAID] Arrays detectados: {arrays.Count}");
-
-    return arrays;
-}*/
 
 
 public async Task<List<RaidArrayInfo>> GetArraysAsync()
@@ -513,7 +329,11 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
                 continue;
 
             var arrayPath = tokens[1];
-            var arrayName = arrayPath.Split('/').Last();
+            var rawName = arrayPath.Split('/').Last();
+            var arrayName = rawName.Contains(':')
+                ? rawName.Split(':').Last()
+                : rawName;
+
 
             // ============================================================
             // 4) mdadm --detail
@@ -711,12 +531,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
 
 
-
-
-
-   
-
-
     private string ParseArrayState(string detail)
     {
         if (string.IsNullOrWhiteSpace(detail))
@@ -795,7 +609,10 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             if (!await EnsureArraySafeForModification(arrayName))
                 return false;
 
-            var devPath = $"/dev/{arrayName}";
+            var devPath = arrayName.StartsWith("/dev/")
+                ? arrayName
+                : $"/dev/{arrayName}";
+
 
             // 1) Cargar configuración JSON del array
             var cfg = ArrayConfigService.Load(arrayName);
@@ -1077,75 +894,6 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
         return "unknown";
     }
 
-
-
-    
-
-/*
-    private string ParseDiskRole(string detail, string device)
-    {
-        if (string.IsNullOrWhiteSpace(detail) || string.IsNullOrWhiteSpace(device))
-            return "unknown";
-
-        var dev = device.Replace("/dev/", "").Trim();
-
-        foreach (var raw in detail.Split('\n'))
-        {
-            var line = raw.Trim();
-            var lower = line.ToLowerInvariant();
-
-            // Solo líneas que mencionan el dispositivo real
-            if (!lower.Contains($"/dev/{dev}"))
-                continue;
-
-            // -----------------------------
-            // ORDEN UNIVERSAL DE PRIORIDAD
-            // -----------------------------
-
-            // 1) faulty
-            if (lower.Contains("faulty"))
-                return "faulty";
-
-            // 2) removed
-            if (lower.Contains("removed"))
-                return "removed";
-
-            // 3) rebuilding / recovering / resync
-            if (lower.Contains("rebuild") ||
-                lower.Contains("recover") ||
-                lower.Contains("resync"))
-                return "rebuilding";
-
-            // 4) write-mostly (Arch, Fedora)
-            if (lower.Contains("write-mostly"))
-                return "write-mostly";
-
-            // 5) blocked (openSUSE)
-            if (lower.Contains("blocked"))
-                return "blocked";
-
-            // 6) spare
-            if (lower.Contains("spare"))
-                return "spare";
-
-            // 7) in-sync (openSUSE)
-            if (lower.Contains("in-sync"))
-                return "active";
-
-            // 8) active (evitar confundir con inactive)
-            if (lower.Contains(" active ") ||
-                lower.Contains(" active,") ||
-                lower.Contains(" active\t"))
-                return "active";
-
-            // 9) sync (Arch, Fedora)
-            if (lower.Contains(" sync "))
-                return "active";
-        }
-
-        return "unknown";
-    }
-*/
 
 
     private string ParseDiskStateFromRole(string role)
@@ -1642,11 +1390,43 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
         name = name.Trim();
 
-        if (!name.StartsWith("/dev/"))
-            name = "/dev/" + name;
+        // Si ya es ruta absoluta
+        if (name.StartsWith("/dev/"))
+        {
+            var last = Path.GetFileName(name); // md0 o vm-host:md0
 
-        return name;
+            // Caso: /dev/md/vm-host:md0 → /dev/md0
+            if (last.Contains(":"))
+            {
+                var clean = last.Split(':').Last();
+                if (Regex.IsMatch(clean, @"^md\d+$"))
+                    return "/dev/" + clean;
+            }
+
+            // Caso: /dev/md0 → OK
+            if (Regex.IsMatch(last, @"^md\d+$"))
+                return "/dev/" + last;
+
+            return name;
+        }
+
+        // Caso: md0 → /dev/md0
+        if (Regex.IsMatch(name, @"^md\d+$"))
+            return "/dev/" + name;
+
+        // Caso: vm-host:md0 → /dev/md0
+        if (name.Contains(":"))
+        {
+            var clean = name.Split(':').Last();
+            if (Regex.IsMatch(clean, @"^md\d+$"))
+                return "/dev/" + clean;
+        }
+
+        // Discos normales
+        return "/dev/" + name;
     }
+
+
 
     
     
