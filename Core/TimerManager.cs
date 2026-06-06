@@ -1,26 +1,29 @@
 using System;
 using Avalonia.Threading;
+using RAID_Util.Services;
 using RAID_Util.Views.Tabs;
-
-namespace RAID_Util.Core;
 
 public class TimerManager
 {
     private readonly DispatcherTimer _generalTimer;
     private readonly DispatcherTimer _hotplugTimer;
-    private readonly LogsView? _logsView;
     private readonly DispatcherTimer _rebuildTimer;
+
     private readonly StatusView? _statusView;
+    private readonly LogsView? _logsView;
+    private readonly RaidStateService _stateService;
 
     public TimerManager(
         StatusView? statusView,
         LogsView? logsView,
         int generalRefreshMs,
         int rebuildRefreshMs,
-        int hotplugRefreshMs)
+        int hotplugRefreshMs,
+        RaidStateService stateService)
     {
         _statusView = statusView;
         _logsView = logsView;
+        _stateService = stateService;
 
         // TIMER GENERAL
         _generalTimer = new DispatcherTimer
@@ -29,28 +32,30 @@ public class TimerManager
         };
         _generalTimer.Tick += async (_, _) =>
         {
+            await _stateService.RefreshAsync();
+
             if (_statusView is not null)
                 await _statusView.RefreshStatusAsync();
         };
 
-        // TIMER REBUILD (vacío por ahora)
+        // TIMER REBUILD
         _rebuildTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(rebuildRefreshMs)
         };
         _rebuildTimer.Tick += async (_, _) =>
         {
-            // Aquí irá UpdateRebuildStatus() cuando exista RaidView
+            // UpdateRebuildStatus() irá aquí
         };
 
-        // TIMER HOTPLUG (vacío por ahora)
+        // TIMER HOTPLUG
         _hotplugTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(hotplugRefreshMs)
         };
         _hotplugTimer.Tick += async (_, _) =>
         {
-            // Aquí irá CheckHotplug() cuando exista DisksView
+            // CheckHotplug() irá aquí
         };
     }
 

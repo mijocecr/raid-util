@@ -21,6 +21,9 @@ public partial class MainWindow : Window
     private bool _sudoReady;
     private TimerManager? _timerManager;
 
+    // ⭐ Servicio de estado RAID en memoria
+    private readonly RaidStateService _stateService = new();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -37,6 +40,10 @@ public partial class MainWindow : Window
 
         SaveSettingButton.Click += OnOpenConfig;
         MainTabs.SelectionChanged += OnTabChanged;
+
+        // ⭐ Conectar RaidView al estado en memoria
+        if (RaidViewControl != null)
+            RaidViewControl.AttachStateService(_stateService);
     }
 
     protected override async void OnOpened(EventArgs e)
@@ -135,13 +142,14 @@ public partial class MainWindow : Window
 
         StatusBarText.Text = "System ready.";
 
-        // ⭐ Timers pueden arrancar ya; las vistas se irán llenando cuando toque
+        // ⭐ TimerManager ahora usa el estado en memoria
         _timerManager = new TimerManager(
             StatusViewControl,
             LogsViewControl,
             _config.GeneralRefreshMs,
             _config.RebuildRefreshMs,
-            _config.HotplugRefreshMs
+            _config.HotplugRefreshMs,
+            _stateService
         );
 
         _timerManager.StartAll();

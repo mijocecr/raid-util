@@ -30,6 +30,10 @@ public partial class RaidView : UserControl
 {
     private const bool FORCE_FAKE_DATA = false;
 
+    private  RaidStateService? _stateService;
+    
+
+    
     private static readonly Thickness DiskCardPadding = new(12);
     private static readonly Thickness DiskCardMargin = new(0, 0, 0, 10);
     private static readonly CornerRadius DiskCardRadius = new(8);
@@ -69,6 +73,111 @@ public partial class RaidView : UserControl
     private RaidArrayInfo? _selectedArray;
     private bool _isBuildingUI = false;
 
+    
+    public RaidView(RaidStateService stateService)
+        : this() // reutiliza el constructor actual
+    {
+        _stateService = stateService;
+        _stateService.StateChanged += OnRaidStateChanged;
+
+        // Carga inicial desde el estado en memoria
+        LoadFromState();
+    }
+
+    //-----------------------------------
+    
+
+
+// ⭐ Conectar RaidView al RaidStateService desde MainWindow
+public void AttachStateService(RaidStateService stateService)
+{
+    _stateService = stateService;
+
+    // Asumimos que StateChanged es un Action o similar sin parámetros
+    _stateService.StateChanged += OnRaidStateChanged;
+
+    // Carga inicial desde el estado en memoria
+    LoadFromState();
+}
+
+// ⭐ Se llama automáticamente cuando cambia el estado en memoria
+private void OnRaidStateChanged()
+{
+    if (FORCE_FAKE_DATA)
+        return;
+
+    LogService.Debug("[RAIDVIEW] StateChanged recibido.");
+    // No bloqueamos, no tocamos mdadm, solo refrescamos desde el estado
+    Dispatcher.UIThread.Post(LoadFromState);
+}
+
+// ⭐ Carga arrays desde RaidStateService y reutiliza tu lógica actual
+private void LoadFromState()
+{
+    if (_stateService == null)
+        return;
+
+    var arrays = _stateService.Arrays ?? new List<RaidArrayInfo>();
+
+    // Reutilizamos SetArrays tal cual, para no romper nada
+    SetArrays(arrays);
+    LogService.Debug($"[RAIDVIEW] LoadFromState() → {_stateService?.Arrays?.Count} arrays");
+
+}
+
+// ⭐ SetArrays completo, tal como debe quedar
+public void SetArrays(List<RaidArrayInfo> arrays)
+{
+    _arrays = arrays ?? new List<RaidArrayInfo>();
+
+    foreach (var a in _arrays)
+    {
+        a.StateIcon = string.IsNullOrWhiteSpace(a.StateIcon)
+            ? GetStateIcon(a.State)
+            : a.StateIcon;
+
+        a.TotalSize ??= "Unknown";
+        a.UsableSize ??= a.TotalSize;
+        a.ParitySize ??= "N/A";
+        a.DiskSummary ??= $"{a.Disks?.Count ?? 0}× Disk";
+        a.Uptime ??= "Unknown";
+
+        if (a.Disks == null)
+            a.Disks = new List<RaidDiskInfo>();
+
+        foreach (var d in a.Disks)
+        {
+            if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
+                d.Icon = d.Icon switch
+                {
+                    "hdd" => "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                    "ssd" => "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                    "nvme" => "avares://RAID-Util/Assets/Icons/disk-nvme.png",
+                    "usb" => "avares://RAID-Util/Assets/Icons/disk-usb.png",
+                    "virtual" => "avares://RAID-Util/Assets/Icons/disk-virtual.png",
+                    _ => "avares://RAID-Util/Assets/Icons/disk-hdd.png"
+                };
+        }
+    }
+
+    // ⭐ Igual que antes: construir la UI en el hilo de UI
+    Dispatcher.UIThread.Post(BuildUI);
+}
+
+    
+    
+    //------------------------------------
+    
+    
+    
+    
+   
+
+    // ⭐ Permite conectar RaidView al RaidStateService sin romper nada
+    
+
+    
+    
     public RaidView()
     {
         InitializeComponent();
@@ -99,6 +208,13 @@ public partial class RaidView : UserControl
 
     public bool IsFakeMode => FORCE_FAKE_DATA;
 
+    
+    
+
+    
+    
+    
+    
     private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
     {
         var service = new RaidService();
@@ -192,42 +308,7 @@ public partial class RaidView : UserControl
         return await dlg.ShowDialog<bool>(new Window());
     }
 
-    public void SetArrays(List<RaidArrayInfo> arrays)
-    {
-        _arrays = arrays ?? new List<RaidArrayInfo>();
-
-        foreach (var a in _arrays)
-        {
-            a.StateIcon = string.IsNullOrWhiteSpace(a.StateIcon)
-                ? GetStateIcon(a.State)
-                : a.StateIcon;
-
-            a.TotalSize ??= "Unknown";
-            a.UsableSize ??= a.TotalSize;
-            a.ParitySize ??= "N/A";
-            a.DiskSummary ??= $"{a.Disks?.Count ?? 0}× Disk";
-            a.Uptime ??= "Unknown";
-
-            if (a.Disks == null)
-                a.Disks = new List<RaidDiskInfo>();
-
-            foreach (var d in a.Disks)
-            {
-                if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
-                    d.Icon = d.Icon switch
-                    {
-                        "hdd" => "avares://RAID-Util/Assets/Icons/disk-hdd.png",
-                        "ssd" => "avares://RAID-Util/Assets/Icons/disk-ssd.png",
-                        "nvme" => "avares://RAID-Util/Assets/Icons/disk-nvme.png",
-                        "usb" => "avares://RAID-Util/Assets/Icons/disk-usb.png",
-                        "virtual" => "avares://RAID-Util/Assets/Icons/disk-virtual.png",
-                        _ => "avares://RAID-Util/Assets/Icons/disk-hdd.png"
-                    };
-            }
-        }
-
-        Dispatcher.UIThread.Post(BuildUI);
-    }
+   
 
     private void LoadFakeData()
     {
