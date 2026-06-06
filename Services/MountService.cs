@@ -1,11 +1,35 @@
 using System;
 using System.IO;
+using System.Linq;
 using RAID_Util.Helpers;
 
 namespace RAID_Util.Services;
 
 public static class MountService
 {
+    // ============================================================
+    // ⭐ Resolver PATH REAL del dispositivo (arrays y discos)
+    // ============================================================
+    private static string ResolveRealDevice(string device)
+    {
+        // Si ya es ruta absoluta → OK
+        if (device.StartsWith("/dev/"))
+            return device;
+
+        // Intentar resolver arrays RAID
+        var arrays = new RaidService().GetArraysAsync().Result;
+        var array = arrays.FirstOrDefault(a =>
+            a.Name == device ||
+            a.Path.EndsWith("/" + device, StringComparison.Ordinal) ||
+            a.Path.EndsWith(device, StringComparison.Ordinal));
+
+        if (array != null)
+            return array.Path; // /dev/md/host:md0
+
+        // Fallback → disco normal
+        return "/dev/" + device;
+    }
+
     public static bool IsMounted(string mountPoint)
     {
         if (!File.Exists("/proc/mounts"))
@@ -26,6 +50,9 @@ public static class MountService
     // ============================================================
     public static bool Mount(string device, string mountPoint, string options = "defaults")
     {
+        // ⭐ Resolver PATH REAL
+        device = ResolveRealDevice(device);
+
         // 1) Crear directorio
         ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
 

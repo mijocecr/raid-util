@@ -12,18 +12,57 @@ public static class FstabService
     private const string BackupPath = "/etc/fstab.raidutil.bak";
 
     // ============================================================
+    // NORMALIZAR DEVICE (ruta real)
+    // ============================================================
+    private static string NormalizeDevice(string device)
+    {
+        if (string.IsNullOrWhiteSpace(device))
+            return device;
+
+        device = device.Trim();
+
+        // Si ya es ruta absoluta → OK
+        if (device.StartsWith("/dev/"))
+            return device;
+
+        // Si es md0 → convertir a /dev/md0
+        if (device.StartsWith("md"))
+            return "/dev/" + device;
+
+        // Si es sda1 → convertir a /dev/sda1
+        if (device.StartsWith("sd") || device.StartsWith("nvme"))
+            return "/dev/" + device;
+
+        return device;
+    }
+
+    // ============================================================
+    // EXTRAER NOMBRE BASE (md0, host:md0, etc.)
+    // ============================================================
+    private static string BaseName(string device)
+    {
+        if (string.IsNullOrWhiteSpace(device))
+            return "";
+
+        var d = device.Trim();
+
+        if (d.StartsWith("/dev/"))
+            d = d.Substring(5);
+
+        return d;
+    }
+
+    // ============================================================
     // BACKUP
     // ============================================================
     public static void Backup()
     {
         try
         {
-            if (File.Exists(FstabPath)) ShellHelper.EjecutarComoRoot($"cp \"{FstabPath}\" \"{BackupPath}\"");
+            if (File.Exists(FstabPath))
+                ShellHelper.EjecutarComoRoot($"cp \"{FstabPath}\" \"{BackupPath}\"");
         }
-        catch
-        {
-            // No romper si falla el backup
-        }
+        catch { }
     }
 
     // ============================================================
@@ -33,6 +72,8 @@ public static class FstabService
     {
         try
         {
+            device = NormalizeDevice(device);
+
             var result = ShellHelper.EjecutarComoRoot($"blkid \"{device}\"");
             var output = (result.Stdout + result.Stderr).ToLower();
 
@@ -45,9 +86,7 @@ public static class FstabService
             if (output.Contains("type=\"ntfs\"")) return "ntfs";
             if (output.Contains("type=\"swap\"")) return "swap";
         }
-        catch
-        {
-        }
+        catch { }
 
         return "auto";
     }
@@ -59,10 +98,12 @@ public static class FstabService
     {
         Backup();
 
+        device = NormalizeDevice(device);
+        var baseDev = BaseName(device);
+
         if (!File.Exists(FstabPath))
             ShellHelper.EjecutarComoRoot($"touch \"{FstabPath}\"");
 
-        // Validación básica
         if (mountPoint.Contains(" "))
             throw new Exception("Mount point cannot contain spaces in /etc/fstab.");
 
@@ -73,14 +114,12 @@ public static class FstabService
         {
             var trimmed = line.Trim();
 
-            // Mantener comentarios y líneas vacías
             if (trimmed.StartsWith("#") || string.IsNullOrWhiteSpace(trimmed))
             {
                 cleaned.Add(line);
                 continue;
             }
 
-            // Parsear columnas
             var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
 
             if (parts.Length >= 2)
@@ -88,24 +127,22 @@ public static class FstabService
                 var dev = parts[0];
                 var mp = parts[1];
 
-                // Eliminar entradas previas del mismo dispositivo o mismo mountpoint
-                if (dev == device || mp == mountPoint)
+                var baseExisting = BaseName(dev);
+
+                // Eliminar entradas previas del mismo dispositivo o mountpoint
+                if (baseExisting == baseDev || mp == mountPoint)
                     continue;
             }
 
             cleaned.Add(line);
         }
 
-        // Construir entrada nueva
         var entry = $"{device} {mountPoint} {fs} {options} 0 0";
-
         cleaned.Add(entry);
 
-        // Guardar en archivo temporal
         var temp = Path.GetTempFileName();
         File.WriteAllLines(temp, cleaned);
 
-        // Copiar con permisos root
         ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
         ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
         ShellHelper.EjecutarComoRoot($"chown root:root \"{FstabPath}\"");
@@ -117,6 +154,9 @@ public static class FstabService
     public static void RemoveEntry(string device)
     {
         Backup();
+
+        device = NormalizeDevice(device);
+        var baseDev = BaseName(device);
 
         if (!File.Exists(FstabPath))
             return;
@@ -139,9 +179,9 @@ public static class FstabService
             if (parts.Length >= 1)
             {
                 var dev = parts[0];
+                var baseExisting = BaseName(dev);
 
-                // Eliminar solo si coincide EXACTAMENTE
-                if (dev == device)
+                if (baseExisting == baseDev)
                     continue;
             }
 

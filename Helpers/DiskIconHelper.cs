@@ -5,13 +5,14 @@ using Avalonia.Platform;
 
 public static class DiskIconHelper
 {
-    private const string DefaultIcon = "avares://{RAID-Util}/Assets/Icons/disk-hdd.png";
+    private const string DefaultIcon = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
 
     public static Image LoadImage(string uriString, int size)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(uriString) || !uriString.Contains("avares://"))
+            // Validar ruta
+            if (string.IsNullOrWhiteSpace(uriString) || !uriString.StartsWith("avares://"))
             {
                 Console.WriteLine($"[ICONHELPER] Ruta inválida '{uriString}', usando default.");
                 uriString = DefaultIcon;
@@ -21,24 +22,39 @@ public static class DiskIconHelper
 
             var uri = new Uri(uriString);
 
-            if (!AssetLoader.Exists(uri))
+            // Intentar abrir el recurso
+            try
             {
-                Console.WriteLine($"[ICONHELPER] NO EXISTE: {uriString}");
-                uri = new Uri(DefaultIcon);
+                using var stream = AssetLoader.Open(uri);
+
+                return new Image
+                {
+                    Source = new Bitmap(stream),
+                    Width = size,
+                    Height = size
+                };
+            }
+            catch
+            {
+                Console.WriteLine($"[ICONHELPER] FALLO al abrir '{uriString}', usando default.");
             }
 
-            using var stream = AssetLoader.Open(uri);
-
-            return new Image
+            // Fallback final
+            var fallbackUri = new Uri(DefaultIcon);
+            using (var fallbackStream = AssetLoader.Open(fallbackUri))
             {
-                Source = new Bitmap(stream),
-                Width = size,
-                Height = size
-            };
+                return new Image
+                {
+                    Source = new Bitmap(fallbackStream),
+                    Width = size,
+                    Height = size
+                };
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ICONHELPER] ERROR: {ex.Message}");
+            Console.WriteLine($"[ICONHELPER] ERROR inesperado: {ex.Message}");
+
             var fallbackUri = new Uri(DefaultIcon);
             using var stream = AssetLoader.Open(fallbackUri);
 

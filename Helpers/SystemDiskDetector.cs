@@ -2,15 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 
 namespace RAID_Util.Helpers;
 
 public static class SystemDiskDetector
 {
-    // Particiones críticas del sistema
+    // Solo montajes realmente críticos
     private static readonly string[] CriticalMounts =
     {
-        "/", "/boot", "/boot/efi", "/usr", "/var", "/etc", "/opt", "/srv"
+        "/", "/boot", "/boot/efi"
     };
 
     // ============================================================
@@ -20,32 +21,41 @@ public static class SystemDiskDetector
     {
         try
         {
-            // 1) Obtener todas las particiones montadas
-            var mounts = GetMountedDevices();
+            var baseName = NormalizeDiskName(diskName);
 
-            // 2) Si alguna partición del disco está montada en un punto crítico → ES SISTEMA
-            foreach (var m in mounts)
+            // 1) Obtener TODAS las particiones del disco
+            var partitions = GetDiskPartitions(baseName);
+
+            // 2) Revisar /proc/mounts
+            var mounted = GetMountedDevices();
+            foreach (var part in partitions)
             {
-                if (!m.Device.Contains(diskName))
-                    continue;
-
-                if (CriticalMounts.Contains(m.MountPoint))
-                    return true;
+                if (mounted.TryGetValue(part, out var mp))
+                    if (CriticalMounts.Contains(mp))
+                        return true;
             }
 
-            // 3) Revisar /etc/fstab por si el disco contiene particiones del sistema
-            var fstab = GetFstabDevices();
+            // 3) Revisar /etc/fstab (UUID, LABEL, PARTUUID, /dev/xxx)
+            var fstab = GetFstabEntries();
             foreach (var entry in fstab)
             {
-                if (!entry.Device.Contains(diskName))
-                    continue;
+                // Coincidencia exacta con particiones del disco
+                if (partitions.Contains(entry.Device))
+                {
+                    if (CriticalMounts.Contains(entry.MountPoint))
+                        return true;
+                }
 
-                if (CriticalMounts.Contains(entry.MountPoint))
-                    return true;
+                // Coincidencia por nombre base (caso /dev/sda → /dev/sda1)
+                if (entry.Device.Contains(baseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (CriticalMounts.Contains(entry.MountPoint))
+                        return true;
+                }
             }
 
-            // 4) Revisar si el disco contiene la partición usada para arrancar
-            if (IsBootDevice(diskName))
+            // 4) Revisar si el root está en RAID
+            if (IsRootOnRaid(baseName))
                 return true;
 
             return false;
@@ -58,14 +68,58 @@ public static class SystemDiskDetector
     }
 
     // ============================================================
-    // DETECTAR DISPOSITIVOS MONTADOS
+    // NORMALIZAR NOMBRE
     // ============================================================
-    private static List<(string Device, string MountPoint)> GetMountedDevices()
+    private static string NormalizeDiskName(string name)
     {
-        var list = new List<(string, string)>();
+        name = name.Trim();
+
+        if (name.StartsWith("/dev/"))
+            name = name.Substring(5);
+
+        return name;
+    }
+
+    // ============================================================
+    // OBTENER PARTICIONES DEL DISCO (lsblk -J)
+    // ============================================================
+    private static List<string> GetDiskPartitions(string baseName)
+    {
+        var result = new List<string>();
+
+        var json = ShellHelper.EjecutarSinRoot("lsblk -J -o NAME,PKNAME").Stdout;
+        if (string.IsNullOrWhiteSpace(json))
+            return result;
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement.GetProperty("blockdevices");
+
+        foreach (var dev in root.EnumerateArray())
+        {
+            var name = dev.GetProperty("name").GetString() ?? "";
+            var pk = dev.TryGetProperty("pkname", out var pkEl) ? pkEl.GetString() ?? "" : "";
+
+            // Partición cuyo padre es el disco
+            if (pk == baseName)
+                result.Add("/dev/" + name);
+
+            // El propio disco
+            if (name == baseName)
+                result.Add("/dev/" + name);
+        }
+
+        return result;
+    }
+
+    // ============================================================
+    // /proc/mounts
+    // ============================================================
+    private static Dictionary<string, string> GetMountedDevices()
+    {
+        var dict = new Dictionary<string, string>();
 
         if (!File.Exists("/proc/mounts"))
-            return list;
+            return dict;
 
         foreach (var line in File.ReadAllLines("/proc/mounts"))
         {
@@ -76,17 +130,16 @@ public static class SystemDiskDetector
             var dev = parts[0];
             var mp = parts[1];
 
-            if (dev.StartsWith("/dev/"))
-                list.Add((dev, mp));
+            dict[dev] = mp;
         }
 
-        return list;
+        return dict;
     }
 
     // ============================================================
-    // LEER /etc/fstab
+    // /etc/fstab (UUID, LABEL, PARTUUID, /dev/xxx)
     // ============================================================
-    private static List<(string Device, string MountPoint)> GetFstabDevices()
+    private static List<(string Device, string MountPoint)> GetFstabEntries()
     {
         var list = new List<(string, string)>();
 
@@ -107,27 +160,29 @@ public static class SystemDiskDetector
             var dev = parts[0];
             var mp = parts[1];
 
-            if (dev.StartsWith("/dev/"))
-                list.Add((dev, mp));
+            list.Add((dev, mp));
         }
 
         return list;
     }
 
     // ============================================================
-    // DETECTAR SI EL DISCO CONTIENE /boot o EFI
+    // DETECTAR SI EL ROOT ESTÁ EN RAID
     // ============================================================
-    private static bool IsBootDevice(string diskName)
+    private static bool IsRootOnRaid(string baseName)
     {
         var mounts = GetMountedDevices();
 
-        foreach (var m in mounts)
-        {
-            if (!m.Device.Contains(diskName))
-                continue;
+        // Buscar qué dispositivo contiene /
+        var rootDev = mounts.FirstOrDefault(x => x.Value == "/").Key;
+        if (string.IsNullOrWhiteSpace(rootDev))
+            return false;
 
-            if (m.MountPoint == "/boot" || m.MountPoint == "/boot/efi")
-                return true;
+        // Si root está en RAID → todos los discos miembros son sistema
+        if (rootDev.StartsWith("/dev/md"))
+        {
+            var mdstat = File.ReadAllText("/proc/mdstat").ToLower();
+            return mdstat.Contains(baseName.ToLower());
         }
 
         return false;

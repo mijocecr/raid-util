@@ -28,7 +28,6 @@ public partial class DisksView : UserControl
     private static CornerRadius _cardCornerRadius;
     private readonly List<RaidDiskInfo> _disks = new();
 
-
     public DisksView()
     {
         InitializeComponent();
@@ -63,21 +62,14 @@ public partial class DisksView : UserControl
 
         if (!sudoReady)
         {
-            LogService.Write("[DISKSVIEW] sudoReady = false → usando fake data.");
             LoadFakeData();
         }
         else
         {
             if (forceFake)
-            {
-                LogService.Write("[DISKSVIEW] FORCE_FAKE_DATA = true → usando fake data.");
                 LoadFakeData();
-            }
             else
-            {
-                LogService.Write("[DISKSVIEW] Modo real → cargando discos reales.");
                 LoadRealData();
-            }
         }
 
         RenderDisks();
@@ -88,8 +80,6 @@ public partial class DisksView : UserControl
     // ============================================================
     private void LoadFakeData()
     {
-        LogService.Debug("[DISKSVIEW] LoadFakeData() iniciado.");
-
         _disks.Clear();
 
         _disks.Add(new RaidDiskInfo
@@ -97,11 +87,13 @@ public partial class DisksView : UserControl
             Name = "sdb",
             Model = "Samsung SSD 860 EVO",
             Size = "500GB",
-            Type = "SSD SATA",
             Serial = "S3Z9NX0M123456A",
-            Temperature = "34°C",
-            State = "Free",
-            Icon = DiskIconService.GetIcon(null, "SSD SATA", false)
+           // Temperature = "34°C",
+            //State = "OK",
+            //FsType = "",
+            //MountPath = "",
+            Icon = DiskIconService.GetIcon(null, "SSD SATA", false),
+            IsRotational = false
         });
 
         _disks.Add(new RaidDiskInfo
@@ -109,25 +101,22 @@ public partial class DisksView : UserControl
             Name = "sdc",
             Model = "Seagate Barracuda",
             Size = "2TB",
-            Type = "HDD 7200 RPM",
             Serial = "ZDH12X0A0001",
-            Temperature = "41°C",
-            State = "Free",
-            Icon = DiskIconService.GetIcon(null, "HDD", true)
+           // Temperature = "41°C",
+            //State = "OK",
+            //FsType = "",
+            //MountPath = "",
+            Icon = DiskIconService.GetIcon(null, "HDD", true),
+            IsRotational = true
         });
-
-        LogService.Debug("[DISKSVIEW] LoadFakeData() completado.");
     }
 
     // ============================================================
     // REAL DATA
     // ============================================================
-
-
+    
     private void LoadRealData()
     {
-        LogService.Debug("[DISKSVIEW] LoadRealData() iniciado.");
-
         _disks.Clear();
 
         try
@@ -137,14 +126,13 @@ public partial class DisksView : UserControl
 
             foreach (var d in list)
             {
-                // Normalizar valores NULL
+                // Normalizar campos existentes en el modelo moderno
                 d.Model ??= "Unknown";
                 d.Serial ??= "Unknown";
-                d.Type ??= "Unknown";
-                d.Temperature ??= "N/A";
-                d.Status ??= "Free";
-                d.Filesystem ??= "";
-                d.MountPoint ??= "";
+                d.Size ??= "Unknown";
+                d.FsType ??= "";
+                d.MountPath ??= "";
+                d.State ??= "UNKNOWN";
 
                 // Normalizar icono
                 d.Icon = DiskIconService.GetIcon(d.Icon, d.Model, d.IsRotational);
@@ -156,8 +144,6 @@ public partial class DisksView : UserControl
         {
             LogService.Error($"[DISKSVIEW] Error cargando discos reales: {ex}");
         }
-
-        LogService.Debug("[DISKSVIEW] LoadRealData() completado.");
     }
 
 
@@ -166,198 +152,186 @@ public partial class DisksView : UserControl
     // ============================================================
     private void RenderDisks()
     {
-        LogService.Debug("[DISKSVIEW] RenderDisks() ejecutado.");
-
         DiskList.Children.Clear();
 
         foreach (var disk in _disks)
-        {
-            LogService.Debug($"[DISKSVIEW] Renderizando tarjeta para {disk.Name}");
             DiskList.Children.Add(BuildDiskCard(disk));
-        }
     }
 
     // ============================================================
     // TARJETA DE DISCO
     // ============================================================
-
-
+    
     private Border BuildDiskCard(RaidDiskInfo disk)
+{
+    EnsureResources();
+
+    // Normalizar campos
+    disk.Model ??= "Unknown";
+    disk.Serial ??= "Unknown";
+    disk.Size ??= "Unknown";
+    disk.FsType ??= "";
+    disk.MountPath ??= "";
+    disk.State ??= "UNKNOWN";
+
+    // ⭐ Temperatura real vía smartctl
+    string temperature = GetTemperature(disk);
+
+    // ⭐ Tipo físico
+    string type =
+        disk.IsNvme ? "NVMe" :
+        !disk.IsRotational ? "SSD" :
+        "HDD";
+
+    // ⭐ Icono
+    var fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
+    var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
+    icon.Stretch = Stretch.Uniform;
+
+    var iconContainer = new Border
     {
-        LogService.Debug($"[DISKSVIEW] BuildDiskCard() → {disk.Name}");
+        Width = 80,
+        Height = 80,
+        Margin = new Thickness(0, 0, 16, 0),
+        VerticalAlignment = VerticalAlignment.Top,
+        Child = icon
+    };
 
-        EnsureResources();
+    // ⭐ Detalles
+    var details = new Grid();
+    for (var i = 0; i < 6; i++)
+        details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
-        // Normalizar campos
-        disk.Model ??= "Unknown";
-        disk.Serial ??= "Unknown";
-        disk.Type ??= "Unknown";
-        disk.Size ??= "Unknown";
-        disk.Temperature ??= "N/A";
-        disk.Status ??= "Free";
-        disk.Filesystem ??= "";
-        disk.MountPoint ??= "";
+    var r = 0;
 
-        // Icono
-        var fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
-        var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
-        icon.Stretch = Stretch.Uniform;
+    void AddRow(Control c)
+    {
+        details.Children.Add(c);
+        Grid.SetRow(c, r++);
+    }
 
-        var iconContainer = new Border
-        {
-            Width = 80,
-            Height = 80,
-            Margin = new Thickness(0, 0, 16, 0),
-            VerticalAlignment = VerticalAlignment.Top,
-            Child = icon
-        };
+    AddRow(new TextBlock
+    {
+        Text = disk.Model,
+        TextWrapping = TextWrapping.Wrap,
+        FontSize = 16,
+        FontWeight = FontWeight.Bold,
+        Foreground = _bmwTextBrush
+    });
 
-        // Detalles
-        var details = new Grid();
-        for (var i = 0; i < 6; i++)
-            details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+    AddRow(new TextBlock
+    {
+        Text = $"/dev/{disk.Name}  •  {disk.Size}",
+        Foreground = _bmwTextDimBrush
+    });
 
-        var r = 0;
+    AddRow(new TextBlock
+    {
+        Text = $"Type: {type}",
+        Foreground = _bmwTextDimBrush
+    });
 
-        void AddRow(Control c)
-        {
-            details.Children.Add(c);
-            Grid.SetRow(c, r++);
-        }
+    AddRow(new TextBlock
+    {
+        Text = $"Serial: {disk.Serial}",
+        Foreground = _bmwTextDimBrush
+    });
 
-        AddRow(new TextBlock
-        {
-            Text = disk.Model,
-            TextWrapping = TextWrapping.Wrap,
-            FontSize = 16,
-            FontWeight = FontWeight.Bold,
-            Foreground = _bmwTextBrush
-        });
+    AddRow(new TextBlock
+    {
+        Text = $"Temperature: {temperature}",
+        Foreground = _bmwTextDimBrush
+    });
 
-        AddRow(new TextBlock
-        {
-            Text = $"/dev/{disk.Name}  •  {disk.Size}",
-            Foreground = _bmwTextDimBrush
-        });
+    AddRow(new TextBlock
+    {
+        Text = $"Status: {disk.State}",
+        Foreground = _bmwAccentBrush
+    });
 
-        AddRow(new TextBlock
-        {
-            Text = $"Type: {disk.Type}",
-            Foreground = _bmwTextDimBrush
-        });
+    // ⭐ Botón More
+    var btnMore = new Button
+    {
+        Content = "More",
+        Width = 70,
+        Height = 32,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top
+    };
+    btnMore.Classes.Add("MoreButton");
 
-        AddRow(new TextBlock
-        {
-            Text = $"Serial: {disk.Serial}",
-            Foreground = _bmwTextDimBrush
-        });
+    if (!disk.IsSystemDisk)
+    {
+        var menu = BuildDiskContextMenu(disk);
 
-        AddRow(new TextBlock
-        {
-            Text = $"Temperature: {disk.Temperature}",
-            Foreground = _bmwTextDimBrush
-        });
-
-        AddRow(new TextBlock
-        {
-            Text = $"Status: {disk.Status}",
-            Foreground = _bmwAccentBrush
-        });
-
-        // Botón More
-        var btnMore = new Button
-        {
-            Content = "More",
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Width = 70,
-            Height = 32,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top
-        };
-        btnMore.Classes.Add("MoreButton");
-
-        if (disk.IsSystemDisk)
-        {
-            btnMore.IsVisible = false;
-        }
-        else
-        {
-            var menu = BuildDiskContextMenu(disk);
-
-            foreach (var item in menu.Items.OfType<MenuItem>())
-                item.Click += (_, _) =>
-                {
-                    var action = item.Tag?.ToString();
-                    OnMenuClick(disk, action);
-                };
-
-            btnMore.ContextMenu = menu;
-
-            btnMore.Click += (_, _) =>
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.Click += (_, _) =>
             {
-                LogService.Debug($"[DISKSVIEW] Abriendo menú More para {disk.Name}");
-                menu.PlacementTarget = btnMore;
-                menu.Open(btnMore);
+                var action = item.Tag?.ToString();
+                OnMenuClick(disk, action);
             };
-        }
 
-        // Grid principal
-        var grid = new Grid
+        btnMore.ContextMenu = menu;
+
+        btnMore.Click += (_, _) =>
         {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Auto)
-            }
-        };
-
-        grid.Children.Add(iconContainer);
-        Grid.SetColumn(iconContainer, 0);
-        Grid.SetRowSpan(iconContainer, r);
-
-        grid.Children.Add(details);
-        Grid.SetColumn(details, 1);
-
-        grid.Children.Add(btnMore);
-        Grid.SetColumn(btnMore, 2);
-        Grid.SetRow(btnMore, 0);
-
-        // Tarjeta final
-        return new Border
-        {
-            Background = _bmwSurfaceElevatedBrush,
-            BorderBrush = _bmwBorderBrush,
-            BorderThickness = _cardBorderThickness,
-            CornerRadius = _cardCornerRadius,
-            Padding = _cardPadding,
-            Margin = _cardMargin,
-            Child = grid
+            menu.PlacementTarget = btnMore;
+            menu.Open(btnMore);
         };
     }
+    else
+    {
+        btnMore.IsVisible = false;
+    }
+
+    // ⭐ Grid principal
+    var grid = new Grid
+    {
+        ColumnDefinitions =
+        {
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star),
+            new ColumnDefinition(GridLength.Auto)
+        }
+    };
+
+    grid.Children.Add(iconContainer);
+    Grid.SetColumn(iconContainer, 0);
+    Grid.SetRowSpan(iconContainer, r);
+
+    grid.Children.Add(details);
+    Grid.SetColumn(details, 1);
+
+    grid.Children.Add(btnMore);
+    Grid.SetColumn(btnMore, 2);
+    Grid.SetRow(btnMore, 0);
+
+    // ⭐ Tarjeta final
+    return new Border
+    {
+        Background = _bmwSurfaceElevatedBrush,
+        BorderBrush = _bmwBorderBrush,
+        BorderThickness = _cardBorderThickness,
+        CornerRadius = _cardCornerRadius,
+        Padding = _cardPadding,
+        Margin = _cardMargin,
+        Child = grid
+    };
+}
 
 
     // ============================================================
     // MENÚ MORE
     // ============================================================
-
-
     private ContextMenu BuildDiskContextMenu(RaidDiskInfo disk)
     {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
 
-        // Siempre disponibles
         items.Add(new MenuItem { Header = "View Info", Tag = "info" });
         items.Add(new MenuItem { Header = "SMART", Tag = "smart" });
 
-        if (disk.IsSystemDisk)
-        {
-            menu.ItemsSource = items;
-            return menu;
-        }
-
-        if (disk.IsUsedByRaid)
+        if (disk.IsSystemDisk || disk.IsUsedByRaid)
         {
             menu.ItemsSource = items;
             return menu;
@@ -379,28 +353,16 @@ public partial class DisksView : UserControl
         return menu;
     }
 
-
     // ============================================================
     // ACCIONES DEL MENU MORE
     // ============================================================
-
-
     private async void OnMenuClick(RaidDiskInfo disk, string? action)
     {
-        LogService.Write($"[DISKSVIEW] Acción solicitada sobre {disk.Name}: '{action}'");
-
-        // Normalizar acción
-        var act = action?.Trim().ToLowerInvariant() ?? "";
-
-        if (string.IsNullOrWhiteSpace(act))
-        {
-            LogService.Error("[DISKSVIEW] Acción nula o vacía recibida.");
+        if (string.IsNullOrWhiteSpace(action))
             return;
-        }
 
-        // ============================================================
-        // ⭐ PROTECCIÓN 1: Disco del sistema → bloquear destructivas
-        // ============================================================
+        var act = action.Trim().ToLowerInvariant();
+
         if (disk.IsSystemDisk &&
             (act == "wipe" || act == "zerosb" || act == "ptable" || act == "init"))
         {
@@ -408,9 +370,6 @@ public partial class DisksView : UserControl
             return;
         }
 
-        // ============================================================
-        // ⭐ PROTECCIÓN 2: Disco en RAID → bloquear destructivas
-        // ============================================================
         if (disk.IsUsedByRaid &&
             (act == "wipe" || act == "zerosb" || act == "ptable" || act == "init"))
         {
@@ -418,9 +377,6 @@ public partial class DisksView : UserControl
             return;
         }
 
-        // ============================================================
-        // ⭐ PROTECCIÓN 3: Disco montado → solo permitir unmount
-        // ============================================================
         if (disk.IsMounted &&
             act != "unmount" &&
             act != "info" &&
@@ -430,9 +386,6 @@ public partial class DisksView : UserControl
             return;
         }
 
-        // ============================================================
-        // ⭐ ACCIONES
-        // ============================================================
         switch (act)
         {
             case "info":
@@ -462,50 +415,35 @@ public partial class DisksView : UserControl
             case "init":
                 await InitializeDisk(disk);
                 break;
-
-            default:
-                LogService.Error($"[DISKSVIEW] Acción desconocida: {act}");
-                await ShowInfoDialog("Error", $"Unknown action '{act}'.");
-                break;
         }
     }
-
 
     // ============================================================
     // DIÁLOGOS BMW
     // ============================================================
     private async Task<bool> ShowConfirm(string title, string message)
     {
-        LogService.Debug($"[DISKSVIEW] ConfirmDialog: {title}");
-
         var dlg = new ConfirmDialog(title, message);
         var owner = this.GetVisualRoot() as Window;
-
-        if (owner != null)
-            return await dlg.ShowDialog<bool>(owner);
-
-        return await dlg.ShowDialog<bool>(new Window());
+        return owner != null
+            ? await dlg.ShowDialog<bool>(owner)
+            : await dlg.ShowDialog<bool>(new Window());
     }
 
     private async Task ShowInfoDialog(string title, string message)
     {
-        LogService.Debug($"[DISKSVIEW] InfoDialog: {title}");
-
         var dlg = new InfoDialog(title, message);
         var owner = this.GetVisualRoot() as Window;
-
         if (owner != null)
             await dlg.ShowDialog(owner);
         else
             await dlg.ShowDialog(new Window());
     }
 
-    // ⭐ NUEVO: DIÁLOGO TIPO CONSOLA
     private async Task ShowConsoleDialog(string title, string text)
     {
         var dlg = new ConsoleDialog(title, text);
         var owner = this.GetVisualRoot() as Window;
-
         if (owner != null)
             await dlg.ShowDialog(owner);
         else
@@ -515,48 +453,91 @@ public partial class DisksView : UserControl
     // ============================================================
     // ACCIONES REALES
     // ============================================================
+    
     private async Task ShowInfo(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] View Info → {disk.Name}");
+        // Temperatura real vía smartctl
+        string temperature = GetTemperature(disk);
+
+        // Tipo físico
+        string type =
+            disk.IsNvme ? "NVMe" :
+            !disk.IsRotational ? "SSD" :
+            "HDD";
 
         var msg =
             $"Model: {disk.Model}\n" +
             $"Size: {disk.Size}\n" +
             $"Serial: {disk.Serial}\n" +
-            $"Type: {disk.Type}\n" +
-            $"Temperature: {disk.Temperature}\n" +
-            $"Filesystem: {disk.Filesystem}\n" +
-            $"Mount: {disk.MountPoint}\n" +
+            $"Type: {type}\n" +
+            $"Temperature: {temperature}\n" +
+            $"Filesystem: {disk.FsType}\n" +
+            $"Mount: {disk.MountPath}\n" +
             $"RAID: {(disk.IsUsedByRaid ? disk.ArrayName : "No")}";
 
         await ShowInfoDialog("Disk Information", msg);
     }
 
+
     private async Task RunSmart(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] SMART → {disk.Name}");
-
         var r = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
         var output = (r.Stdout + "\n" + r.Stderr).Trim();
-
         await ShowConsoleDialog($"SMART — /dev/{disk.Name}", output);
     }
+    
+    private string GetTemperature(RaidDiskInfo disk)
+    {
+        try
+        {
+            // Ejecutar smartctl
+            var r = ShellHelper.EjecutarComoRoot($"smartctl -A /dev/{disk.Name}");
+            var text = (r.Stdout + "\n" + r.Stderr).Trim();
+
+            // Buscar líneas típicas de temperatura
+            foreach (var line in text.Split('\n'))
+            {
+                var lower = line.ToLowerInvariant();
+
+                if (lower.Contains("temperature_celsius") ||
+                    lower.Contains("temperature_internal") ||
+                    lower.Contains("current drive temperature") ||
+                    lower.Contains("temperature:"))
+                {
+                    // Extraer el último número de la línea
+                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    // Buscar algo que parezca un número
+                    foreach (var p in parts.Reverse())
+                    {
+                        if (int.TryParse(p.Replace("°C", "").Replace("C", ""), out var temp))
+                            return $"{temp}°C";
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignorar errores
+        }
+
+        return "N/A";
+    }
+
+    
 
     private async Task UnmountDisk(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] Unmount → {disk.Name}");
-
-        if (string.IsNullOrWhiteSpace(disk.MountPoint))
+        if (string.IsNullOrWhiteSpace(disk.MountPath))
         {
             await ShowInfoDialog("Unmount", "This disk is not mounted.");
             return;
         }
 
-        var ok = MountService.Unmount(disk.MountPoint);
+        var ok = MountService.Unmount(disk.MountPath);
 
         if (!ok)
         {
-            LogService.Error($"[DISKSVIEW] Error unmounting {disk.Name}");
             await ShowInfoDialog("Error", "Could not unmount the disk.");
             return;
         }
@@ -569,8 +550,6 @@ public partial class DisksView : UserControl
 
     private async Task WipeDisk(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] Wipe Disk → {disk.Name}");
-
         var confirm = await ShowConfirm("Wipe Disk", $"This will erase ALL signatures on /dev/{disk.Name}. Continue?");
         if (!confirm) return;
 
@@ -578,7 +557,6 @@ public partial class DisksView : UserControl
 
         if (r.ExitCode != 0)
         {
-            LogService.Error($"[DISKSVIEW] wipefs error: {r.Stderr}");
             await ShowInfoDialog("Error", "Could not wipe the disk.");
             return;
         }
@@ -591,8 +569,6 @@ public partial class DisksView : UserControl
 
     private async Task ZeroSuperblock(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] Zero Superblock → {disk.Name}");
-
         var confirm = await ShowConfirm("Zero Superblock", $"Remove RAID metadata from /dev/{disk.Name}?");
         if (!confirm) return;
 
@@ -600,7 +576,6 @@ public partial class DisksView : UserControl
 
         if (r.ExitCode != 0)
         {
-            LogService.Error($"[DISKSVIEW] zerosb error: {r.Stderr}");
             await ShowInfoDialog("Error", "Could not zero the superblock.");
             return;
         }
@@ -613,8 +588,6 @@ public partial class DisksView : UserControl
 
     private async Task CreatePartitionTable(RaidDiskInfo disk)
     {
-        LogService.Write($"[DISKSVIEW] Create Partition Table → {disk.Name}");
-
         var confirm = await ShowConfirm("Create Partition Table",
             $"Create a new GPT table on /dev/{disk.Name}? This erases ALL partitions.");
         if (!confirm) return;
@@ -623,7 +596,6 @@ public partial class DisksView : UserControl
 
         if (r.ExitCode != 0)
         {
-            LogService.Error($"[DISKSVIEW] parted error: {r.Stderr}");
             await ShowInfoDialog("Error", "Could not create partition table.");
             return;
         }
@@ -633,7 +605,6 @@ public partial class DisksView : UserControl
         LoadRealData();
         RenderDisks();
     }
-
 
     private async Task InitializeDisk(RaidDiskInfo disk)
     {
@@ -654,13 +625,9 @@ public partial class DisksView : UserControl
         {
             await Task.Run(() =>
             {
-                // 1) Crear GPT
                 ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
-
-                // 2) Crear partición primaria
                 ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mkpart primary 0% 100%");
 
-                // 3) Formatear
                 var cmd = fs switch
                 {
                     "ext4" => $"mkfs.ext4 -F -L \"{label}\" {part}",
@@ -674,18 +641,11 @@ public partial class DisksView : UserControl
                 };
 
                 ShellHelper.EjecutarComoRoot(cmd);
-
-                // 4) Esperar a udev
                 ShellHelper.EjecutarComoRoot("udevadm settle");
 
-                // 5) Desmontar si udev montó automáticamente
                 MountService.Unmount(mountPoint);
-
-                // 6) Montar correctamente
                 MountService.Mount(part, mountPoint);
 
-                // ⭐ 7) Permitir desmontar sin contraseña en Dolphin
-                ShellHelper.EjecutarComoRoot($"chown 1000:1000 \"{mountPoint}\"");
                 ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
             });
         }

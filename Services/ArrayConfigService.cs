@@ -22,11 +22,27 @@ public static class ArrayConfigService
     }
 
     // ============================
+    // ⭐ NUEVO: Normalizar clave real del array
+    // ============================
+    private static string NormalizeArrayKey(string arrayName)
+    {
+        // Caso: /dev/md/host:md0 → host:md0
+        if (arrayName.StartsWith("/dev/"))
+        {
+            var last = Path.GetFileName(arrayName); // host:md0
+            return Normalize(last);
+        }
+
+        // Caso: host:md0 → OK
+        return Normalize(arrayName);
+    }
+
+    // ============================
     // 2) Ruta completa del archivo
     // ============================
     private static string GetPath(string arrayName)
     {
-        var clean = Normalize(arrayName);
+        var clean = NormalizeArrayKey(arrayName);
         return Path.Combine(BasePath, $"{clean}.json");
     }
 

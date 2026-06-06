@@ -27,7 +27,7 @@ public static class ConfigManager
     {
         try
         {
-            EnsureDirectories();
+            EnsureConfigDirectory();
 
             if (!File.Exists(ConfigPath))
             {
@@ -40,18 +40,23 @@ public static class ConfigManager
 
             if (cfg is null)
             {
+                BackupCorruptConfig();
                 Save(_config);
                 return _config;
             }
 
-            // Guardamos la instancia cargada
+            // Validar campos críticos
+            cfg.LogsPath ??= Path.Combine(ConfigDir, "logs");
+            cfg.GeneralRefreshMs = Math.Clamp(cfg.GeneralRefreshMs, 500, 60000);
+
             _config = cfg;
 
-            EnsureDirectories();
+            EnsureLogsDirectory();
             return _config;
         }
         catch
         {
+            BackupCorruptConfig();
             Save(_config);
             return _config;
         }
@@ -64,9 +69,13 @@ public static class ConfigManager
     {
         try
         {
-            EnsureDirectories();
+            EnsureConfigDirectory();
 
-            _config = config; // actualizamos instancia interna
+            // Validar campos antes de guardar
+            config.LogsPath ??= Path.Combine(ConfigDir, "logs");
+            config.GeneralRefreshMs = Math.Clamp(config.GeneralRefreshMs, 500, 60000);
+
+            _config = config;
 
             var json = JsonSerializer.Serialize(_config, new JsonSerializerOptions
             {
@@ -74,6 +83,8 @@ public static class ConfigManager
             });
 
             File.WriteAllText(ConfigPath, json);
+
+            EnsureLogsDirectory();
         }
         catch
         {
@@ -92,19 +103,39 @@ public static class ConfigManager
     // ============================================================
     // DIRECTORIOS
     // ============================================================
-    private static void EnsureDirectories()
+    private static void EnsureConfigDirectory()
     {
         try
         {
             if (!Directory.Exists(ConfigDir))
                 Directory.CreateDirectory(ConfigDir);
+        }
+        catch { }
+    }
 
+    private static void EnsureLogsDirectory()
+    {
+        try
+        {
             if (!Directory.Exists(_config.LogsPath))
                 Directory.CreateDirectory(_config.LogsPath);
         }
-        catch
+        catch { }
+    }
+
+    // ============================================================
+    // BACKUP DE CONFIGURACIÓN CORRUPTA
+    // ============================================================
+    private static void BackupCorruptConfig()
+    {
+        try
         {
-            // silencio
+            if (File.Exists(ConfigPath))
+            {
+                var backup = ConfigPath + ".corrupt-" + DateTime.Now.Ticks;
+                File.Copy(ConfigPath, backup, overwrite: true);
+            }
         }
+        catch { }
     }
 }

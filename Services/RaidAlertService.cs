@@ -8,22 +8,36 @@ namespace RAID_Util.Services;
 
 public static class RaidAlertService
 {
-    // Evitar spam de alertas (ej: 30s entre alertas iguales)
     private const int AlertCooldownSeconds = 30;
+
     private static CancellationTokenSource? _cts;
     private static string _lastMdstat = "";
     private static string _lastDetail = "";
     private static string? _currentArray;
     private static DateTime _lastAlertTime = DateTime.MinValue;
 
+    // ============================================================
+    // RESOLVER NOMBRE BASE (md0)
+    // ============================================================
+    private static string BaseName(string arrayName)
+    {
+        if (arrayName.StartsWith("/dev/"))
+            return arrayName.Split('/').Last();
+
+        return arrayName;
+    }
+
     public static void StartMonitoring(string arrayName, ArrayConfig cfg, Action<string> onAlert)
     {
         StopMonitoring();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
+
         _currentArray = arrayName;
         _lastMdstat = "";
         _lastDetail = "";
+
+        var baseName = BaseName(arrayName);
 
         Task.Run(async () =>
         {
@@ -44,20 +58,19 @@ public static class RaidAlertService
 
                         // 1) Degradado
                         if (cfg.AlertDegraded && SafeIsDegraded(arrayName))
-                            TryAlert(onAlert, $"Array {arrayName} is degraded.");
+                            TryAlert(onAlert, $"Array {baseName} is degraded.");
 
-                        // 2) Disco fallado (por array, no global)
-                        if (cfg.AlertDiskFail && HasFaultyDisk(mdstat, arrayName))
-                            TryAlert(onAlert, $"A disk in array {arrayName} has failed.");
+                        // 2) Disco fallado
+                        if (cfg.AlertDiskFail && HasFaultyDisk(mdstat, baseName))
+                            TryAlert(onAlert, $"A disk in array {baseName} has failed.");
 
                         // 3) Resync lento
                         if (cfg.AlertSlowResync && SafeIsResyncing(arrayName))
                         {
                             var speedStr = ExtractSpeed(detail);
                             if (int.TryParse(speedStr, out var kb))
-                                // Ej: si cfg.ResyncMaxSpeed = 200000 KB/s → alerta si < 20000
                                 if (kb > 0 && kb < cfg.ResyncMaxSpeed / 10)
-                                    TryAlert(onAlert, $"Array {arrayName} resync is slow ({kb} KB/s).");
+                                    TryAlert(onAlert, $"Array {baseName} resync is slow ({kb} KB/s).");
                         }
                     }
                 }
@@ -72,7 +85,6 @@ public static class RaidAlertService
                 }
                 catch (TaskCanceledException)
                 {
-                    // Cancelado → salir del bucle
                     break;
                 }
             }
@@ -81,13 +93,7 @@ public static class RaidAlertService
 
     public static void StopMonitoring()
     {
-        try
-        {
-            _cts?.Cancel();
-        }
-        catch
-        {
-        }
+        try { _cts?.Cancel(); } catch { }
 
         _cts = null;
         _currentArray = null;
@@ -95,14 +101,12 @@ public static class RaidAlertService
         _lastDetail = "";
     }
 
-    // ----------------- HELPERS SEGUROS -----------------
-
+    // ============================================================
+    // HELPERS SEGUROS
+    // ============================================================
     private static string SafeGetMdstat()
     {
-        try
-        {
-            return MdadmService.GetMdstat() ?? string.Empty;
-        }
+        try { return MdadmService.GetMdstat() ?? string.Empty; }
         catch (Exception ex)
         {
             LogService.Error($"[RaidAlertService] GetMdstat error: {ex.Message}");
@@ -112,10 +116,7 @@ public static class RaidAlertService
 
     private static string SafeGetDetail(string arrayName)
     {
-        try
-        {
-            return MdadmService.GetDetail(arrayName) ?? string.Empty;
-        }
+        try { return MdadmService.GetDetail(arrayName) ?? string.Empty; }
         catch (Exception ex)
         {
             LogService.Error($"[RaidAlertService] GetDetail({arrayName}) error: {ex.Message}");
@@ -125,10 +126,7 @@ public static class RaidAlertService
 
     private static bool SafeIsDegraded(string arrayName)
     {
-        try
-        {
-            return MdadmService.IsDegraded(arrayName);
-        }
+        try { return MdadmService.IsDegraded(arrayName); }
         catch (Exception ex)
         {
             LogService.Error($"[RaidAlertService] IsDegraded({arrayName}) error: {ex.Message}");
@@ -138,10 +136,7 @@ public static class RaidAlertService
 
     private static bool SafeIsResyncing(string arrayName)
     {
-        try
-        {
-            return MdadmService.IsResyncing(arrayName);
-        }
+        try { return MdadmService.IsResyncing(arrayName); }
         catch (Exception ex)
         {
             LogService.Error($"[RaidAlertService] IsResyncing({arrayName}) error: {ex.Message}");
@@ -149,8 +144,9 @@ public static class RaidAlertService
         }
     }
 
-    // ----------------- LÓGICA DE ALERTA -----------------
-
+    // ============================================================
+    // ALERTA CON COOLDOWN GLOBAL
+    // ============================================================
     private static void TryAlert(Action<string> onAlert, string message)
     {
         var now = DateTime.UtcNow;
@@ -171,25 +167,23 @@ public static class RaidAlertService
         }
     }
 
-    // ----------------- PARSEO DE MDSTAT -----------------
-
-    private static bool HasFaultyDisk(string mdstat, string arrayName)
+    // ============================================================
+    // DETECTAR DISCO FALLADO EN MDSTAT
+    // ============================================================
+    private static bool HasFaultyDisk(string mdstat, string baseName)
     {
         if (string.IsNullOrWhiteSpace(mdstat))
             return false;
 
-        // mdstat suele tener líneas tipo:
-        // md0 : active raid1 sda1[0] sdb1[1](F)
-        // o "faulty" en la línea del array
         var lines = mdstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        // Buscar la línea del array
-        var line = lines.FirstOrDefault(l => l.Contains(arrayName + " ", StringComparison.Ordinal) ||
-                                             l.StartsWith(arrayName + " :", StringComparison.Ordinal));
+        var line = lines.FirstOrDefault(l =>
+            l.StartsWith(baseName + " ", StringComparison.OrdinalIgnoreCase) ||
+            l.Contains(baseName + " :", StringComparison.OrdinalIgnoreCase));
+
         if (line == null)
             return false;
 
-        // Si contiene "faulty" o "(F)" → disco fallado
         if (line.Contains("faulty", StringComparison.OrdinalIgnoreCase))
             return true;
 
@@ -199,25 +193,32 @@ public static class RaidAlertService
         return false;
     }
 
+    // ============================================================
+    // EXTRAER VELOCIDAD DE RESYNC
+    // ============================================================
     private static string ExtractSpeed(string detail)
     {
         if (string.IsNullOrWhiteSpace(detail))
             return "0";
 
-        // mdadm --detail suele tener líneas tipo:
-        // "  Resyncing :  12.3% complete ... speed=12345K/sec"
-        // Buscamos "speed=" y "K/sec"
         var idx = detail.IndexOf("speed=", StringComparison.OrdinalIgnoreCase);
         if (idx < 0)
             return "0";
 
-        var end = detail.IndexOf("K/sec", idx, StringComparison.OrdinalIgnoreCase);
+        var end = detail.IndexOf("/sec", idx, StringComparison.OrdinalIgnoreCase);
         if (end < 0)
             return "0";
 
         var raw = detail.Substring(idx + 6, end - (idx + 6)).Trim();
 
-        // A veces puede venir con decimales o espacios raros → nos quedamos con dígitos
+        // Convertir M/sec a KB/s si es necesario
+        if (raw.EndsWith("M", StringComparison.OrdinalIgnoreCase))
+        {
+            var num = new string(raw.Where(char.IsDigit).ToArray());
+            if (int.TryParse(num, out var m))
+                return (m * 1024).ToString();
+        }
+
         var digits = new string(raw.Where(char.IsDigit).ToArray());
         return string.IsNullOrEmpty(digits) ? "0" : digits;
     }

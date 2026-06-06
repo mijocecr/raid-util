@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
@@ -14,15 +15,15 @@ namespace RAID_Util.Views;
 
 public partial class ArrayConfigWindow : Window
 {
-    private readonly string _arrayName;
+    private readonly RaidArrayInfo _array;
     private readonly ArrayConfig _config;
 
-    public ArrayConfigWindow(string arrayName)
+    public ArrayConfigWindow(RaidArrayInfo array)
     {
         InitializeComponent();
 
-        _arrayName = arrayName;
-        _config = ArrayConfigService.Load(arrayName);
+        _array = array;                       // ⭐ Recibimos el array completo
+        _config = ArrayConfigService.Load(array.BaseName);
 
         LoadUI();
         HookEvents();
@@ -109,7 +110,7 @@ public partial class ArrayConfigWindow : Window
     }
 
     // ============================================================
-    // ⭐ BuildMountOptions FINAL (sin "users", sin basura)
+    // ⭐ BuildMountOptions FINAL
     // ============================================================
     private string BuildMountOptions()
     {
@@ -126,11 +127,7 @@ public partial class ArrayConfigWindow : Window
 
     private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog
-        {
-            Title = "Select mount point"
-        };
-
+        var dialog = new OpenFolderDialog { Title = "Select mount point" };
         var result = await dialog.ShowAsync(this);
 
         if (!string.IsNullOrWhiteSpace(result))
@@ -159,24 +156,34 @@ public partial class ArrayConfigWindow : Window
         // ============================
         if (TgPersistMount.IsChecked == true)
         {
-            if (string.IsNullOrWhiteSpace(TxtMountPoint.Text))
+            var mp = TxtMountPoint.Text ?? "";
+
+            if (string.IsNullOrWhiteSpace(mp))
             {
                 await ShowError("Mount point is required when persistence is enabled.");
                 return;
             }
 
-            if (!TxtMountPoint.Text.StartsWith("/"))
+            if (!mp.StartsWith("/"))
             {
                 await ShowError("Mount point must be an absolute path.");
                 return;
             }
 
-            if (TxtMountPoint.Text == "/" ||
-                TxtMountPoint.Text == "/home" ||
-                TxtMountPoint.Text == "/usr" ||
-                TxtMountPoint.Text == "/root")
+            var forbidden = new[]
+            {
+                "/", "/home", "/usr", "/root", "/etc", "/dev", "/proc", "/sys", "/run", "/tmp"
+            };
+
+            if (Array.Exists(forbidden, x => x == mp))
             {
                 await ShowError("This mount point is not allowed.");
+                return;
+            }
+
+            if (!Directory.Exists(mp))
+            {
+                await ShowError("Mount point directory does not exist.");
                 return;
             }
         }
@@ -191,7 +198,7 @@ public partial class ArrayConfigWindow : Window
         }
 
         // ============================
-        // 4) VALIDACIÓN DE PERFORMANCE
+        // 4) PERFORMANCE
         // ============================
         if (NumResyncPriority.Value is null ||
             NumResyncPriority.Value < 1 || NumResyncPriority.Value > 200000)
@@ -208,24 +215,18 @@ public partial class ArrayConfigWindow : Window
         }
 
         // ============================
-        // 5) VALIDACIÓN DE PERMISOS
+        // 5) PERMISOS
         // ============================
-        if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text))
+        if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text) ||
+            !Regex.IsMatch(TxtMountPermissions.Text, @"^[0-7]{3}$"))
         {
-            await ShowError("Permissions cannot be empty.");
-            return;
-        }
-
-        if (!Regex.IsMatch(TxtMountPermissions.Text, @"^[0-7]{3}$"))
-        {
-            await ShowError("Permissions must be a 3‑digit octal value (e.g., 755, 775, 777).");
+            await ShowError("Permissions must be a 3‑digit octal value (e.g., 755).");
             return;
         }
 
         // ============================
         // 6) GUARDAR CONFIG
         // ============================
-
         _config.Name = TxtName.Text ?? "";
         _config.FsLabel = TxtFsLabel.Text ?? "";
 
@@ -247,13 +248,12 @@ public partial class ArrayConfigWindow : Window
         _config.AlertDiskFail = TgAlertDiskFail.IsChecked ?? false;
         _config.AlertSlowResync = TgAlertSlowResync.IsChecked ?? false;
 
-        ArrayConfigService.Save(_arrayName, _config);
+        ArrayConfigService.Save(_array.BaseName, _config);
 
         // ============================
-        // 7) FSTAB
+        // 7) FSTAB (USAR RUTA REAL)
         // ============================
-
-        var device = $"/dev/{_arrayName}";
+        var device = _array.Path;   // ⭐ CORRECTO
         var mountPoint = _config.MountPoint;
         var options = BuildMountOptions();
 
@@ -283,7 +283,7 @@ public partial class ArrayConfigWindow : Window
         // ============================
         try
         {
-            MdadmService.ApplyConfig(_arrayName, _config);
+            MdadmService.ApplyConfig(_array.BaseName, _config);
         }
         catch (Exception ex)
         {

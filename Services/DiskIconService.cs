@@ -14,7 +14,7 @@ public static class DiskIconService
         // ============================
         // 1) NVMe (detección REAL)
         // ============================
-        if (n.StartsWith("nvme"))
+        if (n.StartsWith("nvme") || m.Contains("nvme"))
             return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
 
         // ============================
@@ -24,9 +24,14 @@ public static class DiskIconService
             return "avares://RAID-Util/Assets/Icons/disk-usb.png";
 
         // ============================
-        // 3) Discos virtuales (FileIO, loop, dm, nbd, zram…)
+        // 3) Discos virtuales (name o model)
         // ============================
-        if (m.Contains("virtual") ||
+        if (n.StartsWith("loop") ||
+            n.StartsWith("dm-") ||
+            n.StartsWith("mapper") ||
+            n.StartsWith("nbd") ||
+            n.StartsWith("zram") ||
+            m.Contains("virtual") ||
             m.Contains("vmware") ||
             m.Contains("qemu") ||
             m.Contains("vbox") ||
@@ -40,7 +45,9 @@ public static class DiskIconService
             m.Contains("img") ||
             m.Contains("qcow") ||
             m.Contains("vmdk"))
+        {
             return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
+        }
 
         // ============================
         // 4) HDD

@@ -7,8 +7,37 @@ public static class LogService
 {
     private static readonly object _lock = new();
 
-    private static string LogFilePath =>
-        Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
+    private static string LogFilePath
+    {
+        get
+        {
+            var cfg = ConfigManager.Get();
+
+            // Validar LogsPath
+            var dir = cfg.LogsPath;
+
+            if (string.IsNullOrWhiteSpace(dir))
+                dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".config",
+                    "raid-util",
+                    "logs"
+                );
+
+            // Asegurar ruta absoluta
+            if (!Path.IsPathRooted(dir))
+            {
+                dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".config",
+                    "raid-util",
+                    dir
+                );
+            }
+
+            return Path.Combine(dir, "raid-util.log");
+        }
+    }
 
     // ============================================================
     //  MÉTODO PRINCIPAL (siempre escribe)
@@ -56,10 +85,10 @@ public static class LogService
     {
         try
         {
-            var logDir = ConfigManager.Get().LogsPath;
+            var dir = Path.GetDirectoryName(LogFilePath);
 
-            if (!Directory.Exists(logDir))
-                Directory.CreateDirectory(logDir);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
         }
         catch
         {

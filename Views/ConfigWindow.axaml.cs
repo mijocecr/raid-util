@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using RAID_Util.Models;
@@ -56,6 +58,38 @@ public partial class ConfigWindow : Window
     }
 
     // ============================================================
+    // VALIDAR Y NORMALIZAR LOGSPATH
+    // ============================================================
+    private string NormalizeLogsPath(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return _config.LogsPath;
+
+        var path = input.Trim();
+
+        // Convertir rutas relativas a absolutas
+        if (!Path.IsPathRooted(path))
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            path = Path.Combine(home, ".config", "raid-util", path);
+        }
+
+        // Crear si no existe
+        try
+        {
+            if (!Directory.Exists(path))
+                Directory.CreateDirectory(path);
+        }
+        catch
+        {
+            // fallback seguro
+            return _config.LogsPath;
+        }
+
+        return path;
+    }
+
+    // ============================================================
     // GUARDAR CONFIG DESDE LOS CONTROLES
     // ============================================================
     private void SaveConfig()
@@ -64,10 +98,8 @@ public partial class ConfigWindow : Window
         _config.RebuildRefreshMs = ParseInt(RebuildRefreshBox.Text, 500);
         _config.HotplugRefreshMs = ParseInt(HotplugRefreshBox.Text, 1500);
 
-        _config.LogsPath =
-            string.IsNullOrWhiteSpace(LogsPathBox.Text)
-                ? _config.LogsPath
-                : LogsPathBox.Text;
+        // ⭐ Normalización robusta
+        _config.LogsPath = NormalizeLogsPath(LogsPathBox.Text);
 
         _config.LogLevel =
             LogLevelCombo.SelectedIndex is >= 0 and <= 2

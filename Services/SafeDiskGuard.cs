@@ -1,201 +1,148 @@
-using System;
-using System.Linq;
+using RAID_Util.Core;
 using RAID_Util.Models;
+using RAID_Util.Helpers;
 
 namespace RAID_Util.Services;
 
 public static class SafeDiskGuard
 {
-    // ============================================================
-    //  VALIDACIONES PÚBLICAS (ARRAY-LEVEL)
-    // ============================================================
-
-    public static bool CanModifyArray(RaidArrayInfo array, out string reason)
-    {
-        // No se puede modificar un array montado
-        if (array.IsMounted)
-        {
-            reason = $"El array {array.Name} está montado en {array.MountPath}. No se puede modificar.";
-            return false;
-        }
-
-        // No se puede modificar un array en estado crítico
-        if (array.State == "Failed")
-        {
-            reason = $"El array {array.Name} está en estado FAILED. No se puede modificar.";
-            return false;
-        }
-
-        // Validar discos
-        if (!ValidateArrayDisks(array, out reason))
-            return false;
-
-        reason = "";
-        return true;
-    }
-
-    public static bool CanStopArray(RaidArrayInfo array, out string reason)
-    {
-        // No parar arrays en reconstrucción
-        if (array.State == "Rebuilding")
-        {
-            reason = $"El array {array.Name} está reconstruyéndose. No se puede detener.";
-            return false;
-        }
-
-        // No parar arrays en estado crítico
-        if (array.State == "Failed")
-        {
-            reason = $"El array {array.Name} está en estado FAILED. No se puede detener.";
-            return false;
-        }
-
-        // Validar discos
-        if (!ValidateArrayDisks(array, out reason))
-            return false;
-
-        reason = "";
-        return true;
-    }
-
-    public static bool CanFormatArray(RaidArrayInfo array, out string reason)
-    {
-        // No formatear si está montado
-        if (array.IsMounted)
-        {
-            reason = $"El array {array.Name} está montado. No se puede formatear.";
-            return false;
-        }
-
-        // No formatear si está degradado
-        if (array.State == "Degraded")
-        {
-            reason = $"El array {array.Name} está degradado. No se puede formatear.";
-            return false;
-        }
-
-        // Validar discos
-        if (!ValidateArrayDisks(array, out reason))
-            return false;
-
-        reason = "";
-        return true;
-    }
-
-    public static bool CanExpandArray(RaidArrayInfo array, out string reason)
-    {
-        // No expandir si está montado
-        if (array.IsMounted)
-        {
-            reason = $"El array {array.Name} está montado. No se puede expandir.";
-            return false;
-        }
-
-        // No expandir si está degradado
-        if (array.State == "Degraded")
-        {
-            reason = $"El array {array.Name} está degradado. No se puede expandir.";
-            return false;
-        }
-
-        // No expandir si está en rebuild
-        if (array.State == "Rebuilding")
-        {
-            reason = $"El array {array.Name} está reconstruyéndose. No se puede expandir.";
-            return false;
-        }
-
-        // Validar discos
-        if (!ValidateArrayDisks(array, out reason))
-            return false;
-
-        reason = "";
-        return true;
-    }
-
-    public static bool CanRepairArray(RaidArrayInfo array, out string reason)
-    {
-        // No reparar si está montado
-        if (array.IsMounted)
-        {
-            reason = $"El array {array.Name} está montado. No se puede reparar.";
-            return false;
-        }
-
-        // No reparar si está en rebuild
-        if (array.State == "Rebuilding")
-        {
-            reason = $"El array {array.Name} ya está reconstruyéndose. No se puede reparar.";
-            return false;
-        }
-
-        // Validar discos
-        if (!ValidateArrayDisks(array, out reason))
-            return false;
-
-        reason = "";
-        return true;
-    }
+    private const int ERROR_TIMEOUT = 8000;
+    private const int WARNING_TIMEOUT = 6000;
+    private const int INFO_TIMEOUT = 4000;
 
     // ============================================================
-    //  VALIDACIÓN INTERNA DE TODOS LOS DISCOS DEL ARRAY
+    // MÉTODO PRINCIPAL
     // ============================================================
-
-    private static bool ValidateArrayDisks(RaidArrayInfo array, out string reason)
+    public static bool CanModify(RaidDiskInfo disk)
     {
-        foreach (var d in array.Disks)
+        // -------------------------------
+        // 1. DISCO DEL SISTEMA
+        // -------------------------------
+        if (disk.IsSystemDisk)
         {
-            // No permitir discos del sistema
-            if (d.IsSystemDisk)
-            {
-                reason = $"El disco /dev/{d.Name} es un disco del sistema. Operación bloqueada.";
-                return false;
-            }
-
-            // No permitir discos NVMe internos
-            if (d.IsNvme && !d.IsVirtual && !d.IsUsb && !d.IsIscsi)
-            {
-                reason = $"El disco /dev/{d.Name} es NVMe interno. No se permite usarlo en operaciones RAID.";
-                return false;
-            }
-
-            // No permitir discos montados
-            if (d.IsMounted)
-            {
-                reason = $"El disco /dev/{d.Name} está montado en {d.MountPoint}.";
-                return false;
-            }
-
-            // No permitir discos con filesystem
-            if (d.HasFileSystem)
-            {
-                reason = $"El disco /dev/{d.Name} contiene un filesystem ({d.Filesystem}).";
-                return false;
-            }
-
-            // No permitir discos con particiones
-            if (d.HasPartitions)
-            {
-                reason = $"El disco /dev/{d.Name} contiene particiones.";
-                return false;
-            }
-
-            // No permitir discos con GPT/MBR
-            if (d.HasValidPartitionTable)
-            {
-                reason = $"El disco /dev/{d.Name} tiene una tabla de particiones válida (GPT/MBR).";
-                return false;
-            }
-
-            // No permitir discos RAID inactivos
-            if (d.IsRaidInactiveMember)
-            {
-                reason = $"El disco /dev/{d.Name} pertenece a un array RAID inactivo.";
-                return false;
-            }
+            NotificadorLinux.Enviar(
+                "This disk contains system partitions (/, /boot or EFI). Destructive operations are blocked for safety.",
+                ERROR_TIMEOUT,
+                "critical",
+                "raid-util"
+            );
+            return false;
         }
 
-        reason = "";
+        // -------------------------------
+        // 2. DISCO MONTADO
+        // -------------------------------
+        if (!string.IsNullOrWhiteSpace(disk.MountPath))
+        {
+            NotificadorLinux.Enviar(
+                "This disk or one of its partitions is currently mounted. Unmount all partitions before performing this operation.",
+                ERROR_TIMEOUT,
+                "critical",
+                "raid-util"
+            );
+            return false;
+        }
+
+        // -------------------------------
+        // 3. DISCO CON FILESYSTEM
+        // -------------------------------
+        if (!string.IsNullOrWhiteSpace(disk.FsType))
+        {
+            NotificadorLinux.Enviar(
+                "This disk contains a valid filesystem. Wipe the disk before using it for RAID or JBOD.",
+                WARNING_TIMEOUT,
+                "normal",
+                "raid-util"
+            );
+            return false;
+        }
+
+        // -------------------------------
+        // 4. DISCO CON PARTICIONES
+        // -------------------------------
+        if (disk.Children.Count > 0)
+        {
+            NotificadorLinux.Enviar(
+                "This disk contains one or more partitions. Wipe the disk before using it for RAID or JBOD.",
+                WARNING_TIMEOUT,
+                "normal",
+                "raid-util"
+            );
+            return false;
+        }
+
+        // -------------------------------
+        // 5. DISCO USADO POR RAID
+        // -------------------------------
+        if (disk.IsUsedByRaid)
+        {
+            NotificadorLinux.Enviar(
+                "This disk is part of an active RAID array and cannot be modified. Use the RAID Arrays section to manage this device.",
+                ERROR_TIMEOUT,
+                "critical",
+                "raid-util"
+            );
+            return false;
+        }
+
+        // -------------------------------
+        // 6. DISCO ISCSI (limitado)
+        // -------------------------------
+        if (disk.IsIscsi)
+        {
+            NotificadorLinux.Enviar(
+                "This is an iSCSI disk. Only non-destructive operations are allowed unless the disk is empty.",
+                WARNING_TIMEOUT,
+                "normal",
+                "raid-util"
+            );
+
+            if (disk.Children.Count == 0 &&
+                string.IsNullOrWhiteSpace(disk.FsType) &&
+                !disk.IsUsedByRaid)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        // -------------------------------
+        // 7. DISCO USB (advertencia)
+        // -------------------------------
+        if (disk.IsUsb)
+        {
+            NotificadorLinux.Enviar(
+                "This is a USB disk. Using USB devices for RAID is not recommended.",
+                WARNING_TIMEOUT,
+                "normal",
+                "raid-util"
+            );
+        }
+
+        // -------------------------------
+        // 8. DISCO VIRTUAL (advertencia)
+        // -------------------------------
+        if (disk.IsVirtual)
+        {
+            NotificadorLinux.Enviar(
+                "This is a virtual disk. Some operations may behave differently depending on the environment.",
+                WARNING_TIMEOUT,
+                "normal",
+                "raid-util"
+            );
+        }
+
+        // -------------------------------
+        // 9. DISCO LISTO PARA USAR
+        // -------------------------------
+        NotificadorLinux.Enviar(
+            "This disk is ready to be used for RAID or JBOD.",
+            INFO_TIMEOUT,
+            "low",
+            "raid-util"
+        );
+
         return true;
     }
 }

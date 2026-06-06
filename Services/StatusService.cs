@@ -9,10 +9,6 @@ using RAID_Util.Models;
 
 namespace RAID_Util.Services;
 
-// ============================================================
-// MODELOS DE INFORMACIÓN PARA STATUS VIEW
-// ============================================================
-
 public class ArrayRiskInfo
 {
     public string Name { get; set; } = "";
@@ -26,14 +22,10 @@ public class DiskAlertInfo
     public string Alert { get; set; } = "";
 }
 
-// ============================================================
-// SERVICIO PRINCIPAL DE ESTADO RAID
-// ============================================================
-
 public class StatusService
 {
     // ============================================================
-    // EJECUCIÓN DE COMANDOS DEL SISTEMA
+    // EJECUCIÓN DE COMANDOS
     // ============================================================
     private static async Task<(string StdOut, string StdErr)> Run(string cmd, string args)
     {
@@ -49,19 +41,12 @@ public class StatusService
                 CreateNoWindow = true
             };
 
-            using var process = new Process
-            {
-                StartInfo = psi,
-                EnableRaisingEvents = false
-            };
-
+            using var process = new Process { StartInfo = psi };
             process.Start();
 
-            // Leer stdout y stderr en paralelo
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
 
-            // Esperar a que termine
             await Task.WhenAll(stdoutTask, stderrTask);
 
             return (stdoutTask.Result.Trim(), stderrTask.Result.Trim());
@@ -72,41 +57,23 @@ public class StatusService
         }
     }
 
-
     // ============================================================
-    // ESTADO GLOBAL DEL RAID
+    // ESTADO GLOBAL
     // ============================================================
-
-    /// <summary>
-    ///     Devuelve el estado general del sistema RAID:
-    ///     Healthy, Warning, Critical o No RAID Detected.
-    /// </summary>
     public async Task<string> GetOverallRaidHealthAsync()
     {
         var arrays = await ParseMdstatAsync();
-
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        var anyDegraded = false;
-        var anyRebuilding = false;
+        bool anyDegraded = arrays.Any(a => a.Flags.Contains("_"));
+        bool anyRebuilding = arrays.Any(a => !string.IsNullOrWhiteSpace(a.RebuildProgress));
+        bool anyInactive = arrays.Any(a => !a.State.Contains("active", StringComparison.OrdinalIgnoreCase));
 
-        foreach (var arr in arrays)
-        {
-            // Flags como [UU], [U_], [__]
-            if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
-                anyDegraded = true;
+        if (anyInactive)
+            return "Critical";
 
-            // Reconstrucción activa
-            if (!string.IsNullOrWhiteSpace(arr.RebuildProgress))
-                anyRebuilding = true;
-
-            // Estado del array
-            if (!arr.State.Contains("active", StringComparison.OrdinalIgnoreCase))
-                anyDegraded = true;
-        }
-
-        if (anyDegraded && !anyRebuilding)
+        if (anyDegraded)
             return "Critical";
 
         if (anyRebuilding)
@@ -116,58 +83,28 @@ public class StatusService
     }
 
     // ============================================================
-    // RESÚMENES NUMÉRICOS
+    // RESÚMENES
     // ============================================================
-
-    /// <summary>
-    ///     Devuelve un resumen de arrays RAID:
-    ///     Total, Healthy, Degraded.
-    /// </summary>
     public async Task<string> GetArraysSummaryAsync()
     {
         var arrays = await ParseMdstatAsync();
-
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        var total = arrays.Count;
-        var healthy = 0;
-        var degraded = 0;
-
-        foreach (var arr in arrays)
-        {
-            var isDegraded = false;
-
-            if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
-                isDegraded = true;
-
-            if (!arr.State.Contains("active", StringComparison.OrdinalIgnoreCase))
-                isDegraded = true;
-
-            if (isDegraded)
-                degraded++;
-            else
-                healthy++;
-        }
+        int total = arrays.Count;
+        int degraded = arrays.Count(a => a.Flags.Contains("_") || !a.State.Contains("active"));
+        int healthy = total - degraded;
 
         return $"Total: {total} | Healthy: {healthy} | Degraded: {degraded}";
     }
 
-    /// <summary>
-    ///     Resumen de discos (pendiente de implementación real).
-    /// </summary>
     public async Task<string> GetDisksSummaryAsync()
     {
         var arrays = await ParseMdstatAsync();
-
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        var total = 0;
-        var active = 0;
-        var faulty = 0;
-        var spare = 0;
-        var smartAlerts = 0;
+        int total = 0, active = 0, faulty = 0, spare = 0, smartAlerts = 0;
 
         foreach (var arr in arrays)
         {
@@ -177,20 +114,15 @@ public class StatusService
             {
                 total++;
 
-                // Estado ACTIVE
-                if (state.Contains("active", StringComparison.OrdinalIgnoreCase) ||
-                    state.Contains("sync", StringComparison.OrdinalIgnoreCase))
+                if (state.Contains("active") || state.Contains("sync"))
                     active++;
 
-                // Estado FAULTY
-                if (state.Contains("faulty", StringComparison.OrdinalIgnoreCase))
+                if (state.Contains("faulty"))
                     faulty++;
 
-                // Estado SPARE
-                if (state.Contains("spare", StringComparison.OrdinalIgnoreCase))
+                if (state.Contains("spare"))
                     spare++;
 
-                // SMART
                 var smart = await GetSmartHealthAsync(device);
                 if (smart != null)
                     smartAlerts++;
@@ -200,34 +132,24 @@ public class StatusService
         return $"Total: {total} | Active: {active} | Faulty: {faulty} | Spare: {spare} | SMART Alerts: {smartAlerts}";
     }
 
-
-    /// <summary>
-    ///     Devuelve un resumen de reconstrucciones activas.
-    /// </summary>
     public async Task<string> GetRebuildSummaryAsync()
     {
         var arrays = await ParseMdstatAsync();
-
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        var rebuilding = arrays
-            .Where(a => !string.IsNullOrWhiteSpace(a.RebuildProgress))
-            .ToList();
-
+        var rebuilding = arrays.Where(a => !string.IsNullOrWhiteSpace(a.RebuildProgress)).ToList();
         if (rebuilding.Count == 0)
             return "No rebuilds in progress";
 
-        var fastest = rebuilding
-            .OrderByDescending(a =>
-            {
-                if (a.RebuildProgress?.EndsWith("%") == true &&
-                    double.TryParse(a.RebuildProgress.TrimEnd('%'), out var val))
-                    return val;
+        var fastest = rebuilding.OrderByDescending(a =>
+        {
+            if (a.RebuildProgress.EndsWith("%") &&
+                double.TryParse(a.RebuildProgress.TrimEnd('%'), out var val))
+                return val;
 
-                return 0;
-            })
-            .First();
+            return 0;
+        }).First();
 
         return $"Active: {rebuilding.Count} | Fastest: {fastest.Name} ({fastest.RebuildProgress})";
     }
@@ -235,40 +157,33 @@ public class StatusService
     // ============================================================
     // ARRAYS EN RIESGO
     // ============================================================
-
-    /// <summary>
-    ///     Devuelve una lista de arrays en estado crítico, degradado o en reconstrucción.
-    /// </summary>
     public async Task<IList<ArrayRiskInfo>> GetArraysAtRiskAsync()
     {
         var result = new List<ArrayRiskInfo>();
         var arrays = await ParseMdstatAsync();
 
-        if (arrays.Count == 0)
-            return result;
-
         foreach (var arr in arrays)
         {
-            var isDegraded = !string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_");
-            var isRebuilding = !string.IsNullOrWhiteSpace(arr.RebuildProgress);
-            var isInactive = !arr.State.Contains("active", StringComparison.OrdinalIgnoreCase);
+            bool degraded = arr.Flags.Contains("_");
+            bool rebuilding = !string.IsNullOrWhiteSpace(arr.RebuildProgress);
+            bool inactive = !arr.State.Contains("active");
 
-            if (!isDegraded && !isRebuilding && !isInactive)
+            if (!degraded && !rebuilding && !inactive)
                 continue;
 
             var info = new ArrayRiskInfo { Name = arr.Name };
 
-            if (isInactive)
+            if (inactive)
             {
                 info.Status = "INACTIVE";
                 info.Details = $"Array is inactive — Level: {arr.Level}";
             }
-            else if (isRebuilding)
+            else if (rebuilding)
             {
                 info.Status = "RECOVERING";
                 info.Details = $"Progress: {arr.RebuildProgress} — ETA: {arr.RebuildEta}";
             }
-            else if (isDegraded)
+            else if (degraded)
             {
                 info.Status = "DEGRADED";
                 info.Details = $"Flags: {arr.Flags} — Devices: {string.Join(", ", arr.Devices)}";
@@ -283,54 +198,38 @@ public class StatusService
     // ============================================================
     // ALERTAS DE DISCO
     // ============================================================
-
-    /// <summary>
-    ///     Devuelve alertas de discos basadas en mdstat, mdadm y SMART.
-    /// </summary>
     public async Task<IList<DiskAlertInfo>> GetDiskAlertsAsync()
     {
         var alerts = new List<DiskAlertInfo>();
         var arrays = await ParseMdstatAsync();
 
-        // 1) Alertas basadas en mdstat
         foreach (var arr in arrays)
-            if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
+        {
+            if (arr.Flags.Contains("_"))
                 alerts.Add(new DiskAlertInfo
                 {
                     Device = arr.Name,
                     Alert = $"Array {arr.Name} degraded — Flags: {arr.Flags}"
                 });
 
-        // 2) Alertas basadas en mdadm
-        foreach (var arr in arrays)
-        {
             var diskStates = await GetMdadmDiskStatesAsync(arr.Name);
 
             foreach (var (device, state) in diskStates)
             {
-                if (state.Contains("faulty", StringComparison.OrdinalIgnoreCase))
+                if (state.Contains("faulty"))
                     alerts.Add(new DiskAlertInfo
                     {
                         Device = device,
                         Alert = $"Disk {device} is FAULTY in {arr.Name}"
                     });
 
-                if (state.Contains("spare", StringComparison.OrdinalIgnoreCase))
+                if (state.Contains("spare"))
                     alerts.Add(new DiskAlertInfo
                     {
                         Device = device,
                         Alert = $"Disk {device} is SPARE in {arr.Name}"
                     });
-            }
-        }
 
-        // 3) Alertas SMART
-        foreach (var arr in arrays)
-        {
-            var diskStates = await GetMdadmDiskStatesAsync(arr.Name);
-
-            foreach (var (device, _) in diskStates)
-            {
                 var smart = await GetSmartHealthAsync(device);
                 if (smart != null)
                     alerts.Add(new DiskAlertInfo
@@ -345,12 +244,8 @@ public class StatusService
     }
 
     // ============================================================
-    // EVENTOS RECIENTES
+    // EVENTOS
     // ============================================================
-
-    /// <summary>
-    ///     Genera una lista de eventos RAID basados en el estado actual.
-    /// </summary>
     public async Task<IList<string>> GetRecentEventsAsync()
     {
         var events = new List<string>();
@@ -364,18 +259,18 @@ public class StatusService
 
         foreach (var arr in arrays)
         {
-            if (!arr.State.Contains("active", StringComparison.OrdinalIgnoreCase))
+            if (!arr.State.Contains("active"))
                 events.Add($"{arr.Name}: Array is INACTIVE (state: {arr.State})");
 
-            if (!string.IsNullOrWhiteSpace(arr.Flags) && arr.Flags.Contains("_"))
+            if (arr.Flags.Contains("_"))
                 events.Add($"{arr.Name}: Degraded — Flags: {arr.Flags}");
 
             if (!string.IsNullOrWhiteSpace(arr.RebuildProgress))
                 events.Add($"{arr.Name}: Recovery in progress — {arr.RebuildProgress} (ETA: {arr.RebuildEta})");
 
             if (string.IsNullOrWhiteSpace(arr.RebuildProgress) &&
-                (string.IsNullOrWhiteSpace(arr.Flags) || !arr.Flags.Contains("_")) &&
-                arr.State.Contains("active", StringComparison.OrdinalIgnoreCase))
+                !arr.Flags.Contains("_") &&
+                arr.State.Contains("active"))
                 events.Add($"{arr.Name}: Healthy — All disks OK");
         }
 
@@ -385,7 +280,6 @@ public class StatusService
     // ============================================================
     // PARSEO DE /proc/mdstat
     // ============================================================
-
     public async Task<List<MdstatArray>> ParseMdstatAsync()
     {
         var result = new List<MdstatArray>();
@@ -402,7 +296,6 @@ public class StatusService
         {
             var line = raw.Trim();
 
-            // Línea que define un array
             if (line.StartsWith("md"))
             {
                 current = new MdstatArray();
@@ -410,10 +303,9 @@ public class StatusService
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
                 current.Name = parts[0].TrimEnd(':');
-                current.State = parts[2];
-                current.Level = parts[3];
+                current.State = parts.Length > 2 ? parts[2] : "";
+                current.Level = parts.Length > 3 ? parts[3] : "";
 
-                // Discos
                 for (var i = 4; i < parts.Length; i++)
                     if (parts[i].Contains("["))
                         current.Devices.Add(parts[i]);
@@ -422,14 +314,12 @@ public class StatusService
                 continue;
             }
 
-            // Flags como [UU] o [U_]
-            if (current != null && line.Contains("[") && line.Contains("]") && !line.Contains("recovery"))
+            if (current != null && line.Contains("[") && line.Contains("]"))
             {
                 current.Flags = line.Trim();
                 continue;
             }
 
-            // Progreso de reconstrucción
             if (current != null && line.Contains("recovery"))
             {
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -451,12 +341,13 @@ public class StatusService
     // ============================================================
     // MDADM --DETAIL
     // ============================================================
-
     private async Task<List<(string Device, string State)>> GetMdadmDiskStatesAsync(string arrayName)
     {
         var result = new List<(string, string)>();
 
-        var (outp, _) = await Run("mdadm", $"--detail /dev/{arrayName}");
+        var path = MdadmService.GetDetail(arrayName);
+        var (outp, _) = await Run("mdadm", $"--detail {path}");
+
         if (string.IsNullOrWhiteSpace(outp))
             return result;
 
@@ -466,14 +357,19 @@ public class StatusService
         {
             var trimmed = line.Trim();
 
-            if (trimmed.Contains("/dev/"))
-            {
-                var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var dev = parts.Last();
-                var state = string.Join(' ', parts.Skip(3).Take(parts.Length - 4));
+            if (!trimmed.Contains("/dev/"))
+                continue;
 
-                result.Add((dev, state));
-            }
+            var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var dev = parts.Last();
+            var state = string.Join(' ', parts.Where(p =>
+                p.Equals("active", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("faulty", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("spare", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("sync", StringComparison.OrdinalIgnoreCase)));
+
+            result.Add((dev, state));
         }
 
         return result;
@@ -482,10 +378,9 @@ public class StatusService
     // ============================================================
     // SMART HEALTH
     // ============================================================
-
     private async Task<string?> GetSmartHealthAsync(string device)
     {
-        var (outp, _) = await Run("smartctl", $"-H {device}");
+        var (outp, _) = await Run("smartctl", $"-H /dev/{device}");
 
         if (string.IsNullOrWhiteSpace(outp))
             return null;
