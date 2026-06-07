@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using RAID_Util.Helpers;
 using RAID_Util.Models;
 
 namespace RAID_Util.Services;
@@ -16,9 +17,17 @@ public class RaidStateService
 
     public async Task RefreshAsync()
     {
+        // ⭐ NO permitir llamadas antes de que MainWindow valide sudo
+        if (!Credentials.AllowRaidCalls)
+        {
+            LogService.Debug("[STATE] RefreshAsync aborted → AllowRaidCalls = false");
+            return;
+        }
+
         _ = Task.Run(async () =>
         {
-            var raidService = new RaidService();
+            // ⭐ FIX: usar Singleton
+            var raidService = RaidService.Instance;
 
             var arrays = await raidService.GetArraysAsync();
             var disks = await raidService.GetAllDisksAsync();
@@ -33,4 +42,3 @@ public class RaidStateService
         });
     }
 }
-

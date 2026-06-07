@@ -1,11 +1,12 @@
-// File: RAID-Util/Services/StatusService.cs
-
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using RAID_Util.Core;
+using RAID_Util.Helpers;
 using RAID_Util.Models;
+using RAID_Util.Services;
 
 namespace RAID_Util.Services;
 
@@ -24,11 +25,16 @@ public class DiskAlertInfo
 
 public class StatusService
 {
+    private readonly RaidService _raid = RaidService.Instance;
+
     // ============================================================
-    // EJECUCIÓN DE COMANDOS
+    // SAFE COMMAND EXECUTION (FIXED)
     // ============================================================
     private static async Task<(string StdOut, string StdErr)> Run(string cmd, string args)
     {
+        if (!Credentials.AllowRaidCalls)
+            return ("", "");
+
         try
         {
             var psi = new ProcessStartInfo
@@ -41,13 +47,16 @@ public class StatusService
                 CreateNoWindow = true
             };
 
-            using var process = new Process { StartInfo = psi };
+            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             process.Start();
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
 
             await Task.WhenAll(stdoutTask, stderrTask);
+
+            // ⭐ CRÍTICO: evita congelamientos
+            await process.WaitForExitAsync();
 
             return (stdoutTask.Result.Trim(), stderrTask.Result.Trim());
         }
@@ -58,19 +67,22 @@ public class StatusService
     }
 
     // ============================================================
-    // ESTADO GLOBAL
+    // GLOBAL RAID HEALTH
     // ============================================================
     public async Task<string> GetOverallRaidHealthAsync()
     {
-        var arrays = await ParseMdstatAsync();
+        if (!Credentials.AllowRaidCalls)
+            return "Waiting for sudo...";
+
+        var arrays = await _raid.GetArraysAsync();
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        bool anyDegraded = arrays.Any(a => a.Flags.Contains("_"));
-        bool anyRebuilding = arrays.Any(a => !string.IsNullOrWhiteSpace(a.RebuildProgress));
-        bool anyInactive = arrays.Any(a => !a.State.Contains("active", StringComparison.OrdinalIgnoreCase));
+        bool anyDegraded = arrays.Any(a => a.State == RaidArrayState.Degraded);
+        bool anyRebuilding = arrays.Any(a => a.RebuildProgress > 0);
+        bool anyFailed = arrays.Any(a => a.State == RaidArrayState.Failed);
 
-        if (anyInactive)
+        if (anyFailed)
             return "Critical";
 
         if (anyDegraded)
@@ -83,110 +95,92 @@ public class StatusService
     }
 
     // ============================================================
-    // RESÚMENES
+    // SUMMARIES
     // ============================================================
     public async Task<string> GetArraysSummaryAsync()
     {
-        var arrays = await ParseMdstatAsync();
+        if (!Credentials.AllowRaidCalls)
+            return "Waiting...";
+
+        var arrays = await _raid.GetArraysAsync();
         if (arrays.Count == 0)
             return "No RAID Detected";
 
         int total = arrays.Count;
-        int degraded = arrays.Count(a => a.Flags.Contains("_") || !a.State.Contains("active"));
-        int healthy = total - degraded;
+        int degraded = arrays.Count(a => a.State == RaidArrayState.Degraded);
+        int healthy = arrays.Count(a => a.State == RaidArrayState.Clean || a.State == RaidArrayState.Active);
 
         return $"Total: {total} | Healthy: {healthy} | Degraded: {degraded}";
     }
 
     public async Task<string> GetDisksSummaryAsync()
     {
-        var arrays = await ParseMdstatAsync();
-        if (arrays.Count == 0)
+        if (!Credentials.AllowRaidCalls)
+            return "Waiting...";
+
+        var disks = await _raid.GetAllDisksAsync();
+        if (disks.Count == 0)
             return "No RAID Detected";
 
-        int total = 0, active = 0, faulty = 0, spare = 0, smartAlerts = 0;
+        int total = disks.Count;
+        int active = disks.Count(d => d.State == "OK");
+        int faulty = disks.Count(d => d.State == "faulty");
+        int spare = disks.Count(d => d.Role == "spare");
 
-        foreach (var arr in arrays)
-        {
-            var diskStates = await GetMdadmDiskStatesAsync(arr.Name);
-
-            foreach (var (device, state) in diskStates)
-            {
-                total++;
-
-                if (state.Contains("active") || state.Contains("sync"))
-                    active++;
-
-                if (state.Contains("faulty"))
-                    faulty++;
-
-                if (state.Contains("spare"))
-                    spare++;
-
-                var smart = await GetSmartHealthAsync(device);
-                if (smart != null)
-                    smartAlerts++;
-            }
-        }
-
-        return $"Total: {total} | Active: {active} | Faulty: {faulty} | Spare: {spare} | SMART Alerts: {smartAlerts}";
+        return $"Total: {total} | Active: {active} | Faulty: {faulty} | Spare: {spare}";
     }
 
     public async Task<string> GetRebuildSummaryAsync()
     {
-        var arrays = await ParseMdstatAsync();
+        if (!Credentials.AllowRaidCalls)
+            return "Waiting...";
+
+        var arrays = await _raid.GetArraysAsync();
         if (arrays.Count == 0)
             return "No RAID Detected";
 
-        var rebuilding = arrays.Where(a => !string.IsNullOrWhiteSpace(a.RebuildProgress)).ToList();
+        var rebuilding = arrays.Where(a => a.RebuildProgress > 0).ToList();
         if (rebuilding.Count == 0)
             return "No rebuilds in progress";
 
-        var fastest = rebuilding.OrderByDescending(a =>
-        {
-            if (a.RebuildProgress.EndsWith("%") &&
-                double.TryParse(a.RebuildProgress.TrimEnd('%'), out var val))
-                return val;
+        var fastest = rebuilding.OrderByDescending(a => a.RebuildProgress).First();
 
-            return 0;
-        }).First();
-
-        return $"Active: {rebuilding.Count} | Fastest: {fastest.Name} ({fastest.RebuildProgress})";
+        return $"Active: {rebuilding.Count} | Fastest: {fastest.Name} ({fastest.RebuildProgress}%)";
     }
 
     // ============================================================
-    // ARRAYS EN RIESGO
+    // ARRAYS AT RISK
     // ============================================================
     public async Task<IList<ArrayRiskInfo>> GetArraysAtRiskAsync()
     {
+        if (!Credentials.AllowRaidCalls)
+            return new List<ArrayRiskInfo>();
+
         var result = new List<ArrayRiskInfo>();
-        var arrays = await ParseMdstatAsync();
+        var arrays = await _raid.GetArraysAsync();
 
         foreach (var arr in arrays)
         {
-            bool degraded = arr.Flags.Contains("_");
-            bool rebuilding = !string.IsNullOrWhiteSpace(arr.RebuildProgress);
-            bool inactive = !arr.State.Contains("active");
-
-            if (!degraded && !rebuilding && !inactive)
+            // ⭐ Healthy = Clean o Active
+            if (arr.State == RaidArrayState.Clean || arr.State == RaidArrayState.Active)
                 continue;
 
             var info = new ArrayRiskInfo { Name = arr.Name };
 
-            if (inactive)
-            {
-                info.Status = "INACTIVE";
-                info.Details = $"Array is inactive — Level: {arr.Level}";
-            }
-            else if (rebuilding)
-            {
-                info.Status = "RECOVERING";
-                info.Details = $"Progress: {arr.RebuildProgress} — ETA: {arr.RebuildEta}";
-            }
-            else if (degraded)
+            if (arr.State == RaidArrayState.Degraded)
             {
                 info.Status = "DEGRADED";
-                info.Details = $"Flags: {arr.Flags} — Devices: {string.Join(", ", arr.Devices)}";
+                info.Details = $"{arr.Disks.Count} disks — degraded";
+            }
+            else if (arr.State == RaidArrayState.Rebuilding)
+            {
+                info.Status = "REBUILDING";
+                info.Details = $"{arr.RebuildProgress}% — ETA: {arr.RebuildETA}";
+            }
+            else if (arr.State == RaidArrayState.Failed)
+            {
+                info.Status = "FAILED";
+                info.Details = "Array is FAILED";
             }
 
             result.Add(info);
@@ -196,201 +190,69 @@ public class StatusService
     }
 
     // ============================================================
-    // ALERTAS DE DISCO
+    // DISK ALERTS
     // ============================================================
     public async Task<IList<DiskAlertInfo>> GetDiskAlertsAsync()
     {
-        var alerts = new List<DiskAlertInfo>();
-        var arrays = await ParseMdstatAsync();
+        if (!Credentials.AllowRaidCalls)
+            return new List<DiskAlertInfo>();
 
-        foreach (var arr in arrays)
+        var alerts = new List<DiskAlertInfo>();
+        var disks = await _raid.GetAllDisksAsync();
+
+        foreach (var d in disks)
         {
-            if (arr.Flags.Contains("_"))
+            if (d.State == "faulty")
                 alerts.Add(new DiskAlertInfo
                 {
-                    Device = arr.Name,
-                    Alert = $"Array {arr.Name} degraded — Flags: {arr.Flags}"
+                    Device = d.Name,
+                    Alert = $"Disk {d.Name} is FAULTY"
                 });
 
-            var diskStates = await GetMdadmDiskStatesAsync(arr.Name);
-
-            foreach (var (device, state) in diskStates)
-            {
-                if (state.Contains("faulty"))
-                    alerts.Add(new DiskAlertInfo
-                    {
-                        Device = device,
-                        Alert = $"Disk {device} is FAULTY in {arr.Name}"
-                    });
-
-                if (state.Contains("spare"))
-                    alerts.Add(new DiskAlertInfo
-                    {
-                        Device = device,
-                        Alert = $"Disk {device} is SPARE in {arr.Name}"
-                    });
-
-                var smart = await GetSmartHealthAsync(device);
-                if (smart != null)
-                    alerts.Add(new DiskAlertInfo
-                    {
-                        Device = device,
-                        Alert = smart
-                    });
-            }
+            if (d.Role == "spare")
+                alerts.Add(new DiskAlertInfo
+                {
+                    Device = d.Name,
+                    Alert = $"Disk {d.Name} is SPARE"
+                });
         }
 
         return alerts;
     }
 
     // ============================================================
-    // EVENTOS
+    // RECENT EVENTS
     // ============================================================
     public async Task<IList<string>> GetRecentEventsAsync()
     {
+        if (!Credentials.AllowRaidCalls)
+            return new List<string> { "Waiting for sudo..." };
+
         var events = new List<string>();
-        var arrays = await ParseMdstatAsync();
+        var arrays = await _raid.GetArraysAsync();
 
         if (arrays.Count == 0)
         {
-            events.Add("No RAID arrays detected on this system.");
+            events.Add("No RAID arrays detected.");
             return events;
         }
 
         foreach (var arr in arrays)
         {
-            if (!arr.State.Contains("active"))
-                events.Add($"{arr.Name}: Array is INACTIVE (state: {arr.State})");
+            if (arr.State == RaidArrayState.Failed)
+                events.Add($"{arr.Name}: FAILED");
 
-            if (arr.Flags.Contains("_"))
-                events.Add($"{arr.Name}: Degraded — Flags: {arr.Flags}");
+            if (arr.State == RaidArrayState.Degraded)
+                events.Add($"{arr.Name}: Degraded");
 
-            if (!string.IsNullOrWhiteSpace(arr.RebuildProgress))
-                events.Add($"{arr.Name}: Recovery in progress — {arr.RebuildProgress} (ETA: {arr.RebuildEta})");
+            if (arr.State == RaidArrayState.Rebuilding)
+                events.Add($"{arr.Name}: Rebuilding — {arr.RebuildProgress}% (ETA: {arr.RebuildETA})");
 
-            if (string.IsNullOrWhiteSpace(arr.RebuildProgress) &&
-                !arr.Flags.Contains("_") &&
-                arr.State.Contains("active"))
-                events.Add($"{arr.Name}: Healthy — All disks OK");
+            // ⭐ Healthy = Clean o Active
+            if (arr.State == RaidArrayState.Clean || arr.State == RaidArrayState.Active)
+                events.Add($"{arr.Name}: Healthy");
         }
 
         return events;
-    }
-
-    // ============================================================
-    // PARSEO DE /proc/mdstat
-    // ============================================================
-    public async Task<List<MdstatArray>> ParseMdstatAsync()
-    {
-        var result = new List<MdstatArray>();
-
-        var (text, _) = await Run("cat", "/proc/mdstat");
-        if (string.IsNullOrWhiteSpace(text))
-            return result;
-
-        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        MdstatArray? current = null;
-
-        foreach (var raw in lines)
-        {
-            var line = raw.Trim();
-
-            if (line.StartsWith("md"))
-            {
-                current = new MdstatArray();
-
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                current.Name = parts[0].TrimEnd(':');
-                current.State = parts.Length > 2 ? parts[2] : "";
-                current.Level = parts.Length > 3 ? parts[3] : "";
-
-                for (var i = 4; i < parts.Length; i++)
-                    if (parts[i].Contains("["))
-                        current.Devices.Add(parts[i]);
-
-                result.Add(current);
-                continue;
-            }
-
-            if (current != null && line.Contains("[") && line.Contains("]"))
-            {
-                current.Flags = line.Trim();
-                continue;
-            }
-
-            if (current != null && line.Contains("recovery"))
-            {
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var p in parts)
-                {
-                    if (p.EndsWith("%"))
-                        current.RebuildProgress = p;
-
-                    if (p.StartsWith("finish="))
-                        current.RebuildEta = p.Replace("finish=", "");
-                }
-            }
-        }
-
-        return result;
-    }
-
-    // ============================================================
-    // MDADM --DETAIL
-    // ============================================================
-    private async Task<List<(string Device, string State)>> GetMdadmDiskStatesAsync(string arrayName)
-    {
-        var result = new List<(string, string)>();
-
-        var path = MdadmService.GetDetail(arrayName);
-        var (outp, _) = await Run("mdadm", $"--detail {path}");
-
-        if (string.IsNullOrWhiteSpace(outp))
-            return result;
-
-        var lines = outp.Split('\n');
-
-        foreach (var line in lines)
-        {
-            var trimmed = line.Trim();
-
-            if (!trimmed.Contains("/dev/"))
-                continue;
-
-            var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            var dev = parts.Last();
-            var state = string.Join(' ', parts.Where(p =>
-                p.Equals("active", StringComparison.OrdinalIgnoreCase) ||
-                p.Equals("faulty", StringComparison.OrdinalIgnoreCase) ||
-                p.Equals("spare", StringComparison.OrdinalIgnoreCase) ||
-                p.Equals("sync", StringComparison.OrdinalIgnoreCase)));
-
-            result.Add((dev, state));
-        }
-
-        return result;
-    }
-
-    // ============================================================
-    // SMART HEALTH
-    // ============================================================
-    private async Task<string?> GetSmartHealthAsync(string device)
-    {
-        var (outp, _) = await Run("smartctl", $"-H /dev/{device}");
-
-        if (string.IsNullOrWhiteSpace(outp))
-            return null;
-
-        if (outp.Contains("FAILED", StringComparison.OrdinalIgnoreCase))
-            return "SMART FAIL";
-
-        if (outp.Contains("WARNING", StringComparison.OrdinalIgnoreCase))
-            return "SMART WARNING";
-
-        return null;
     }
 }

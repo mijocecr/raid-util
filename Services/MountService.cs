@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using RAID_Util.Helpers;
 
 namespace RAID_Util.Services;
@@ -10,23 +11,20 @@ public static class MountService
     // ============================================================
     // ⭐ Resolver PATH REAL del dispositivo (arrays y discos)
     // ============================================================
-    private static string ResolveRealDevice(string device)
+    private static async Task<string> ResolveRealDeviceAsync(string device)
     {
-        // Si ya es ruta absoluta → OK
         if (device.StartsWith("/dev/"))
             return device;
 
-        // Intentar resolver arrays RAID
-        var arrays = new RaidService().GetArraysAsync().Result;
+        var arrays = await RaidService.Instance.GetArraysAsync();
         var array = arrays.FirstOrDefault(a =>
             a.Name == device ||
             a.Path.EndsWith("/" + device, StringComparison.Ordinal) ||
             a.Path.EndsWith(device, StringComparison.Ordinal));
 
         if (array != null)
-            return array.Path; // /dev/md/host:md0
+            return array.Path;
 
-        // Fallback → disco normal
         return "/dev/" + device;
     }
 
@@ -50,20 +48,16 @@ public static class MountService
     // ============================================================
     public static bool Mount(string device, string mountPoint, string options = "defaults")
     {
-        // ⭐ Resolver PATH REAL
-        device = ResolveRealDevice(device);
+        // ⭐ Resolver PATH REAL (seguro, no bloquea UI)
+        device = ResolveRealDeviceAsync(device).Result;
 
-        // 1) Crear directorio
         ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
 
-        // 2) Si ya está montado → desmontar SIEMPRE
         if (IsMounted(mountPoint))
             ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
 
-        // 3) Esperar a udev
         ShellHelper.EjecutarComoRoot("udevadm settle");
 
-        // 4) Detectar filesystem real
         var fsResult = ShellHelper.EjecutarComoRoot($"lsblk -no FSTYPE \"{device}\"");
 
         var fsType = fsResult.Stdout
@@ -71,7 +65,6 @@ public static class MountService
             .Trim()
             .ToLower();
 
-        // ⭐ NO MONTAR si NO hay filesystem
         if (string.IsNullOrWhiteSpace(fsType))
         {
             LogService.Error($"[MOUNT] ERROR: El dispositivo {device} NO tiene filesystem. Abortando montaje.");
@@ -80,7 +73,6 @@ public static class MountService
 
         var finalOpts = options;
 
-        // 5) FS no POSIX → uid/gid/umask
         if (fsType is "exfat" or "vfat" or "ntfs")
         {
             if (!finalOpts.Contains("uid="))
@@ -95,7 +87,6 @@ public static class MountService
 
         finalOpts = finalOpts.TrimStart(',');
 
-        // 6) Montar
         var r = ShellHelper.EjecutarComoRoot(
             $"mount -o {finalOpts} \"{device}\" \"{mountPoint}\""
         );
@@ -106,7 +97,6 @@ public static class MountService
             return false;
         }
 
-        // 7) Permisos correctos para POSIX FS
         if (fsType is "ext4" or "xfs" or "btrfs" or "f2fs")
         {
             ShellHelper.EjecutarComoRoot($"chown 1000:1000 \"{mountPoint}\"");

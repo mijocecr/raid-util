@@ -16,7 +16,8 @@ public static class MdadmService
         if (arrayName.StartsWith("/dev/"))
             return arrayName;
 
-        var arrays = new RaidService().GetArraysAsync().Result;
+        // ⭐ FIX: usar Singleton
+        var arrays = RaidService.Instance.GetArraysAsync().Result;
 
         var a = arrays.FirstOrDefault(x =>
             x.Name == arrayName ||
@@ -70,7 +71,6 @@ public static class MdadmService
     {
         var md = GetMdstat().ToLower();
 
-        // Buscar por nombre base (md0)
         var baseName = arrayName.StartsWith("/dev/")
             ? arrayName.Split('/').Last()
             : arrayName;

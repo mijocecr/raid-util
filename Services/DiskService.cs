@@ -13,9 +13,17 @@ public static class DiskService
     // ============================================================
     // MÉTODO PRINCIPAL
     // ============================================================
+    
     public static List<RaidDiskInfo> GetAllDisks()
     {
         var list = new List<RaidDiskInfo>();
+
+        // ⭐ Blindaje: NO ejecutar lsblk antes de validar sudo
+        if (!Credentials.AllowRaidCalls)
+        {
+            LogService.Debug("[RAID] GetAllDisks blocked → AllowRaidCalls = false");
+            return list;
+        }
 
         var json = ShellHelper.EjecutarSinRoot(
             "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,FSTYPE,MOUNTPOINT,PKNAME,PTTYPE,TRAN"
@@ -78,6 +86,7 @@ public static class DiskService
 
         return list;
     }
+
 
     // ============================================================
     // DETECTAR SI ES DISCO VIRTUAL

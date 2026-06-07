@@ -1,9 +1,13 @@
 using System;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using RAID_Util.Services;
+using RAID_Util.Core;
+using RAID_Util.Helpers;
 
 namespace RAID_Util.Views.Tabs;
 
@@ -17,27 +21,51 @@ public partial class StatusView : UserControl
 
         _statusService = new StatusService();
 
-        // Cargar datos cuando el control entra al árbol visual
-        AttachedToVisualTree += async (_, __) => await LoadStatusAsync();
+        // Load only when attached AND sudo is validated
+        AttachedToVisualTree += OnAttached;
+    }
+
+    private async void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (!Credentials.AllowRaidCalls)
+        {
+            // Prevent RAID calls before sudo validation
+            Console.WriteLine("[STATUSVIEW] Load blocked → AllowRaidCalls = false");
+            return;
+        }
+
+        await LoadStatusAsync();
     }
 
     /// <summary>
-    ///     Método público llamado por TimerManager para refrescar el estado.
+    /// Called by TimerManager to refresh the status.
     /// </summary>
     public async Task RefreshStatusAsync()
     {
+        if (!Credentials.AllowRaidCalls)
+        {
+            Console.WriteLine("[STATUSVIEW] Refresh blocked → AllowRaidCalls = false");
+            return;
+        }
+
         await LoadStatusAsync();
     }
 
     // ============================================================
-    // CARGA PRINCIPAL DEL STATUS (OPTIMIZADA)
+    // MAIN STATUS LOADING (OPTIMIZED)
     // ============================================================
     private async Task LoadStatusAsync()
     {
+        if (!Credentials.AllowRaidCalls)
+        {
+            Console.WriteLine("[STATUSVIEW] LoadStatusAsync blocked → AllowRaidCalls = false");
+            return;
+        }
+
         try
         {
             // --------------------------------------------------------
-            // 0) Lanzar todas las tareas en paralelo (MUCHO MÁS RÁPIDO)
+            // 0) Launch all tasks in parallel (MUCH FASTER)
             // --------------------------------------------------------
             var tHealth = _statusService.GetOverallRaidHealthAsync();
             var tArrays = _statusService.GetArraysSummaryAsync();
@@ -50,34 +78,33 @@ public partial class StatusView : UserControl
             await Task.WhenAll(tHealth, tArrays, tDisks, tRebuild, tAtRisk, tDiskAlerts, tEvents);
 
             // --------------------------------------------------------
-            // 1) Estado global RAID
+            // 1) Global RAID health
             // --------------------------------------------------------
             var raidHealth = tHealth.Result;
             TxtOverallRaidHealth.Text = raidHealth;
 
             EnsureTransitions();
-
             TxtOverallRaidHealth.Foreground = GetHealthBrush(raidHealth);
 
             // --------------------------------------------------------
-            // 2) Resúmenes numéricos
+            // 2) Numeric summaries
             // --------------------------------------------------------
             TxtArraysSummary.Text = tArrays.Result;
             TxtDisksSummary.Text = tDisks.Result;
             TxtRebuildSummary.Text = tRebuild.Result;
 
             // --------------------------------------------------------
-            // 3) Arrays en riesgo
+            // 3) Arrays at risk
             // --------------------------------------------------------
             ListArraysAtRisk.ItemsSource = tAtRisk.Result;
 
             // --------------------------------------------------------
-            // 4) Alertas de discos
+            // 4) Disk alerts
             // --------------------------------------------------------
             ListDiskAlerts.ItemsSource = tDiskAlerts.Result;
 
             // --------------------------------------------------------
-            // 5) Eventos recientes
+            // 5) Recent events
             // --------------------------------------------------------
             ListRecentEvents.ItemsSource = tEvents.Result;
         }
