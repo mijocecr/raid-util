@@ -127,38 +127,53 @@ private void LoadFromState()
 
 // ⭐ SetArrays completo, tal como debe quedar
 
+
 public void SetArrays(List<RaidArrayInfo> arrays)
 {
+    // ⭐ 1) Guardar estado anterior
+    var expanded = _arrays
+        .Where(a => a.IsExpanded)
+        .Select(a => a.Name)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    var selected = _arrays
+        .Where(a => a.IsSelected)
+        .Select(a => a.Name)
+        .FirstOrDefault();
+
+    var monitoring = _monitoringArrayName;
+
+    // ⭐ 2) Reemplazar arrays
     _arrays = arrays ?? new List<RaidArrayInfo>();
 
+    // ⭐ 3) Restaurar estado + fallbacks
     foreach (var a in _arrays)
     {
-        
-        // ⭐ Fallback seguro para enum RaidArrayState
+        a.IsExpanded = expanded.Contains(a.Name);
+
+        a.IsSelected = selected != null &&
+                       a.Name.Equals(selected, StringComparison.OrdinalIgnoreCase);
+
+        if (monitoring != null &&
+            a.Name.Equals(monitoring, StringComparison.OrdinalIgnoreCase))
+        {
+            _monitoringArrayName = a.Name;
+        }
+
         if (!Enum.IsDefined(typeof(RaidArrayState), a.State))
             a.State = RaidArrayState.Unknown;
 
-
-        // ⭐ Fallback de icono
         a.StateIcon = string.IsNullOrWhiteSpace(a.StateIcon)
             ? GetStateIcon(a.State)
             : a.StateIcon;
 
-        // ⭐ Fallback de nivel
         a.Level = string.IsNullOrWhiteSpace(a.Level) ? "N/A" : a.Level;
-
-        // ⭐ Fallback de tamaños
         a.TotalSize = string.IsNullOrWhiteSpace(a.TotalSize) ? "Unknown" : a.TotalSize;
         a.UsableSize = string.IsNullOrWhiteSpace(a.UsableSize) ? a.TotalSize : a.UsableSize;
         a.ParitySize = string.IsNullOrWhiteSpace(a.ParitySize) ? "N/A" : a.ParitySize;
-
-        // ⭐ Fallback de path
         a.Path = string.IsNullOrWhiteSpace(a.Path) ? "/dev/unknown" : a.Path;
-
-        // ⭐ Fallback de uptime
         a.Uptime = string.IsNullOrWhiteSpace(a.Uptime) ? "Unknown" : a.Uptime;
 
-        // ⭐ Fallback de discos
         if (a.Disks == null)
             a.Disks = new List<RaidDiskInfo>();
 
@@ -168,26 +183,26 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             d.Serial = string.IsNullOrWhiteSpace(d.Serial) ? "Unknown" : d.Serial;
             d.Size = string.IsNullOrWhiteSpace(d.Size) ? "Unknown" : d.Size;
 
-            // Fallback de icono de disco
             if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
                 d.Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
         }
 
-        // ⭐ Fallback de resumen de discos
         a.DiskSummary = $"{a.Disks.Count}× Disk";
 
-        // ⭐ Fallback de progreso
         if (a.RebuildProgress < 0 || a.RebuildProgress > 100)
             a.RebuildProgress = 0;
 
-        // ⭐ Fallback de ETA
         if (string.IsNullOrWhiteSpace(a.RebuildETA))
             a.RebuildETA = "N/A";
     }
 
-    // ⭐ Construir UI en el hilo de UI
-    Dispatcher.UIThread.Post(BuildUI);
+    // ⭐ IMPORTANTE:
+    // NO llamar a BuildUI() aquí.
 }
+
+
+
+
 
     
     

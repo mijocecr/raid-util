@@ -629,44 +629,88 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
     }
 
     
-
-    private RaidArrayState ParseArrayStateEnum(string detail)
-    {
-        if (string.IsNullOrWhiteSpace(detail))
-            return RaidArrayState.Unknown;
-
-        var lower = detail.ToLowerInvariant();
-
-        if (lower.Contains("state : faulty") ||
-            lower.Contains("state : failed") ||
-            lower.Contains("state : inactive") ||
-            lower.Contains("state : stopped"))
-            return RaidArrayState.Failed;
-
-        if (lower.Contains("state : clean, degraded") ||
-            lower.Contains("state : degraded") ||
-            lower.Contains("degraded"))
-            return RaidArrayState.Degraded;
-
-        if (lower.Contains("resync=") ||
-            lower.Contains("recovery =") ||
-            lower.Contains("rebuild =") ||
-            lower.Contains("recovering") ||
-            lower.Contains("resyncing") ||
-            lower.Contains("checking"))
-            return RaidArrayState.Rebuilding;
-
-        if (lower.Contains("read-only"))
-            return RaidArrayState.ReadOnly;
-
-        if (lower.Contains("state : clean"))
-            return RaidArrayState.Clean;
-
-        if (lower.Contains("state : active"))
-            return RaidArrayState.Active;
-
+private RaidArrayState ParseArrayStateEnum(string detail)
+{
+    if (string.IsNullOrWhiteSpace(detail))
         return RaidArrayState.Unknown;
+
+    var lower = detail.ToLowerInvariant();
+
+    // ============================================================
+    // 1) Detectar nombre del array automáticamente
+    // ============================================================
+    string mdName = null;
+
+    // Ejemplos de líneas:
+    // "md0 : active raid1 ..."
+    // "Array : /dev/md0"
+    foreach (var token in lower.Split(' ', '\n', '\r', '\t'))
+    {
+        if (token.StartsWith("md") && token.Length <= 5)
+        {
+            mdName = token.Trim();
+            break;
+        }
     }
+
+    // ============================================================
+    // 2) Leer /proc/mdstat para detectar rebuild/resync/reshape
+    // ============================================================
+    try
+    {
+        var mdstat = File.ReadAllText("/proc/mdstat").ToLowerInvariant();
+
+        if (mdName != null && mdstat.Contains(mdName))
+        {
+            if (mdstat.Contains("resync") ||
+                mdstat.Contains("recovery") ||
+                mdstat.Contains("rebuild") ||
+                mdstat.Contains("reshape"))
+            {
+                return RaidArrayState.Rebuilding;
+            }
+        }
+    }
+    catch { }
+
+    // ============================================================
+    // 3) Estados críticos
+    // ============================================================
+    if (lower.Contains("state : faulty") ||
+        lower.Contains("state : failed") ||
+        lower.Contains("state : inactive") ||
+        lower.Contains("state : stopped"))
+        return RaidArrayState.Failed;
+
+    // ============================================================
+    // 4) Degraded
+    // ============================================================
+    if (lower.Contains("clean, degraded") ||
+        lower.Contains("active, degraded") ||
+        lower.Contains(" degraded"))
+        return RaidArrayState.Degraded;
+
+    // ============================================================
+    // 5) Read-only
+    // ============================================================
+    if (lower.Contains("read-only"))
+        return RaidArrayState.ReadOnly;
+
+    // ============================================================
+    // 6) Clean / Active
+    // ============================================================
+    if (lower.Contains("state : clean"))
+        return RaidArrayState.Clean;
+
+    if (lower.Contains("state : active"))
+        return RaidArrayState.Active;
+
+    return RaidArrayState.Unknown;
+}
+
+
+
+    
 
     public bool AutoAssemble()
     {
