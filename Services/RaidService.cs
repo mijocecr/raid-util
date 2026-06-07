@@ -51,93 +51,98 @@ public class RaidService
     // ============================================================
     // ADD DISK TO ARRAY
     // ============================================================
-    public async Task<bool> AddDiskToArrayAsync(string arrayName, string diskName)
+  public async Task<bool> AddDiskToArrayAsync(string arrayName, string diskName)
+{
+    try
     {
-        try
+        if (!await EnsureArraySafeForModification(arrayName))
+            return false;
+
+        NotificadorLinux.Enviar($"Preparando para añadir {diskName} a {arrayName}…");
+
+        LogService.Write($"[RAID] AddDiskToArray START → array={arrayName}, disk={diskName}");
+
+        NotificadorLinux.Enviar("Esperando a que mdadm esté libre…");
+
+        if (!await WaitForMdadmIdleAsync())
         {
-            if (!await EnsureArraySafeForModification(arrayName))
-                return false;
-
-            NotificadorLinux.Enviar($"Preparando para añadir {diskName} a {arrayName}…");
-
-            LogService.Write($"[RAID] AddDiskToArray START → array={arrayName}, disk={diskName}");
-
-            NotificadorLinux.Enviar("Esperando a que mdadm esté libre…");
-
-            if (!await WaitForMdadmIdleAsync())
-            {
-                NotificadorLinux.Enviar("mdadm está ocupado. Operación cancelada.", 5000, "critical");
-                return false;
-            }
-
-            NotificadorLinux.Enviar("Validando array…");
-
-            var arrays = await GetArraysAsync();
-            var array = arrays.FirstOrDefault(a =>
-                a.Name == arrayName ||
-                a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
-                a.Path.EndsWith(arrayName, StringComparison.Ordinal));
-
-            if (array == null)
-            {
-                NotificadorLinux.Enviar($"Array {arrayName} no encontrado.", 5000, "critical");
-                return false;
-            }
-
-            var arrayPath = array.Path;   // PATH REAL
-
-            if (array.Disks.Any(d => d.Name == diskName))
-            {
-                NotificadorLinux.Enviar($"El disco {diskName} ya pertenece al array.", 5000, "critical");
-                return false;
-            }
-
-            NotificadorLinux.Enviar("Validando disco…");
-
-            var errors = await ValidateDiskForRaidAsync(diskName);
-            if (errors.Count > 0)
-            {
-                foreach (var e in errors)
-                    LogService.Error("[VALIDATION] " + e);
-
-                NotificadorLinux.Enviar("El disco no es válido para RAID.", 5000, "critical");
-                return false;
-            }
-
-            NotificadorLinux.Enviar($"Añadiendo /dev/{diskName} al array…");
-
-            var cmd = $"/usr/sbin/mdadm {arrayPath} --add /dev/{diskName}";
-            var result = ShellHelper.EjecutarComoRoot(cmd);
-
-            if (result.ExitCode != 0)
-            {
-                NotificadorLinux.Enviar("Error al añadir el disco al array.", 5000, "critical");
-                return false;
-            }
-
-            NotificadorLinux.Enviar("Finalizando operación…");
-
-            ShellHelper.EjecutarComoRoot("udevadm settle");
-            await WaitForMdadmIdleAsync();
-
-            NotificadorLinux.Enviar("Esperando a que el array esté healthy…");
-
-            var healthy = await WaitForArrayHealthy(arrayName);
-
-            if (!healthy)
-                NotificadorLinux.Enviar("El disco fue añadido, pero el array sigue degradado.", 5000, "warning");
-            else
-                NotificadorLinux.Enviar($"Disco {diskName} añadido correctamente a {arrayName}.");
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            NotificadorLinux.Enviar("Error inesperado al añadir el disco.", 5000, "critical");
-            LogService.Error(ex.ToString());
+            NotificadorLinux.Enviar("mdadm está ocupado. Operación cancelada.", 5000, "critical");
             return false;
         }
+
+        NotificadorLinux.Enviar("Validando array…");
+
+        var arrays = await GetArraysAsync();
+        var array = arrays.FirstOrDefault(a =>
+            a.Name == arrayName ||
+            a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
+            a.Path.EndsWith(arrayName, StringComparison.Ordinal));
+
+        if (array == null)
+        {
+            NotificadorLinux.Enviar($"Array {arrayName} no encontrado.", 5000, "critical");
+            return false;
+        }
+
+        var arrayPath = array.Path;
+
+        if (array.Disks.Any(d => d.Name == diskName))
+        {
+            NotificadorLinux.Enviar($"El disco {diskName} ya pertenece al array.", 5000, "critical");
+            return false;
+        }
+
+        NotificadorLinux.Enviar("Validando disco…");
+
+        var errors = await ValidateDiskForRaidAsync(diskName);
+        if (errors.Count > 0)
+        {
+            foreach (var e in errors)
+                LogService.Error("[VALIDATION] " + e);
+
+            NotificadorLinux.Enviar("El disco no es válido para RAID.", 5000, "critical");
+            return false;
+        }
+
+        NotificadorLinux.Enviar($"Añadiendo /dev/{diskName} al array…");
+
+        var cmd = $"/usr/sbin/mdadm {arrayPath} --add /dev/{diskName}";
+        var result = ShellHelper.EjecutarComoRoot(cmd);
+
+        if (result.ExitCode != 0)
+        {
+            NotificadorLinux.Enviar("Error al añadir el disco al array.", 5000, "critical");
+            return false;
+        }
+
+        NotificadorLinux.Enviar("Finalizando operación…");
+
+        ShellHelper.EjecutarComoRoot("udevadm settle");
+        await WaitForMdadmIdleAsync();
+
+        // ⭐ NUEVO: persistir configuración y actualizar initramfs
+        PersistArrayToMdadmConf();
+        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+
+        NotificadorLinux.Enviar("Esperando a que el array esté healthy…");
+
+        var healthy = await WaitForArrayHealthy(arrayName);
+
+        if (!healthy)
+            NotificadorLinux.Enviar("El disco fue añadido, pero el array sigue degradado.", 5000, "warning");
+        else
+            NotificadorLinux.Enviar($"Disco {diskName} añadido correctamente a {arrayName}.");
+
+        return true;
     }
+    catch (Exception ex)
+    {
+        NotificadorLinux.Enviar("Error inesperado al añadir el disco.", 5000, "critical");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
 
     public async Task<bool> WaitForArrayHealthy(string arrayName)
     {
@@ -725,149 +730,170 @@ private RaidArrayState ParseArrayStateEnum(string detail)
         return result.ExitCode == 0;
     }
 
-    public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
+   public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
+{
+    try
     {
-        try
+        if (!await EnsureArraySafeForModification(arrayName, allowFstab: true))
+            return false;
+
+        string devPath;
+
+        if (arrayName.StartsWith("/dev/"))
         {
-            if (!await EnsureArraySafeForModification(arrayName))
-                return false;
-
-            string devPath;
-
-            if (arrayName.StartsWith("/dev/"))
-            {
-                devPath = arrayName;
-            }
-            else
-            {
-                var arrays = await GetArraysAsync();
-                var array = arrays.FirstOrDefault(a =>
-                    a.Name == arrayName ||
-                    a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
-                    a.Path.EndsWith(arrayName, StringComparison.Ordinal));
-
-                devPath = array != null ? array.Path : $"/dev/{arrayName}";
-            }
-
-            var cfg = ArrayConfigService.Load(arrayName);
-
-            var mountPath = string.IsNullOrWhiteSpace(cfg.MountPoint)
-                ? $"/mnt/{arrayName}"
-                : cfg.MountPoint;
-
-            Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
-
-            var checkMount = ShellHelper.EjecutarComoRoot($"mount | grep -w {devPath}");
-            if (checkMount.ExitCode == 0)
-            {
-                Console.WriteLine($"[RAID] {devPath} está montado. Desmontando...");
-
-                var umount = ShellHelper.EjecutarComoRoot($"umount -f {devPath}");
-                if (umount.ExitCode != 0)
-                {
-                    Console.WriteLine($"[RAID] ERROR desmontando: {umount.Stderr}");
-                    return false;
-                }
-
-                ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
-            }
-
-            var ls = ShellHelper.EjecutarComoRoot($"ls {devPath}");
-            if (ls.ExitCode != 0)
-            {
-                Console.WriteLine($"[RAID] ERROR: {devPath} no existe.");
-                return false;
-            }
-
-            var mkfsCmd = fsType switch
-            {
-                "ext4" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.ext4 -F {devPath}"
-                    : $"mkfs.ext4 -F -L \"{label}\" {devPath}",
-                "xfs" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.xfs -f {devPath}"
-                    : $"mkfs.xfs -f -L \"{label}\" {devPath}",
-                "btrfs" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.btrfs -f {devPath}"
-                    : $"mkfs.btrfs -f -L \"{label}\" {devPath}",
-                "f2fs" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.f2fs -f {devPath}"
-                    : $"mkfs.f2fs -f -l \"{label}\" {devPath}",
-                "vfat (FAT32)" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.vfat -F 32 {devPath}"
-                    : $"mkfs.vfat -F 32 -n \"{label}\" {devPath}",
-                "exfat" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.exfat {devPath}"
-                    : $"mkfs.exfat -n \"{label}\" {devPath}",
-                "ntfs" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkfs.ntfs -f {devPath}"
-                    : $"mkfs.ntfs -f -L \"{label}\" {devPath}",
-                "swap" => string.IsNullOrWhiteSpace(label)
-                    ? $"mkswap {devPath}"
-                    : $"mkswap -L \"{label}\" {devPath}",
-                _ => throw new Exception("Filesystem no soportado")
-            };
-
-            var mkfs = ShellHelper.EjecutarComoRoot(mkfsCmd);
-            if (mkfs.ExitCode != 0)
-            {
-                Console.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
-                return false;
-            }
-
-            if (fsType == "swap")
-            {
-                ShellHelper.EjecutarComoRoot($"swapon {devPath}");
-                return true;
-            }
-
-            ShellHelper.EjecutarComoRoot($"mkdir -p {mountPath}");
-
-            List<string> opts = new();
-
-            opts.Add("users");
-
-            if (cfg.Mount_NoAtime) opts.Add("noatime");
-            if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
-            if (cfg.Mount_Discard) opts.Add("discard");
-            if (cfg.Mount_Sync) opts.Add("sync");
-            if (cfg.Mount_ReadOnly) opts.Add("ro");
-
-            if (opts.Count == 1)
-                opts.Add("defaults");
-
-            var mountOpts = string.Join(",", opts);
-
-            if (cfg.PersistMount)
-            {
-                var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
-                if (mount.ExitCode != 0)
-                {
-                    Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
-                    return false;
-                }
-
-                var perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
-                    ? "755"
-                    : cfg.MountPermissions;
-
-                ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
-
-                var fs = NormalizeFs(fsType);
-                var entry = $"{devPath} {mountPath} {fs} {mountOpts} 0 0";
-
-                ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab'");
-                ShellHelper.EjecutarComoRoot($"bash -c \"echo '{entry}' >> /etc/fstab\"");
-            }
-
-            return true;
+            devPath = arrayName;
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine($"[RAID] ERROR en InitializeArrayAsync: {ex}");
+            var arrays = await GetArraysAsync();
+            var array = arrays.FirstOrDefault(a =>
+                a.Name == arrayName ||
+                a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
+                a.Path.EndsWith(arrayName, StringComparison.Ordinal));
+
+            devPath = array != null ? array.Path : $"/dev/{arrayName}";
+        }
+
+        var cfg = ArrayConfigService.Load(arrayName);
+
+        var mountPath = string.IsNullOrWhiteSpace(cfg.MountPoint)
+            ? $"/mnt/{arrayName}"
+            : cfg.MountPoint;
+
+        Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
+
+        var checkMount = ShellHelper.EjecutarComoRoot($"mount | grep -w {devPath}");
+        if (checkMount.ExitCode == 0)
+        {
+            Console.WriteLine($"[RAID] {devPath} está montado. Desmontando...");
+
+            var umount = ShellHelper.EjecutarComoRoot($"umount -f {devPath}");
+            if (umount.ExitCode != 0)
+            {
+                Console.WriteLine($"[RAID] ERROR desmontando: {umount.Stderr}");
+                return false;
+            }
+
+            // ⭐ limpiar posibles entradas antiguas por devPath
+            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
+        }
+
+        var ls = ShellHelper.EjecutarComoRoot($"ls {devPath}");
+        if (ls.ExitCode != 0)
+        {
+            Console.WriteLine($"[RAID] ERROR: {devPath} no existe.");
             return false;
         }
+
+        var mkfsCmd = fsType switch
+        {
+            "ext4" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.ext4 -F {devPath}"
+                : $"mkfs.ext4 -F -L \"{label}\" {devPath}",
+            "xfs" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.xfs -f {devPath}"
+                : $"mkfs.xfs -f -L \"{label}\" {devPath}",
+            "btrfs" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.btrfs -f {devPath}"
+                : $"mkfs.btrfs -f -L \"{label}\" {devPath}",
+            "f2fs" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.f2fs -f {devPath}"
+                : $"mkfs.f2fs -f -l \"{label}\" {devPath}",
+            "vfat (FAT32)" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.vfat -F 32 {devPath}"
+                : $"mkfs.vfat -F 32 -n \"{label}\" {devPath}",
+            "exfat" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.exfat {devPath}"
+                : $"mkfs.exfat -n \"{label}\" {devPath}",
+            "ntfs" => string.IsNullOrWhiteSpace(label)
+                ? $"mkfs.ntfs -f {devPath}"
+                : $"mkfs.ntfs -f -L \"{label}\" {devPath}",
+            "swap" => string.IsNullOrWhiteSpace(label)
+                ? $"mkswap {devPath}"
+                : $"mkswap -L \"{label}\" {devPath}",
+            _ => throw new Exception("Filesystem no soportado")
+        };
+
+        var mkfs = ShellHelper.EjecutarComoRoot(mkfsCmd);
+        if (mkfs.ExitCode != 0)
+        {
+            Console.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
+            return false;
+        }
+
+        // ⭐ tras mkfs en array, persistir mdadm y actualizar initramfs
+        PersistArrayToMdadmConf();
+        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+
+        if (fsType == "swap")
+        {
+            ShellHelper.EjecutarComoRoot($"swapon {devPath}");
+            return true;
+        }
+
+        ShellHelper.EjecutarComoRoot($"mkdir -p {mountPath}");
+
+        List<string> opts = new();
+
+        opts.Add("users");
+
+        if (cfg.Mount_NoAtime) opts.Add("noatime");
+        if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
+        if (cfg.Mount_Discard) opts.Add("discard");
+        if (cfg.Mount_Sync) opts.Add("sync");
+        if (cfg.Mount_ReadOnly) opts.Add("ro");
+
+        if (opts.Count == 1)
+            opts.Add("defaults");
+
+        var mountOpts = string.Join(",", opts);
+
+        if (cfg.PersistMount)
+        {
+            var mount = ShellHelper.EjecutarComoRoot($"mount -o {mountOpts} {devPath} {mountPath}");
+            if (mount.ExitCode != 0)
+            {
+                Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
+                return false;
+            }
+
+            var perms = string.IsNullOrWhiteSpace(cfg.MountPermissions)
+                ? "755"
+                : cfg.MountPermissions;
+
+            ShellHelper.EjecutarComoRoot($"chmod {perms} {mountPath}");
+
+            var fs = NormalizeFs(fsType);
+
+            // ⭐ usar UUID si existe
+            var uuidResult = ShellHelper.EjecutarComoRoot($"blkid -s UUID -o value {devPath}");
+            var uuid = uuidResult.ExitCode == 0 ? uuidResult.Stdout.Trim() : "";
+
+            string firstField = !string.IsNullOrWhiteSpace(uuid)
+                ? $"UUID={uuid}"
+                : devPath;
+
+            var entry = $"{firstField} {mountPath} {fs} {mountOpts} 0 0";
+
+            // limpiar entradas previas por devPath o UUID
+            if (!string.IsNullOrWhiteSpace(uuid))
+                ShellHelper.EjecutarComoRoot($"sed -i '\\#UUID={uuid}#d' /etc/fstab");
+            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
+
+            ShellHelper.EjecutarComoRoot($"bash -c \"echo '{entry}' >> /etc/fstab\"");
+            ShellHelper.EjecutarComoRoot("systemctl daemon-reload");
+        }
+
+        return true;
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[RAID] ERROR en InitializeArrayAsync: {ex}");
+        return false;
+    }
+}
+
+
 
     private string ParseLevel(string detail)
     {
@@ -1239,170 +1265,188 @@ private RaidArrayState ParseArrayStateEnum(string detail)
     }
 
     public async Task<bool> DeleteArrayAsync(RaidArrayInfo array)
+{
+    try
     {
-        try
+        var arrayPath = array.Path;
+        var name = array.Name;
+
+        LogService.Write($"[RAID] DELETE START → {name} ({arrayPath})");
+
+        NotificadorLinux.Enviar($"Deleting RAID array {name}… This may take a moment.");
+
+        if (!await EnsureArraySafeForModification(arrayPath))
         {
-            var arrayPath = array.Path;
-            var name = array.Name;
-
-            LogService.Write($"[RAID] DELETE START → {name} ({arrayPath})");
-
-            NotificadorLinux.Enviar($"Deleting RAID array {name}… This may take a moment.");
-
-            if (!await EnsureArraySafeForModification(arrayPath))
-            {
-                var msg = "Array cannot be deleted because it is not in a safe state.";
-                NotificadorLinux.Enviar(msg, 5000, "critical");
-                LogService.Error("[RAID] DELETE ABORTED: EnsureArraySafeForModification failed.");
-                return false;
-            }
-
-            NotificadorLinux.Enviar($"Stopping array {name}…");
-            LogService.Write($"[RAID] Stopping array {arrayPath}");
-
-            var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
-            if (stop.ExitCode != 0)
-            {
-                var msg = $"Failed to stop array {name}.";
-                NotificadorLinux.Enviar(msg, 5000, "critical");
-                LogService.Error($"[RAID] STOP FAILED: {stop.Stderr}");
-                return false;
-            }
-
-            NotificadorLinux.Enviar($"Removing array {name}…");
-            LogService.Write($"[RAID] Removing array {arrayPath}");
-
-            var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
-
-            if (remove.ExitCode != 0)
-            {
-                if (remove.Stderr.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
-                {
-                    LogService.Write("[RAID] REMOVE skipped: md device already removed after --stop.");
-                }
-                else
-                {
-                    var msg = $"Failed to remove array {name}.";
-                    NotificadorLinux.Enviar(msg, 5000, "critical");
-                    LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
-                    return false;
-                }
-            }
-
-            NotificadorLinux.Enviar("Cleaning RAID metadata from member disks…");
-
-            foreach (var d in array.Disks)
-            {
-                LogService.Write($"[RAID] Wiping superblock on {d.Name}");
-                var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
-
-                if (wipe.ExitCode != 0)
-                {
-                    var msg = $"Failed to wipe RAID metadata on disk {d.Name}.";
-                    NotificadorLinux.Enviar(msg, 5000, "warning");
-                    LogService.Error($"[RAID] ZERO-SB FAILED on {d.Name}: {wipe.Stderr}");
-                }
-            }
-
-            NotificadorLinux.Enviar("Updating mdadm configuration…");
-            LogService.Write("[RAID] Updating mdadm.conf");
-
-            ShellHelper.EjecutarComoRoot("mdadm --detail --scan > /etc/mdadm/mdadm.conf");
-
-            ShellHelper.EjecutarComoRoot("sync");
-
-            var success = $"Array {name} has been successfully deleted.";
-            NotificadorLinux.Enviar(success, 5000, "info");
-
-            LogService.Write($"[RAID] DELETE OK → {name}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            var msg = "Unexpected error while deleting the RAID array.";
+            var msg = "Array cannot be deleted because it is not in a safe state.";
             NotificadorLinux.Enviar(msg, 5000, "critical");
-
-            LogService.Error("[RAID] DELETE FAILED:");
-            LogService.Error(ex.ToString());
+            LogService.Error("[RAID] DELETE ABORTED: EnsureArraySafeForModification failed.");
             return false;
         }
+
+        // ⭐ limpiar fstab por si acaso
+        RemoveArrayFromFstab(arrayPath);
+
+        NotificadorLinux.Enviar($"Stopping array {name}…");
+        LogService.Write($"[RAID] Stopping array {arrayPath}");
+
+        var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
+        if (stop.ExitCode != 0)
+        {
+            var msg = $"Failed to stop array {name}.";
+            NotificadorLinux.Enviar(msg, 5000, "critical");
+            LogService.Error($"[RAID] STOP FAILED: {stop.Stderr}");
+            return false;
+        }
+
+        NotificadorLinux.Enviar($"Removing array {name}…");
+        LogService.Write($"[RAID] Removing array {arrayPath}");
+
+        var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
+
+        if (remove.ExitCode != 0)
+        {
+            if (remove.Stderr.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
+            {
+                LogService.Write("[RAID] REMOVE skipped: md device already removed after --stop.");
+            }
+            else
+            {
+                var msg = $"Failed to remove array {name}.";
+                NotificadorLinux.Enviar(msg, 5000, "critical");
+                LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
+                return false;
+            }
+        }
+
+        NotificadorLinux.Enviar("Cleaning RAID metadata from member disks…");
+
+        foreach (var d in array.Disks)
+        {
+            LogService.Write($"[RAID] Wiping superblock on {d.Name}");
+
+            // ⭐ no tocar discos marcados como sistema
+            if (d.IsSystemDisk)
+            {
+                LogService.Error($"[RAID] ZERO-SB SKIPPED on system disk {d.Name}");
+                continue;
+            }
+
+            var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
+
+            if (wipe.ExitCode != 0)
+            {
+                var msg = $"Failed to wipe RAID metadata on disk {d.Name}.";
+                NotificadorLinux.Enviar(msg, 5000, "warning");
+                LogService.Error($"[RAID] ZERO-SB FAILED on {d.Name}: {wipe.Stderr}");
+            }
+        }
+
+        NotificadorLinux.Enviar("Updating mdadm configuration…");
+        LogService.Write("[RAID] Updating mdadm.conf");
+
+        // ⭐ usar método de persistencia y actualizar initramfs
+        PersistArrayToMdadmConf();
+        ShellHelper.EjecutarComoRoot("sync");
+        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+
+        var success = $"Array {name} has been successfully deleted.";
+        NotificadorLinux.Enviar(success, 5000, "info");
+
+        LogService.Write($"[RAID] DELETE OK → {name}");
+        return true;
     }
+    catch (Exception ex)
+    {
+        var msg = "Unexpected error while deleting the RAID array.";
+        NotificadorLinux.Enviar(msg, 5000, "critical");
+
+        LogService.Error("[RAID] DELETE FAILED:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
 
     public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
+{
+    try
     {
-        try
+        foreach (var d in disks)
         {
-            foreach (var d in disks)
+            if (d.IsSystemDisk)
             {
-                if (d.IsSystemDisk)
-                {
-                    LogService.Error($"[CREATE] ERROR: /dev/{d.Name} es disco del sistema. Operación bloqueada.");
-                    return false;
-                }
-            }
-
-            foreach (var d in disks)
-            {
-                var errors = ValidateDiskForRaidAsync(d.Name).Result;
-                if (errors.Count > 0)
-                {
-                    LogService.Error($"[CREATE] Validation failed for /dev/{d.Name}:");
-                    foreach (var e in errors)
-                        LogService.Error("[VALIDATION] " + e);
-                    return false;
-                }
-            }
-
-            var mdName = GetNextFreeMdName();
-            var arrayPath = $"/dev/{mdName}";
-            LastCreatedMdName = mdName;
-
-            var mdadmLevel = level.ToLower() switch
-            {
-                "linear" => "linear",
-                "jbod" => "linear",
-                "jbod (linear)" => "linear",
-                _ => level.Replace("RAID", "").Trim()
-            };
-
-            var deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
-
-            var nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
-                ? mdName
-                : friendlyName.Trim();
-
-            var cmd =
-                $"/usr/sbin/mdadm --create {arrayPath} " +
-                $"--verbose " +
-                $"--metadata=1.2 " +
-                $"--name={nameForMdadm} " +
-                $"--level={mdadmLevel} " +
-                $"--raid-devices={disks.Count} " +
-                $"{deviceList} --force --run";
-
-            LogService.Write($"[CREATE] Ejecutando: {cmd}");
-
-            var result = ShellHelper.EjecutarComoRoot(cmd);
-
-            if (result.ExitCode != 0)
-            {
-                LogService.Error("[CREATE] mdadm falló:");
-                LogService.Error(result.Stderr);
+                LogService.Error($"[CREATE] ERROR: /dev/{d.Name} es disco del sistema. Operación bloqueada.");
                 return false;
             }
-
-            ShellHelper.EjecutarComoRoot("udevadm settle");
-
-            LogService.Write($"[CREATE] Array creado correctamente → {arrayPath}");
-            return true;
         }
-        catch (Exception ex)
+
+        foreach (var d in disks)
         {
-            LogService.Error("[CREATE] EXCEPCIÓN:");
-            LogService.Error(ex.ToString());
+            var errors = ValidateDiskForRaidAsync(d.Name).Result;
+            if (errors.Count > 0)
+            {
+                LogService.Error($"[CREATE] Validation failed for /dev/{d.Name}:");
+                foreach (var e in errors)
+                    LogService.Error("[VALIDATION] " + e);
+                return false;
+            }
+        }
+
+        var mdName = GetNextFreeMdName();
+        var arrayPath = $"/dev/{mdName}";
+        LastCreatedMdName = mdName;
+
+        var mdadmLevel = level.ToLower() switch
+        {
+            "linear" => "linear",
+            "jbod" => "linear",
+            "jbod (linear)" => "linear",
+            _ => level.Replace("RAID", "").Trim()
+        };
+
+        var deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
+
+        var nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
+            ? mdName
+            : friendlyName.Trim();
+
+        var cmd =
+            $"/usr/sbin/mdadm --create {arrayPath} " +
+            $"--verbose " +
+            $"--metadata=1.2 " +
+            $"--name={nameForMdadm} " +
+            $"--level={mdadmLevel} " +
+            $"--raid-devices={disks.Count} " +
+            $"{deviceList} --force --run";
+
+        LogService.Write($"[CREATE] Ejecutando: {cmd}");
+
+        var result = ShellHelper.EjecutarComoRoot(cmd);
+
+        if (result.ExitCode != 0)
+        {
+            LogService.Error("[CREATE] mdadm falló:");
+            LogService.Error(result.Stderr);
             return false;
         }
+
+        ShellHelper.EjecutarComoRoot("udevadm settle");
+
+        // ⭐ persistir arrays y actualizar initramfs
+        PersistArrayToMdadmConf();
+        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+
+        LogService.Write($"[CREATE] Array creado correctamente → {arrayPath}");
+        return true;
     }
+    catch (Exception ex)
+    {
+        LogService.Error("[CREATE] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
 
     public string GetNextFreeMdName()
     {
@@ -1469,111 +1513,114 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 
 
     public async Task<bool> RemoveDiskFromArrayAsync(string arrayName, string diskName)
+{
+    try
     {
-        try
+        string arrayPath;
+
+        if (arrayName.StartsWith("/dev/"))
         {
-            string arrayPath;
+            arrayPath = arrayName;
+        }
+        else
+        {
+            var arrays = await GetArraysAsync();
+            var array = arrays.FirstOrDefault(a =>
+                a.Name == arrayName ||
+                a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
+                a.Path.EndsWith(arrayName, StringComparison.Ordinal));
 
-            if (arrayName.StartsWith("/dev/"))
+            arrayPath = array != null ? array.Path : $"/dev/{arrayName}";
+        }
+
+        diskName = NormalizeDev(diskName);
+        var shortName = Path.GetFileName(diskName);
+
+        if (!await EnsureArraySafeForModification(arrayPath))
+            return false;
+
+        LogService.Write($"[RAID] RemoveDiskFromArrayAsync START → array={arrayPath}, disk={diskName}");
+
+        var detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
+        var raidLevel = "unknown";
+
+        if (detailExec.ExitCode == 0)
+        {
+            foreach (var line in detailExec.Stdout.Split('\n'))
             {
-                arrayPath = arrayName;
-            }
-            else
-            {
-                var arrays = await GetArraysAsync();
-                var array = arrays.FirstOrDefault(a =>
-                    a.Name == arrayName ||
-                    a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
-                    a.Path.EndsWith(arrayName, StringComparison.Ordinal));
-
-                arrayPath = array != null ? array.Path : $"/dev/{arrayName}";
-            }
-
-            diskName = NormalizeDev(diskName);
-            var shortName = Path.GetFileName(diskName);
-
-            if (!await EnsureArraySafeForModification(arrayPath))
-                return false;
-
-            LogService.Write($"[RAID] RemoveDiskFromArrayAsync START → array={arrayPath}, disk={diskName}");
-
-            var detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
-            var raidLevel = "unknown";
-
-            if (detailExec.ExitCode == 0)
-            {
-                foreach (var line in detailExec.Stdout.Split('\n'))
+                if (line.Trim().StartsWith("Raid Level"))
                 {
-                    if (line.Trim().StartsWith("Raid Level"))
-                    {
-                        raidLevel = line.Split(':')[1].Trim().ToLower();
-                        break;
-                    }
+                    raidLevel = line.Split(':')[1].Trim().ToLower();
+                    break;
                 }
             }
+        }
 
-            var supportsFail = raidLevel switch
+        var supportsFail = raidLevel switch
+        {
+            "raid0"      => false,
+            "linear"     => false,
+            "multipath"  => false,
+            _            => true
+        };
+
+        var detailText = detailExec.Stdout;
+
+        if (supportsFail &&
+            !detailText.Contains($"faulty   {diskName}") &&
+            !detailText.Contains($"faulty   /dev/{shortName}"))
+        {
+            LogService.Write($"[RAID] Marking disk as faulty: {diskName}");
+            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayPath} --fail {diskName}");
+            ShellHelper.EjecutarComoRoot("udevadm settle");
+            await Task.Delay(300);
+        }
+
+        detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
+        detailText = detailExec.Stdout;
+
+        var spare = DetectSpareDevice(detailText);
+        if (!string.IsNullOrWhiteSpace(spare) && NormalizeDev(spare) != diskName)
+        {
+            var spareDev = NormalizeDev(spare);
+            LogService.Write($"[RAID] Spare detected ({spareDev}) → removing spare first.");
+            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayPath} --remove {spareDev}");
+            ShellHelper.EjecutarComoRoot("udevadm settle");
+        }
+
+        bool hasFaultyLine =
+            detailText.Contains($"faulty   {diskName}") ||
+            detailText.Contains($"faulty   /dev/{shortName}");
+
+        bool hasRemovedSlot = detailText.Contains(" removed");
+
+        string removeCmd;
+
+        if (hasFaultyLine && hasRemovedSlot)
+        {
+            LogService.Write("[RAID] Detected faulty device with removed slot → using '--remove failed'.");
+            removeCmd = $"/usr/sbin/mdadm {arrayPath} --remove failed";
+        }
+        else
+        {
+            LogService.Write("[RAID] Using normal remove by device path.");
+            removeCmd = $"/usr/sbin/mdadm {arrayPath} --remove {diskName}";
+        }
+
+        LogService.Write($"[RAID] Attempting remove: {removeCmd}");
+        var remove1 = ShellHelper.EjecutarComoRoot(removeCmd);
+
+        if (remove1.ExitCode != 0)
+        {
+            LogService.Write($"[RAID] First remove FAILED (code={remove1.ExitCode}) → checking lsblk children.");
+
+            if (DiskStillAttached(shortName))
             {
-                "raid0"      => false,
-                "linear"     => false,
-                "multipath"  => false,
-                _            => true
-            };
+                LogService.Write("[RAID] Disk still attached → forcing kernel release.");
 
-            var detailText = detailExec.Stdout;
-
-            if (supportsFail &&
-                !detailText.Contains($"faulty   {diskName}") &&
-                !detailText.Contains($"faulty   /dev/{shortName}"))
-            {
-                LogService.Write($"[RAID] Marking disk as faulty: {diskName}");
-                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayPath} --fail {diskName}");
-                ShellHelper.EjecutarComoRoot("udevadm settle");
-                await Task.Delay(300);
-            }
-
-            detailExec = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --detail {arrayPath}");
-            detailText = detailExec.Stdout;
-
-            var spare = DetectSpareDevice(detailText);
-            if (!string.IsNullOrWhiteSpace(spare) && NormalizeDev(spare) != diskName)
-            {
-                var spareDev = NormalizeDev(spare);
-                LogService.Write($"[RAID] Spare detected ({spareDev}) → removing spare first.");
-                ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm {arrayPath} --remove {spareDev}");
-                ShellHelper.EjecutarComoRoot("udevadm settle");
-            }
-
-            bool hasFaultyLine =
-                detailText.Contains($"faulty   {diskName}") ||
-                detailText.Contains($"faulty   /dev/{shortName}");
-
-            bool hasRemovedSlot = detailText.Contains(" removed");
-
-            string removeCmd;
-
-            if (hasFaultyLine && hasRemovedSlot)
-            {
-                LogService.Write("[RAID] Detected faulty device with removed slot → using '--remove failed'.");
-                removeCmd = $"/usr/sbin/mdadm {arrayPath} --remove failed";
-            }
-            else
-            {
-                LogService.Write("[RAID] Using normal remove by device path.");
-                removeCmd = $"/usr/sbin/mdadm {arrayPath} --remove {diskName}";
-            }
-
-            LogService.Write($"[RAID] Attempting remove: {removeCmd}");
-            var remove1 = ShellHelper.EjecutarComoRoot(removeCmd);
-
-            if (remove1.ExitCode != 0)
-            {
-                LogService.Write($"[RAID] First remove FAILED (code={remove1.ExitCode}) → checking lsblk children.");
-
-                if (DiskStillAttached(shortName))
+                // ⭐ no eliminar del kernel si es disco de sistema
+                if (!SystemDiskDetector.IsSystemDisk(shortName))
                 {
-                    LogService.Write("[RAID] Disk still attached → forcing kernel release.");
-
                     ShellHelper.EjecutarComoRoot($"echo 1 > /sys/block/{shortName}/device/delete");
                     ShellHelper.EjecutarComoRoot("udevadm settle");
 
@@ -1586,33 +1633,47 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 
                     ShellHelper.EjecutarComoRoot("udevadm settle");
                 }
-
-                LogService.Write("[RAID] Retrying remove after kernel release...");
-
-                var remove2 = ShellHelper.EjecutarComoRoot(removeCmd);
-
-                if (remove2.ExitCode != 0)
+                else
                 {
-                    LogService.Error($"[RAID] RemoveDiskFromArrayAsync FAILED: {remove2.Stderr}");
-                    return false;
+                    LogService.Error($"[RAID] SKIP device/delete on system disk {shortName}");
                 }
             }
 
-            LogService.Write($"[RAID] Cleaning metadata on {diskName}");
+            LogService.Write("[RAID] Retrying remove after kernel release...");
+
+            var remove2 = ShellHelper.EjecutarComoRoot(removeCmd);
+
+            if (remove2.ExitCode != 0)
+            {
+                LogService.Error($"[RAID] RemoveDiskFromArrayAsync FAILED: {remove2.Stderr}");
+                return false;
+            }
+        }
+
+        LogService.Write($"[RAID] Cleaning metadata on {diskName}");
+
+        if (!SystemDiskDetector.IsSystemDisk(shortName))
+        {
             ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --zero-superblock {diskName}");
             ShellHelper.EjecutarComoRoot($"/usr/sbin/wipefs -a {diskName}");
             ShellHelper.EjecutarComoRoot("udevadm settle");
-
-            LogService.Write("[RAID] RemoveDiskFromArrayAsync OK → disk cleaned and removed.");
-            return true;
         }
-        catch (Exception ex)
+        else
         {
-            LogService.Error("[RAID] RemoveDiskFromArrayAsync EXCEPTION:");
-            LogService.Error(ex.ToString());
-            return false;
+            LogService.Error($"[RAID] SKIP zero-superblock/wipefs on system disk {shortName}");
         }
+
+        LogService.Write("[RAID] RemoveDiskFromArrayAsync OK → disk cleaned and removed.");
+        return true;
     }
+    catch (Exception ex)
+    {
+        LogService.Error("[RAID] RemoveDiskFromArrayAsync EXCEPTION:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
 
     // =====================================================================================
     // ⭐ FUNCIONES AUXILIARES
@@ -1846,9 +1907,6 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     {
         LogService.Write($"[STOP] StopArraySafeAsync → {arrayName}");
 
-        // ============================================================
-        // 1. Resolver array real
-        // ============================================================
         var arrays = await GetArraysAsync();
         var array = arrays.FirstOrDefault(a =>
             a.Name == arrayName ||
@@ -1859,46 +1917,33 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 
         var arrayPath = array.Path;
 
-        // ============================================================
-        // 2. Validaciones de seguridad
-        // ============================================================
-
-        // 2.1 Array montado
         if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
         {
             LogService.Error("[STOP] Array is mounted.");
             return (false, $"Array is mounted at {array.MountPath}. Unmount first.");
         }
 
-        // 2.2 Array degradado → NO detener
         if (array.IsDegraded)
         {
             LogService.Error("[STOP] Array is degraded. Stopping is unsafe.");
             return (false, "Array is degraded. Stopping it may cause data loss.");
         }
 
-        // 2.3 Array en resync/recovery/check/repair
         if (array.IsResyncing || array.IsRecovering || array.IsChecking || array.IsRepairing)
         {
             LogService.Error("[STOP] Array is busy (resync/recovery/check/repair).");
             return (false, "Array is busy (resync/recovery/check/repair). Try again later.");
         }
 
-        // 2.4 Array no activo
         if (!array.IsActive)
         {
             LogService.Error("[STOP] Array is not active.");
             return (false, "Array is not active. Cannot stop.");
         }
 
-        // ============================================================
-        // 3. Remover de fstab
-        // ============================================================
+        // ⭐ limpiar fstab antes de parar
         RemoveArrayFromFstab(arrayPath);
 
-        // ============================================================
-        // 4. Unmount si por alguna razón sigue montado
-        // ============================================================
         if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
         {
             LogService.Write($"[STOP] Unmounting {array.MountPath}...");
@@ -1911,15 +1956,9 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             }
         }
 
-        // ============================================================
-        // 5. Esperar a que mdadm esté libre
-        // ============================================================
         if (!await WaitForMdadmIdleAsync())
             return (false, "mdadm is busy, cannot stop array.");
 
-        // ============================================================
-        // 6. Detener array
-        // ============================================================
         var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
 
         if (stop.ExitCode != 0)
@@ -1927,6 +1966,10 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             LogService.Error($"[STOP] mdadm --stop failed: {stop.Stderr}");
             return (false, $"Failed to stop array:\n{stop.Stderr}");
         }
+
+        // ⭐ actualizar mdadm.conf e initramfs tras parar
+        PersistArrayToMdadmConf();
+        ShellHelper.EjecutarComoRoot("update-initramfs -u");
 
         LogService.Write("[STOP] StopArraySafeAsync OK");
         return (true, "Array stopped.");
@@ -1938,6 +1981,7 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         return (false, "Unexpected error stopping array. Check logs.");
     }
 }
+
 
     
 
@@ -1967,106 +2011,75 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     }
 
     public bool PersistArrayToMdadmConf()
+{
+    try
     {
-        try
+        LogService.Write("========== MDADM PERSIST START ==========");
+
+        var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
+
+        LogService.Write($"[MDADM] exit={exit}");
+        LogService.Write("[MDADM] STDOUT:");
+        LogService.Write(stdout ?? "<null>");
+        LogService.Write("[MDADM] STDERR:");
+        LogService.Write(stderr ?? "<null>");
+
+        if (exit != 0 || string.IsNullOrWhiteSpace(stdout))
         {
-            LogService.Write("========== MDADM PERSIST START ==========");
-
-            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --detail --scan");
-
-            LogService.Write($"[MDADM] exit={exit}");
-            LogService.Write("[MDADM] STDOUT:");
-            LogService.Write(stdout ?? "<null>");
-            LogService.Write("[MDADM] STDERR:");
-            LogService.Write(stderr ?? "<null>");
-
-            if (exit != 0 || string.IsNullOrWhiteSpace(stdout))
-            {
-                LogService.Error("[MDADM] No se pudo obtener la salida de mdadm --detail --scan.");
-                return false;
-            }
-
-            var arrayLines = stdout
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => l.Trim())
-                .Where(l => l.StartsWith("ARRAY"))
-                .ToList();
-
-            LogService.Write($"[MDADM] Líneas ARRAY detectadas: {arrayLines.Count}");
-
-            if (arrayLines.Count == 0)
-            {
-                LogService.Error("[MDADM] No se detectaron líneas ARRAY.");
-                return false;
-            }
-
-            var newest = arrayLines
-                .OrderByDescending(l =>
-                {
-                    var match = Regex.Match(l, @"md(\d+)");
-                    return match.Success ? int.Parse(match.Groups[1].Value) : -1;
-                })
-                .First();
-
-            LogService.Write("[MDADM] Línea seleccionada:");
-            LogService.Write(newest);
-
-            string[] possiblePaths =
-            {
-                "/etc/mdadm/mdadm.conf",
-                "/etc/mdadm.conf"
-            };
-
-            var confPath = possiblePaths.FirstOrDefault(File.Exists)
-                           ?? possiblePaths[0];
-
-            LogService.Write($"[MDADM] Usando ruta de configuración: {confPath}");
-
-            if (!File.Exists(confPath))
-            {
-                LogService.Write("[MDADM] Archivo no existe. Creándolo...");
-                File.WriteAllText(confPath,
-                    "DEVICE partitions\n" +
-                    "MAILADDR root\n\n"
-                );
-            }
-
-            var existing = File.ReadAllText(confPath);
-
-            if (existing.Contains(newest))
-            {
-                LogService.Write("[MDADM] La entrada ya existe en mdadm.conf");
-                return true;
-            }
-
-            var tempFile = "/tmp/mdadm.conf.append";
-            File.WriteAllText(tempFile, newest + Environment.NewLine);
-
-            var append = ShellHelper.EjecutarComoRoot($"cat {tempFile} >> {confPath}");
-
-            LogService.Write($"[MDADM] append exit={append.ExitCode}");
-            LogService.Write("[MDADM] append STDERR:");
-            LogService.Write(append.Stderr ?? "<null>");
-
-            if (append.ExitCode != 0)
-            {
-                LogService.Error("[MDADM] Error al escribir en mdadm.conf:");
-                LogService.Error(append.Stderr);
-                return false;
-            }
-
-            LogService.Write("[MDADM] Entrada agregada correctamente a mdadm.conf");
-            LogService.Write("========== MDADM PERSIST END (OK) ==========");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("[MDADM] EXCEPCIÓN:");
-            LogService.Error(ex.ToString());
-            LogService.Write("========== MDADM PERSIST END (EXCEPTION) ==========");
+            LogService.Error("[MDADM] No se pudo obtener la salida de mdadm --detail --scan.");
             return false;
         }
+
+        string[] possiblePaths =
+        {
+            "/etc/mdadm/mdadm.conf",
+            "/etc/mdadm.conf"
+        };
+
+        var confPath = possiblePaths.FirstOrDefault(File.Exists)
+                       ?? possiblePaths[0];
+
+        if (!File.Exists(confPath))
+        {
+            LogService.Write("[MDADM] Archivo no existe. Creándolo...");
+            File.WriteAllText(confPath,
+                "DEVICE partitions\n" +
+                "MAILADDR root\n\n"
+            );
+        }
+
+        var tempFile = "/tmp/mdadm.conf.new";
+        File.WriteAllText(tempFile,
+            "DEVICE partitions\n" +
+            "MAILADDR root\n\n" +
+            stdout.Trim() + Environment.NewLine);
+
+        var copy = ShellHelper.EjecutarComoRoot($"cp {tempFile} {confPath}");
+
+        LogService.Write($"[MDADM] cp exit={copy.ExitCode}");
+        LogService.Write("[MDADM] cp STDERR:");
+        LogService.Write(copy.Stderr ?? "<null>");
+
+        if (copy.ExitCode != 0)
+        {
+            LogService.Error("[MDADM] Error al escribir en mdadm.conf:");
+            LogService.Error(copy.Stderr);
+            return false;
+        }
+
+        LogService.Write("[MDADM] mdadm.conf actualizado correctamente");
+        LogService.Write("========== MDADM PERSIST END (OK) ==========");
+        return true;
     }
+    catch (Exception ex)
+    {
+        LogService.Error("[MDADM] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        LogService.Write("========== MDADM PERSIST END (EXCEPTION) ==========");
+        return false;
+    }
+}
+
 
     public bool WaitForArray(string mdName, int timeoutMs = 5000)
     {
@@ -2086,92 +2099,94 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     }
 
     public bool RemoveArrayFromFstab(string arrayPath)
+{
+    try
     {
-        try
+        var fstab = "/etc/fstab";
+
+        if (!File.Exists(fstab))
         {
-            var fstab = "/etc/fstab";
-
-            if (!File.Exists(fstab))
-            {
-                LogService.Write("[FSTAB] No existe /etc/fstab, nada que limpiar.");
-                return true;
-            }
-
-            var lines = File.ReadAllLines(fstab);
-
-            var dev = arrayPath.Trim();
-            var name = dev.Split('/').Last();
-            var nameOnly = name.Replace("md", "");
-
-                       string[] patterns =
-            {
-                dev,                 // /dev/md0
-                $"/dev/{name}",      // /dev/md0
-                $"/dev/md/{name}",   // /dev/md/md0
-                name,                // md0
-                $"md{nameOnly}",     // md0
-                $"md/{name}",        // md/md0
-                $"md/{nameOnly}"     // md/0
-            };
-
-            var newLines = new List<string>();
-
-            foreach (var line in lines)
-            {
-                var trimmed = line.Trim();
-
-                var match = patterns.Any(p => trimmed.StartsWith(p, StringComparison.Ordinal));
-
-                // ⭐ También eliminar entradas por UUID
-                if (!match &&
-                    trimmed.StartsWith("UUID=", StringComparison.Ordinal) &&
-                    trimmed.Contains(name, StringComparison.Ordinal))
-                    match = true;
-
-                // ⭐ También eliminar symlinks de mdadm
-                if (!match &&
-                    (trimmed.Contains("md-name", StringComparison.Ordinal) ||
-                     trimmed.Contains("md-uuid", StringComparison.Ordinal)) &&
-                    trimmed.Contains(name, StringComparison.Ordinal))
-                    match = true;
-
-                if (!match)
-                    newLines.Add(line);
-            }
-
-            if (newLines.Count == lines.Length)
-            {
-                LogService.Write("[FSTAB] No había entrada para este array.");
-                return true;
-            }
-
-            var tempFile = "/tmp/fstab.cleaned";
-            File.WriteAllLines(tempFile, newLines);
-
-            var result = ShellHelper.EjecutarComoRoot($"cp {tempFile} {fstab}");
-
-            if (result.ExitCode != 0)
-            {
-                LogService.Error("[FSTAB] Error al actualizar /etc/fstab:");
-                LogService.Error(result.Stderr);
-                return false;
-            }
-
-            LogService.Write("[FSTAB] Entrada eliminada correctamente.");
+            LogService.Write("[FSTAB] No existe /etc/fstab, nada que limpiar.");
             return true;
         }
-        catch (Exception ex)
+
+        var lines = File.ReadAllLines(fstab);
+
+        var dev = arrayPath.Trim();
+
+        // ⭐ obtener UUID real del dispositivo, si existe
+        var uuidResult = ShellHelper.EjecutarComoRoot($"blkid -s UUID -o value {dev}");
+        var uuid = uuidResult.ExitCode == 0 ? uuidResult.Stdout.Trim() : "";
+
+        var newLines = new List<string>();
+
+        foreach (var line in lines)
         {
-            LogService.Error("[FSTAB] EXCEPCIÓN:");
-            LogService.Error(ex.ToString());
+            var trimmed = line.Trim();
+
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+            {
+                newLines.Add(line);
+                continue;
+            }
+
+            var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                newLines.Add(line);
+                continue;
+            }
+
+            var firstField = parts[0];
+
+            bool match = false;
+
+            if (string.Equals(firstField, dev, StringComparison.Ordinal))
+                match = true;
+
+            if (!match && !string.IsNullOrWhiteSpace(uuid) &&
+                string.Equals(firstField, $"UUID={uuid}", StringComparison.OrdinalIgnoreCase))
+                match = true;
+
+            if (!match)
+                newLines.Add(line);
+        }
+
+        if (newLines.Count == lines.Length)
+        {
+            LogService.Write("[FSTAB] No había entrada para este array.");
+            return true;
+        }
+
+        var tempFile = "/tmp/fstab.cleaned";
+        File.WriteAllLines(tempFile, newLines);
+
+        var result = ShellHelper.EjecutarComoRoot($"cp {tempFile} {fstab}");
+
+        if (result.ExitCode != 0)
+        {
+            LogService.Error("[FSTAB] Error al actualizar /etc/fstab:");
+            LogService.Error(result.Stderr);
             return false;
         }
+
+        ShellHelper.EjecutarComoRoot("systemctl daemon-reload");
+
+        LogService.Write("[FSTAB] Entrada eliminada correctamente.");
+        return true;
     }
+    catch (Exception ex)
+    {
+        LogService.Error("[FSTAB] EXCEPCIÓN:");
+        LogService.Error(ex.ToString());
+        return false;
+    }
+}
+
     
     
     public async Task<bool> EnsureArraySafeForModification(string arrayName, bool allowFstab = false)
     {
-        // ⭐ Resolver PATH REAL del array (sin cambiar firma)
         string devPath;
 
         if (arrayName.StartsWith("/dev/"))
@@ -2189,7 +2204,6 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             devPath = array != null ? array.Path : $"/dev/{arrayName}";
         }
 
-        // 1) ¿Está montado?
         var mounts = await ShellHelper.RunCleanAsync(
             $"grep -E '^{devPath}\\b' /proc/mounts || true");
 
@@ -2201,20 +2215,34 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             return false;
         }
 
-        // 2) ¿Está en fstab?
-        var fstab = await ShellHelper.RunCleanAsync(
-            $"grep -E '^{devPath}\\b' /etc/fstab || true");
+        // ⭐ también comprobar por UUID en fstab
+        var uuidResult = ShellHelper.RunCleanAsync($"blkid -s UUID -o value {devPath}");
+        var uuid = (await uuidResult)?.Trim() ?? "";
+
+        string fstab = "";
+        if (!allowFstab)
+        {
+            fstab = await ShellHelper.RunCleanAsync(
+                $"grep -E '^{devPath}\\b' /etc/fstab || true");
+
+            if (string.IsNullOrWhiteSpace(fstab) && !string.IsNullOrWhiteSpace(uuid))
+            {
+                fstab = await ShellHelper.RunCleanAsync(
+                    $"grep -E '^UUID={uuid}\\b' /etc/fstab || true");
+            }
+        }
 
         if (!allowFstab && !string.IsNullOrWhiteSpace(fstab))
         {
             NotificadorLinux.Enviar(
-                $"{devPath} está en /etc/fstab. Debe eliminarse antes de modificar el array.",
+                $"{devPath} (o su UUID) está en /etc/fstab. Debe eliminarse antes de modificar el array.",
                 7000, "critical");
             return false;
         }
 
         return true;
     }
+
 
 
     public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string detail)

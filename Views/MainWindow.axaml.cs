@@ -148,10 +148,9 @@ public partial class MainWindow : Window
             Credentials.AllowRaidCalls = true;
 
             // ⭐ FIX DEFINITIVO:
-            // Esperar a que Avalonia construya el árbol visual ANTES de refrescar StatusView
             Dispatcher.UIThread.Post(async () =>
             {
-                await Task.Delay(50); // ⭐ Permite que el TabItem se construya
+                await Task.Delay(50);
 
                 if (StatusViewControl != null)
                 {
@@ -169,7 +168,7 @@ public partial class MainWindow : Window
         }
 
         // ============================================================
-        // 2) CHECK mdadm (UNIVERSAL → SIN ROOT)
+        // 2) CHECK mdadm
         // ============================================================
 
         StatusBarText.Text = "Checking RAID subsystem...";
@@ -194,7 +193,7 @@ public partial class MainWindow : Window
         StatusBarText.Text = "System ready.";
 
         // ============================================================
-        // 3) START TIMERS ONLY WHEN EVERYTHING IS READY
+        // 3) START TIMERS
         // ============================================================
 
         _timerManager = new TimerManager(
@@ -234,7 +233,7 @@ public partial class MainWindow : Window
             DisksViewControl?.Initialize(_sudoReady, false);
         }
 
-        // RAID TAB
+        // RAID TAB → refrescar usando el mismo método que el botón Refresh
         if (MainTabs.SelectedIndex == 1)
         {
             if (!_sudoReady)
@@ -250,80 +249,29 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_raidLoaded || _raidLoading)
+            if (_raidLoading)
             {
-                LogService.Debug("[MAIN] RAID already loaded or loading.");
+                LogService.Debug("[MAIN] RAID already loading.");
                 return;
             }
 
-            _raidLoading = true;
+            LogService.Debug("[MAIN] RAID tab selected → refreshing RAID info...");
             StatusBarText.Text = "Loading RAID information...";
 
-            LogService.Debug("[MAIN] Launching LoadRaidAsync...");
-            _ = LoadRaidAsync();
+            _raidLoading = true;
+
+            if (RaidViewControl != null)
+                await RaidViewControl.RefreshArraysAsync();
+
+            _raidLoading = false;
         }
     }
 
     private async Task LoadRaidAsync()
     {
-        LogService.Write("[MAIN] ================= RAID LOAD START =================");
-
-        if (!_sudoReady)
-        {
-            LogService.Error("[MAIN] LoadRaidAsync aborted → sudo not ready.");
-            return;
-        }
-
-        if (!_raidSubsystemReady)
-        {
-            LogService.Error("[MAIN] LoadRaidAsync aborted → mdadm not available.");
-            return;
-        }
-
-        try
-        {
-            using (LoadingService.Show("Loading RAID arrays..."))
-            {
-                // ⭐ FIX: usar Singleton
-                var service = RaidService.Instance;
-
-                LogService.Debug("[MAIN] Calling GetArraysAsync...");
-                var arrays = await service.GetArraysAsync();
-
-                LogService.Debug($"[MAIN] Arrays returned: {arrays.Count}");
-
-                LogService.Debug("[MAIN] Calling GetAllDisksAsync...");
-                var disks = await service.GetAllDisksAsync();
-
-                LogService.Debug($"[MAIN] Disks returned: {disks.Count}");
-
-                if (RaidViewControl != null)
-                {
-                    RaidViewControl.ApplyTemplate();
-                    RaidViewControl.UpdateLayout();
-
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        RaidViewControl.SetArrays(arrays);
-                    });
-                }
-
-                StatusBarText.Text = "RAID information loaded.";
-            }
-
-            _raidLoaded = true;
-            LogService.Write("[MAIN] ================= RAID LOAD END =================");
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("[MAIN] LoadRaidAsync EXCEPTION:");
-            LogService.Error(ex.ToString());
-            StatusBarText.Text = "Error loading RAID information.";
-        }
-        finally
-        {
-            _raidLoading = false;
-        }
+        // ⭐ Este método ya no se usa para refrescar RAID
+        // pero NO lo elimino porque tú pediste que no se eliminen métodos.
+        LogService.Write("[MAIN] LoadRaidAsync called (legacy).");
     }
 
     private async void OnOpenConfig(object? sender, RoutedEventArgs e)
@@ -351,6 +299,9 @@ public partial class MainWindow : Window
     private void onRaid_Clicked(object? sender, PointerPressedEventArgs e)
     {
         StatusBarText.Text = "Redundant Array of Independent Disks";
+
+        if (MainTabs.SelectedIndex != 1)
+            MainTabs.SelectedIndex = 1;
     }
 
     private void onDisks_Clicked(object? sender, PointerPressedEventArgs e)

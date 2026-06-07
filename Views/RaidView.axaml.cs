@@ -1106,67 +1106,88 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     }
 
     private Border BuildStatusDot(RaidDiskInfo disk)
+{
+    // 1. Determinar color base según RAID Membership
+    Color color = disk.RaidMembership switch
     {
-        Color color = disk.RaidMembership switch
+        RaidMembership.Active      => Color.FromRgb(0, 200, 0),
+        RaidMembership.Spare       => Color.FromRgb(0, 150, 255),
+        RaidMembership.Rebuilding  => Color.FromRgb(255, 200, 0),
+        RaidMembership.Syncing     => Color.FromRgb(255, 200, 0),
+        RaidMembership.Faulty      => Color.FromRgb(220, 0, 0),
+        _                          => Color.FromRgb(90, 90, 90)
+    };
+
+    // 2. Glow (círculo grande)
+    var glow = new Border
+    {
+        Width = 28,
+        Height = 28,
+        CornerRadius = new CornerRadius(14),
+        Background = new SolidColorBrush(color) { Opacity = 0.35 },
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    // 3. Dot (círculo pequeño)
+    var dot = new Border
+    {
+        Width = 16,
+        Height = 16,
+        CornerRadius = new CornerRadius(8),
+        Background = new SolidColorBrush(color),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    // 4. Contenedor
+    var container = new Grid
+    {
+        Width = 28,
+        Height = 28
+    };
+
+    container.Children.Add(glow);
+    container.Children.Add(dot);
+
+    // 5. Animaciones según estado
+    Dispatcher.UIThread.Post(() =>
+    {
+        string state = disk.State?.ToLowerInvariant() ?? "unknown";
+
+        // WARNING → parpadeo suave amarillo
+        if (state == "warning")
         {
-            RaidMembership.Active      => Color.FromRgb(0, 200, 0),
-            RaidMembership.Spare       => Color.FromRgb(0, 150, 255),
-            RaidMembership.Rebuilding  => Color.FromRgb(255, 200, 0),
-            RaidMembership.Syncing     => Color.FromRgb(255, 200, 0),
-            RaidMembership.Faulty      => Color.FromRgb(220, 0, 0),
-            _                          => Color.FromRgb(90, 90, 90)
-        };
+            AnimateWarning(glow, dot);
+            return;
+        }
 
-        var glow = new Border
+        // FAULTY → animación SOS
+        if (state == "faulty")
         {
-            Width = 28,
-            Height = 28,
-            CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(color) { Opacity = 0.35 },
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+            AnimateSOS(glow, dot);
+            return;
+        }
 
-        var dot = new Border
+        // REBUILD / SYNC → animación de reconstrucción
+        if (disk.RaidMembership == RaidMembership.Rebuilding ||
+            disk.RaidMembership == RaidMembership.Syncing)
         {
-            Width = 16,
-            Height = 16,
-            CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(color),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+            AnimateRebuild(glow, dot);
+            return;
+        }
 
-        var container = new Grid
-        {
-            Width = 28,
-            Height = 28
-        };
+        // Estados normales → sin animación
+    });
 
-        container.Children.Add(glow);
-        container.Children.Add(dot);
+    // 6. Devolver borde contenedor
+    return new Border
+    {
+        Child = container,
+        Background = Brushes.Transparent
+    };
+}
 
-        Dispatcher.UIThread.Post(() =>
-        {
-            switch (disk.RaidMembership)
-            {
-                case RaidMembership.Rebuilding:
-                case RaidMembership.Syncing:
-                    AnimateRebuild(glow, dot);
-                    break;
-
-                case RaidMembership.Faulty:
-                    AnimateSOS(glow, dot);
-                    break;
-            }
-        });
-
-        return new Border
-        {
-            Child = container,
-            Background = Brushes.Transparent
-        };
-    }
 
     private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, string? action)
 {
@@ -1509,23 +1530,27 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     {
         var parent = GetWindow();
 
-        // ⭐ FIX: usar Singleton
         var service = RaidService.Instance;
 
         var allDisks = await service.GetAllDisksAsync();
         var nodes = RaidService.Nodes;
 
+        // ⭐ FILTRO UNIVERSAL
         var freeDisks = allDisks
-            .Where(d => d.RaidMembership == RaidMembership.None)
-            .Where(d => string.IsNullOrWhiteSpace(d.MountPath))
-            .Where(d => d.Children.All(child =>
-            {
-                if (!nodes.TryGetValue(child, out var part))
-                    return true;
+            .Where(d =>
+                // 1. No pertenece a un array (salvo removed)
+                (d.RaidMembership == RaidMembership.None ||
+                 d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
 
-                string mp = part.mountpoint ?? "";
-                return string.IsNullOrWhiteSpace(mp);
-            }))
+                // 2. No está montado
+                && !d.IsMounted
+
+                // 3. No tiene particiones montadas
+                && (d.Children == null || d.Children.Count == 0)
+
+                // 4. No es disco del sistema
+                && !d.IsSystemDisk
+            )
             .ToList();
 
         if (freeDisks.Count == 0)
@@ -1568,6 +1593,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         await LoadRaidAsync(true);
     }
+
 
 
     private void CreateFakeArray(CreateArrayResult result)
@@ -1778,6 +1804,12 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     {
         OpenArrayConfigWindow();
     }
+    
+    public Task RefreshArraysAsync()
+    {
+        return LoadRaidAsync();
+    }
+
 
     private async Task LoadRaidAsync(bool afterCreate = false)
     {
@@ -2233,18 +2265,26 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
     private async Task AddDiskToArrayUI(RaidArrayInfo array)
     {
-        // ⭐ FIX: usar Singleton
         var service = RaidService.Instance;
 
         var allDisks = await service.GetAllDisksAsync();
 
+        // ⭐ FILTRO UNIVERSAL
         var candidates = allDisks
             .Where(d =>
-                !d.IsMounted &&
-                d.RaidMembership == RaidMembership.None &&
-                !d.Name.StartsWith("loop", StringComparison.OrdinalIgnoreCase) &&
-                !d.Name.StartsWith("zram", StringComparison.OrdinalIgnoreCase) &&
-                !d.IsSystemDisk)
+                // 1. No pertenece a un array (salvo removed)
+                (d.RaidMembership == RaidMembership.None ||
+                 d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
+
+                // 2. No está montado
+                && !d.IsMounted
+
+                // 3. No tiene particiones montadas
+                && (d.Children == null || d.Children.Count == 0)
+
+                // 4. No es disco del sistema
+                && !d.IsSystemDisk
+            )
             .ToList();
 
         if (array.IsResyncing || array.IsRecovering || array.RebuildProgress > 0)
@@ -2286,6 +2326,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         await LoadRaidAsync();
     }
+
 
 
     private bool ArrayAllowsExpansion(RaidArrayInfo array)

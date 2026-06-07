@@ -75,6 +75,18 @@ public partial class DisksView : UserControl
         RenderDisks();
     }
 
+    // ⭐ NUEVO — MÉTODO PÚBLICO DE REFRESCO
+    public Task RefreshDisksAsync()
+    {
+        LogService.Write("[DISKSVIEW] RefreshDisksAsync() called.");
+
+        _disks.Clear();
+        LoadRealData();
+        RenderDisks();
+
+        return Task.CompletedTask;
+    }
+
     // ============================================================
     // FAKE DATA
     // ============================================================
@@ -88,10 +100,6 @@ public partial class DisksView : UserControl
             Model = "Samsung SSD 860 EVO",
             Size = "500GB",
             Serial = "S3Z9NX0M123456A",
-           // Temperature = "34°C",
-            //State = "OK",
-            //FsType = "",
-            //MountPath = "",
             Icon = DiskIconService.GetIcon(null, "SSD SATA", false),
             IsRotational = false
         });
@@ -102,10 +110,6 @@ public partial class DisksView : UserControl
             Model = "Seagate Barracuda",
             Size = "2TB",
             Serial = "ZDH12X0A0001",
-           // Temperature = "41°C",
-            //State = "OK",
-            //FsType = "",
-            //MountPath = "",
             Icon = DiskIconService.GetIcon(null, "HDD", true),
             IsRotational = true
         });
@@ -114,7 +118,6 @@ public partial class DisksView : UserControl
     // ============================================================
     // REAL DATA
     // ============================================================
-    
     private void LoadRealData()
     {
         _disks.Clear();
@@ -124,9 +127,16 @@ public partial class DisksView : UserControl
             var list = DiskService.GetAllDisks();
             LogService.Write($"[DISKSVIEW] Discos detectados: {list.Count}");
 
-            foreach (var d in list)
+            var eligible = list.Where(d =>
+                (d.RaidMembership == RaidMembership.None ||
+                 d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
+                && !d.IsMounted
+                && (d.Children == null || d.Children.Count == 0)
+                && !d.IsSystemDisk
+            );
+
+            foreach (var d in eligible)
             {
-                // Normalizar campos existentes en el modelo moderno
                 d.Model ??= "Unknown";
                 d.Serial ??= "Unknown";
                 d.Size ??= "Unknown";
@@ -134,7 +144,6 @@ public partial class DisksView : UserControl
                 d.MountPath ??= "";
                 d.State ??= "UNKNOWN";
 
-                // Normalizar icono
                 d.Icon = DiskIconService.GetIcon(d.Icon, d.Model, d.IsRotational);
 
                 _disks.Add(d);
@@ -145,7 +154,6 @@ public partial class DisksView : UserControl
             LogService.Error($"[DISKSVIEW] Error cargando discos reales: {ex}");
         }
     }
-
 
     // ============================================================
     // RENDERIZAR TARJETAS
@@ -161,164 +169,154 @@ public partial class DisksView : UserControl
     // ============================================================
     // TARJETA DE DISCO
     // ============================================================
-    
     private Border BuildDiskCard(RaidDiskInfo disk)
-{
-    EnsureResources();
-
-    // Normalizar campos
-    disk.Model ??= "Unknown";
-    disk.Serial ??= "Unknown";
-    disk.Size ??= "Unknown";
-    disk.FsType ??= "";
-    disk.MountPath ??= "";
-    disk.State ??= "UNKNOWN";
-
-    // ⭐ Temperatura real vía smartctl
-    string temperature = GetTemperature(disk);
-
-    // ⭐ Tipo físico
-    string type =
-        disk.IsNvme ? "NVMe" :
-        !disk.IsRotational ? "SSD" :
-        "HDD";
-
-    // ⭐ Icono
-    var fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
-    var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
-    icon.Stretch = Stretch.Uniform;
-
-    var iconContainer = new Border
     {
-        Width = 80,
-        Height = 80,
-        Margin = new Thickness(0, 0, 16, 0),
-        VerticalAlignment = VerticalAlignment.Top,
-        Child = icon
-    };
+        EnsureResources();
 
-    // ⭐ Detalles
-    var details = new Grid();
-    for (var i = 0; i < 6; i++)
-        details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        disk.Model ??= "Unknown";
+        disk.Serial ??= "Unknown";
+        disk.Size ??= "Unknown";
+        disk.FsType ??= "";
+        disk.MountPath ??= "";
+        disk.State ??= "UNKNOWN";
 
-    var r = 0;
+        string temperature = GetTemperature(disk);
 
-    void AddRow(Control c)
-    {
-        details.Children.Add(c);
-        Grid.SetRow(c, r++);
-    }
+        string type =
+            disk.IsNvme ? "NVMe" :
+            !disk.IsRotational ? "SSD" :
+            "HDD";
 
-    AddRow(new TextBlock
-    {
-        Text = disk.Model,
-        TextWrapping = TextWrapping.Wrap,
-        FontSize = 16,
-        FontWeight = FontWeight.Bold,
-        Foreground = _bmwTextBrush
-    });
+        var fixedIcon = DiskIconService.GetIcon(disk.Icon, disk.Model, disk.IsRotational);
+        var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
+        icon.Stretch = Stretch.Uniform;
 
-    AddRow(new TextBlock
-    {
-        Text = $"/dev/{disk.Name}  •  {disk.Size}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    AddRow(new TextBlock
-    {
-        Text = $"Type: {type}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    AddRow(new TextBlock
-    {
-        Text = $"Serial: {disk.Serial}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    AddRow(new TextBlock
-    {
-        Text = $"Temperature: {temperature}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    AddRow(new TextBlock
-    {
-        Text = $"Status: {disk.State}",
-        Foreground = _bmwAccentBrush
-    });
-
-    // ⭐ Botón More
-    var btnMore = new Button
-    {
-        Content = "More",
-        Width = 70,
-        Height = 32,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        VerticalAlignment = VerticalAlignment.Top
-    };
-    btnMore.Classes.Add("MoreButton");
-
-    if (!disk.IsSystemDisk)
-    {
-        var menu = BuildDiskContextMenu(disk);
-
-        foreach (var item in menu.Items.OfType<MenuItem>())
-            item.Click += (_, _) =>
-            {
-                var action = item.Tag?.ToString();
-                OnMenuClick(disk, action);
-            };
-
-        btnMore.ContextMenu = menu;
-
-        btnMore.Click += (_, _) =>
+        var iconContainer = new Border
         {
-            menu.PlacementTarget = btnMore;
-            menu.Open(btnMore);
+            Width = 80,
+            Height = 80,
+            Margin = new Thickness(0, 0, 16, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = icon
+        };
+
+        var details = new Grid();
+        for (var i = 0; i < 6; i++)
+            details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+
+        var r = 0;
+
+        void AddRow(Control c)
+        {
+            details.Children.Add(c);
+            Grid.SetRow(c, r++);
+        }
+
+        AddRow(new TextBlock
+        {
+            Text = disk.Model,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 16,
+            FontWeight = FontWeight.Bold,
+            Foreground = _bmwTextBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"/dev/{disk.Name}  •  {disk.Size}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Type: {type}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Serial: {disk.Serial}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Temperature: {temperature}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Status: {disk.State}",
+            Foreground = _bmwAccentBrush
+        });
+
+        var btnMore = new Button
+        {
+            Content = "More",
+            Width = 70,
+            Height = 32,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        btnMore.Classes.Add("MoreButton");
+
+        if (!disk.IsSystemDisk)
+        {
+            var menu = BuildDiskContextMenu(disk);
+
+            foreach (var item in menu.Items.OfType<MenuItem>())
+                item.Click += (_, _) =>
+                {
+                    var action = item.Tag?.ToString();
+                    OnMenuClick(disk, action);
+                };
+
+            btnMore.ContextMenu = menu;
+
+            btnMore.Click += (_, _) =>
+            {
+                menu.PlacementTarget = btnMore;
+                menu.Open(btnMore);
+            };
+        }
+        else
+        {
+            btnMore.IsVisible = false;
+        }
+
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+
+        grid.Children.Add(iconContainer);
+        Grid.SetColumn(iconContainer, 0);
+        Grid.SetRowSpan(iconContainer, r);
+
+        grid.Children.Add(details);
+        Grid.SetColumn(details, 1);
+
+        grid.Children.Add(btnMore);
+        Grid.SetColumn(btnMore, 2);
+        Grid.SetRow(btnMore, 0);
+
+        return new Border
+        {
+            Background = _bmwSurfaceElevatedBrush,
+            BorderBrush = _bmwBorderBrush,
+            BorderThickness = _cardBorderThickness,
+            CornerRadius = _cardCornerRadius,
+            Padding = _cardPadding,
+            Margin = _cardMargin,
+            Child = grid
         };
     }
-    else
-    {
-        btnMore.IsVisible = false;
-    }
-
-    // ⭐ Grid principal
-    var grid = new Grid
-    {
-        ColumnDefinitions =
-        {
-            new ColumnDefinition(GridLength.Auto),
-            new ColumnDefinition(GridLength.Star),
-            new ColumnDefinition(GridLength.Auto)
-        }
-    };
-
-    grid.Children.Add(iconContainer);
-    Grid.SetColumn(iconContainer, 0);
-    Grid.SetRowSpan(iconContainer, r);
-
-    grid.Children.Add(details);
-    Grid.SetColumn(details, 1);
-
-    grid.Children.Add(btnMore);
-    Grid.SetColumn(btnMore, 2);
-    Grid.SetRow(btnMore, 0);
-
-    // ⭐ Tarjeta final
-    return new Border
-    {
-        Background = _bmwSurfaceElevatedBrush,
-        BorderBrush = _bmwBorderBrush,
-        BorderThickness = _cardBorderThickness,
-        CornerRadius = _cardCornerRadius,
-        Padding = _cardPadding,
-        Margin = _cardMargin,
-        Child = grid
-    };
-}
-
 
     // ============================================================
     // MENÚ MORE
@@ -453,13 +451,10 @@ public partial class DisksView : UserControl
     // ============================================================
     // ACCIONES REALES
     // ============================================================
-    
     private async Task ShowInfo(RaidDiskInfo disk)
     {
-        // Temperatura real vía smartctl
         string temperature = GetTemperature(disk);
 
-        // Tipo físico
         string type =
             disk.IsNvme ? "NVMe" :
             !disk.IsRotational ? "SSD" :
@@ -478,23 +473,20 @@ public partial class DisksView : UserControl
         await ShowInfoDialog("Disk Information", msg);
     }
 
-
     private async Task RunSmart(RaidDiskInfo disk)
     {
         var r = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
         var output = (r.Stdout + "\n" + r.Stderr).Trim();
         await ShowConsoleDialog($"SMART — /dev/{disk.Name}", output);
     }
-    
+
     private string GetTemperature(RaidDiskInfo disk)
     {
         try
         {
-            // Ejecutar smartctl
             var r = ShellHelper.EjecutarComoRoot($"smartctl -A /dev/{disk.Name}");
             var text = (r.Stdout + "\n" + r.Stderr).Trim();
 
-            // Buscar líneas típicas de temperatura
             foreach (var line in text.Split('\n'))
             {
                 var lower = line.ToLowerInvariant();
@@ -504,10 +496,8 @@ public partial class DisksView : UserControl
                     lower.Contains("current drive temperature") ||
                     lower.Contains("temperature:"))
                 {
-                    // Extraer el último número de la línea
                     var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
 
-                    // Buscar algo que parezca un número
                     foreach (var p in parts.Reverse())
                     {
                         if (int.TryParse(p.Replace("°C", "").Replace("C", ""), out var temp))
@@ -518,13 +508,10 @@ public partial class DisksView : UserControl
         }
         catch
         {
-            // Ignorar errores
         }
 
         return "N/A";
     }
-
-    
 
     private async Task UnmountDisk(RaidDiskInfo disk)
     {
@@ -659,3 +646,5 @@ public partial class DisksView : UserControl
         RenderDisks();
     }
 }
+
+                  
