@@ -570,105 +570,111 @@ public partial class RaidView : UserControl
     }
 
     private void UpdateArrayCardProgress(RaidArrayInfo array)
+{
+    foreach (var child in ListArrays.Children)
     {
-        foreach (var child in ListArrays.Children)
+        if (child is not Border glowBorder)
+            continue;
+
+        if (glowBorder.Child is not Border cardBorder)
+            continue;
+
+        if (cardBorder.Child is not Grid overlay)
+            continue;
+
+        var grid = overlay.Children.OfType<Grid>().FirstOrDefault();
+        if (grid == null) continue;
+
+        var infoPanel = grid.Children.OfType<StackPanel>().FirstOrDefault();
+        if (infoPanel == null) continue;
+
+        var nameBlock = infoPanel.Children.OfType<TextBlock>().FirstOrDefault();
+        if (nameBlock == null) continue;
+
+        if (!nameBlock.Text.StartsWith(array.Name))
+            continue;
+
+        var progressText = infoPanel.Children
+            .OfType<TextBlock>()
+            .FirstOrDefault(t =>
+                t.Text.Contains("%") ||
+                t.Text.Contains("Resyncing") ||
+                t.Text.Contains("Rebuilding") ||
+                t.Text.Contains("Checking") ||
+                t.Text.Contains("Repairing") ||
+                t.Text.Contains("Recovering"));
+
+        var barContainer = infoPanel.Children
+            .OfType<Border>()
+            .FirstOrDefault(b => b.Height == 10);
+
+        var op = GetOperationLabel(array);
+
+        // ⭐ FIX: si la operación terminó → ocultar barra
+        if (array.RebuildProgress >= 100 || string.IsNullOrWhiteSpace(op))
         {
-            if (child is not Border glowBorder)
-                continue;
+            if (progressText != null)
+                progressText.Text = "";
 
-            if (glowBorder.Child is not Border cardBorder)
-                continue;
+            if (barContainer != null)
+                barContainer.IsVisible = false;
 
-            if (cardBorder.Child is not Grid overlay)
-                continue;
-
-            var grid = overlay.Children.OfType<Grid>().FirstOrDefault();
-            if (grid == null) continue;
-
-            var infoPanel = grid.Children.OfType<StackPanel>().FirstOrDefault();
-            if (infoPanel == null) continue;
-
-            var nameBlock = infoPanel.Children.OfType<TextBlock>().FirstOrDefault();
-            if (nameBlock == null) continue;
-
-            if (!nameBlock.Text.StartsWith(array.Name))
-                continue;
-
-            var progressText = infoPanel.Children
-                .OfType<TextBlock>()
-                .FirstOrDefault(t =>
-                    t.Text.Contains("%") ||
-                    t.Text.Contains("Resyncing") ||
-                    t.Text.Contains("Rebuilding") ||
-                    t.Text.Contains("Checking") ||
-                    t.Text.Contains("Repairing") ||
-                    t.Text.Contains("Recovering"));
-
-            var barContainer = infoPanel.Children
-                .OfType<Border>()
-                .FirstOrDefault(b => b.Height == 10);
-
-            var op = GetOperationLabel(array);
-
-            if (string.IsNullOrWhiteSpace(op))
-            {
-                if (progressText != null)
-                    progressText.Text = "";
-
-                if (barContainer != null)
-                    barContainer.IsVisible = false;
-
-                return;
-            }
-
-            if (progressText == null)
-            {
-                progressText = new TextBlock
-                {
-                    FontSize = 14,
-                    Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!,
-                    Margin = new Thickness(0, 8, 0, 0)
-                };
-                infoPanel.Children.Add(progressText);
-            }
-
-            if (barContainer == null)
-            {
-                barContainer = new Border
-                {
-                    Background = Brushes.Gray,
-                    Height = 10,
-                    CornerRadius = new CornerRadius(3),
-                    Margin = new Thickness(0, 2, 0, 0)
-                };
-
-                var barFillNew = new Border
-                {
-                    Background = Brushes.LimeGreen,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    Width = 0,
-                    Height = 10,
-                    CornerRadius = new CornerRadius(3)
-                };
-
-                barContainer.Child = barFillNew;
-                infoPanel.Children.Add(barContainer);
-            }
-
-            progressText.Text = $"{op}: {array.RebuildProgress}%"
-                                + (array.RebuildETA != "N/A" ? $" (ETA {array.RebuildETA})" : " (ETA N/A)");
-
-            var barFill = barContainer.Child as Border;
-            if (barFill != null)
-            {
-                var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
-                barFill.Width = barContainer.Bounds.Width * pct;
-            }
-
-            barContainer.IsVisible = true;
             return;
         }
+
+        // Crear texto si no existe
+        if (progressText == null)
+        {
+            progressText = new TextBlock
+            {
+                FontSize = 14,
+                Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            infoPanel.Children.Add(progressText);
+        }
+
+        // Crear barra si no existe
+        if (barContainer == null)
+        {
+            barContainer = new Border
+            {
+                Background = Brushes.Gray,
+                Height = 10,
+                CornerRadius = new CornerRadius(3),
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+
+            var barFillNew = new Border
+            {
+                Background = Brushes.LimeGreen,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 0,
+                Height = 10,
+                CornerRadius = new CornerRadius(3)
+            };
+
+            barContainer.Child = barFillNew;
+            infoPanel.Children.Add(barContainer);
+        }
+
+        // Actualizar texto
+        progressText.Text = $"{op}: {array.RebuildProgress}%"
+                            + (array.RebuildETA != "N/A" ? $" (ETA {array.RebuildETA})" : " (ETA N/A)");
+
+        // Actualizar barra
+        var barFill = barContainer.Child as Border;
+        if (barFill != null)
+        {
+            var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
+            barFill.Width = barContainer.Bounds.Width * pct;
+        }
+
+        barContainer.IsVisible = true;
+        return;
     }
+}
+
 
     private void AnimateArrayGlow(Border glowBorder)
     {
