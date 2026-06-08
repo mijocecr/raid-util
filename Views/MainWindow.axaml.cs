@@ -21,10 +21,6 @@ public partial class MainWindow : Window
     private bool _sudoReady;
     private bool _raidSubsystemReady;
 
-    private TimerManager? _timerManager;
-
-    private readonly RaidStateService _stateService = new();
-
     public MainWindow()
     {
         LogService.Debug("[MAIN] Constructor ENTER");
@@ -58,9 +54,6 @@ public partial class MainWindow : Window
         if (MainTabs != null)
             MainTabs.SelectionChanged += OnTabChanged;
 
-        if (RaidViewControl != null)
-            RaidViewControl.AttachStateService(_stateService);
-
         LogService.Debug("[MAIN] Constructor EXIT");
     }
 
@@ -84,7 +77,7 @@ public partial class MainWindow : Window
         await Task.Delay(150);
 
         // ============================================================
-        // 1) UNIVERSAL SUDO VALIDATION
+        // 1) UNIVERSAL SUDO VALIDATION (NO EJECUTA NADA MÁS)
         // ============================================================
 
         const int maxAttempts = 2;
@@ -107,6 +100,7 @@ public partial class MainWindow : Window
             StatusBarText.Text = "Validating password...";
             LogService.Debug("[MAIN] Validating admin password...");
 
+            // ÚNICA llamada sudo permitida aquí
             var sudoResult = await Task.Run(() => ShellHelper.EjecutarComoRoot("true"));
             var (exit, stdout, stderr) = sudoResult;
 
@@ -143,11 +137,9 @@ public partial class MainWindow : Window
             // ⭐ Password correct
             LogService.Write("[MAIN] Password validated successfully.");
             _sudoReady = true;
-
-            // ⭐ Enable RAID calls only after sudo is validated
             Credentials.AllowRaidCalls = true;
 
-            // ⭐ FIX DEFINITIVO:
+            // Refrescar StatusView una vez
             Dispatcher.UIThread.Post(async () =>
             {
                 await Task.Delay(50);
@@ -156,10 +148,6 @@ public partial class MainWindow : Window
                 {
                     LogService.Debug("[MAIN] StatusViewControl READY → refreshing...");
                     await StatusViewControl.RefreshStatusAsync();
-                }
-                else
-                {
-                    LogService.Error("[MAIN] StatusViewControl STILL NULL after delay.");
                 }
 
             }, DispatcherPriority.Background);
@@ -192,22 +180,6 @@ public partial class MainWindow : Window
 
         StatusBarText.Text = "System ready.";
 
-        // ============================================================
-        // 3) START TIMERS
-        // ============================================================
-
-        _timerManager = new TimerManager(
-            StatusViewControl,
-            LogsViewControl,
-            _config.GeneralRefreshMs,
-            _config.RebuildRefreshMs,
-            _config.HotplugRefreshMs,
-            _stateService
-        );
-
-        LogService.Debug("[MAIN] Starting TimerManager...");
-        _timerManager.StartAll();
-
         LogService.Debug("[MAIN] OnOpened completed.");
         StatusBarText.Text = "Ready.";
     }
@@ -233,7 +205,7 @@ public partial class MainWindow : Window
             DisksViewControl?.Initialize(_sudoReady, false);
         }
 
-        // RAID TAB → refrescar usando el mismo método que el botón Refresh
+        // RAID TAB
         if (MainTabs.SelectedIndex == 1)
         {
             if (!_sudoReady)
@@ -267,23 +239,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task LoadRaidAsync()
-    {
-        // ⭐ Este método ya no se usa para refrescar RAID
-        // pero NO lo elimino porque tú pediste que no se eliminen métodos.
-        LogService.Write("[MAIN] LoadRaidAsync called (legacy).");
-    }
-
     private async void OnOpenConfig(object? sender, RoutedEventArgs e)
     {
         var win = new ConfigWindow(_config);
         await win.ShowDialog(this);
-
-        _timerManager?.UpdateIntervals(
-            _config.GeneralRefreshMs,
-            _config.RebuildRefreshMs,
-            _config.HotplugRefreshMs
-        );
     }
 
     private void Set_Status(object? sender, PointerPressedEventArgs e)

@@ -6,28 +6,54 @@
     Background="{DynamicResource BMWSurfaceBrush}"
     Foreground="{DynamicResource BMWTextBrush}">
 
+    <UserControl.Resources>
+        <!-- Colores de estado RAID -->
+        <SolidColorBrush x:Key="RaidHealthyBrush" Color="#1E4620"/>   <!-- Verde oscuro -->
+        <SolidColorBrush x:Key="RaidWarningBrush" Color="#4A3E00"/>   <!-- Amarillo oscuro -->
+        <SolidColorBrush x:Key="RaidCriticalBrush" Color="#5A1E1E"/>  <!-- Rojo oscuro -->
+        <SolidColorBrush x:Key="RaidUnknownBrush" Color="#2A2A2A"/>   <!-- Gris oscuro -->
+    </UserControl.Resources>
+
     <ScrollViewer>
         <StackPanel Margin="20" Spacing="18">
 
             <!-- ===================================================== -->
-            <!-- 🟥 RAID HEALTH SUMMARY                                -->
+            <!-- 🟥 RAID HEALTH SUMMARY + REFRESH BUTTON               -->
             <!-- ===================================================== -->
             <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
                     BorderBrush="{DynamicResource BMWBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
+                    
                     Padding="18"
                     BoxShadow="0 2 6 0 #22000000">
 
                 <StackPanel Spacing="12">
 
-                    <TextBlock Text="RAID Health Summary"
-                               FontSize="20"
-                               FontWeight="Bold"
-                               Foreground="{DynamicResource BMWTextBrush}" />
+                    <!-- Título + Botón refrescar -->
+                    <DockPanel LastChildFill="False">
 
-                    <!-- Estado global -->
-                    <Border Background="{DynamicResource BMWInputBrush}"
+                        <TextBlock Text="RAID Health Summary"
+                                   FontSize="20"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource BMWTextBrush}" />
+
+                        <Button x:Name="BtnRefresh"
+                                Content="⟳ Refresh"
+                                Padding="10 4"
+                                Margin="10 0 0 0"
+                                Background="{DynamicResource BMWButtonBrush}"
+                                Foreground="{DynamicResource BMWButtonTextBrush}"
+                                BorderBrush="{DynamicResource BMWBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Click="OnRefreshClick"
+                                DockPanel.Dock="Right" />
+                    </DockPanel>
+
+                    <!-- Estado global (ACTUALIZADO) -->
+                    <Border x:Name="RaidHealthCard"
+                            Background="{DynamicResource RaidUnknownBrush}"
                             BorderBrush="{DynamicResource BMWBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
@@ -36,6 +62,7 @@
                         <TextBlock x:Name="TxtOverallRaidHealth"
                                    Text="Checking..."
                                    FontSize="18"
+                                   TextAlignment="Center"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource BMWTextBrush}" />
                     </Border>
@@ -66,6 +93,67 @@
                                        Width="150"
                                        Foreground="{DynamicResource BMWTextDimBrush}" />
                             <TextBlock x:Name="TxtRebuildSummary"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold" />
+                        </DockPanel>
+
+                    </StackPanel>
+
+                </StackPanel>
+            </Border>
+
+
+            <!-- ===================================================== -->
+            <!-- 🟦 SYSTEM INFORMATION                                 -->
+            <!-- ===================================================== -->
+            <Border Background="{DynamicResource BMWSurfaceElevatedBrush}"
+                    BorderBrush="{DynamicResource BMWBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18"
+                    BoxShadow="0 2 6 0 #22000000">
+
+                <StackPanel Spacing="12">
+
+                    <TextBlock Text="System Information"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource BMWTextBrush}" />
+
+                    <StackPanel Spacing="6">
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Uptime:"
+                                       Width="150"
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
+                            <TextBlock x:Name="TxtSystemUptime"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold" />
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="CPU Usage:"
+                                       Width="150"
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
+                            <TextBlock x:Name="TxtSystemCpu"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold" />
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="RAM Usage:"
+                                       Width="150"
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
+                            <TextBlock x:Name="TxtSystemRam"
+                                       Text="Loading..."
+                                       FontWeight="SemiBold" />
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Disk Free:"
+                                       Width="150"
+                                       Foreground="{DynamicResource BMWTextDimBrush}" />
+                            <TextBlock x:Name="TxtSystemDisk"
                                        Text="Loading..."
                                        FontWeight="SemiBold" />
                         </DockPanel>
