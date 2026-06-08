@@ -1,12 +1,13 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using Avalonia.VisualTree;
+using Avalonia.Threading;
 using RAID_Util.Services;
 using RAID_Util.Helpers;
 
@@ -15,6 +16,7 @@ namespace RAID_Util.Views.Tabs;
 public partial class StatusView : UserControl
 {
     private readonly StatusService _status;
+    private CancellationTokenSource? _autoRefreshCts;
 
     public StatusView()
     {
@@ -22,8 +24,59 @@ public partial class StatusView : UserControl
         _status = new StatusService();
 
         AttachedToVisualTree += OnAttached;
+        DetachedFromVisualTree += OnDetached;
     }
 
+    // ============================================================
+    // AUTO REFRESH (CORREGIDO)
+    // ============================================================
+    private void StartAutoRefresh()
+    {
+        StopAutoRefresh(); // evitar duplicados
+
+        _autoRefreshCts = new CancellationTokenSource();
+        var token = _autoRefreshCts.Token;
+
+        Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    // Toda comprobación visual debe hacerse en UI thread
+                    bool isVisible = await Dispatcher.UIThread.InvokeAsync(() => this.IsVisible);
+
+                    if (isVisible && Credentials.AllowRaidCalls)
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(async () =>
+                        {
+                            await RefreshStatusAsync();
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[STATUS] Auto-refresh error: {ex}");
+                }
+
+                await Task.Delay(5000, token); // refresco cada 5s
+            }
+        }, token);
+    }
+
+    private void StopAutoRefresh()
+    {
+        if (_autoRefreshCts != null)
+        {
+            _autoRefreshCts.Cancel();
+            _autoRefreshCts.Dispose();
+            _autoRefreshCts = null;
+        }
+    }
+
+    // ============================================================
+    // EVENTOS DE VIDA DEL CONTROL
+    // ============================================================
     private async void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
     {
         if (!Credentials.AllowRaidCalls)
@@ -32,9 +85,20 @@ public partial class StatusView : UserControl
             return;
         }
 
+        await Task.Delay(150); // evitar carrera con MainWindow
         await LoadStatusAsync();
+
+        StartAutoRefresh();
     }
 
+    private void OnDetached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        StopAutoRefresh();
+    }
+
+    // ============================================================
+    // REFRESH MANUAL
+    // ============================================================
     public async Task RefreshStatusAsync()
     {
         if (!Credentials.AllowRaidCalls)
@@ -48,6 +112,9 @@ public partial class StatusView : UserControl
 
     private async void OnRefreshClick(object? sender, RoutedEventArgs e)
     {
+        if (!BtnRefresh.IsEnabled)
+            return;
+
         BtnRefresh.IsEnabled = false;
         await RefreshStatusAsync();
         BtnRefresh.IsEnabled = true;
@@ -71,9 +138,7 @@ public partial class StatusView : UserControl
                 return;
             }
 
-            // -------------------------------
             // RAID INFO
-            // -------------------------------
             var raidHealth = await _status.GetOverallRaidHealthAsync();
             var arraysSummary = await _status.GetArraysSummaryAsync();
             var disksSummary = await _status.GetDisksSummaryAsync();
@@ -82,17 +147,13 @@ public partial class StatusView : UserControl
             var diskAlerts = await _status.GetDiskAlertsAsync();
             var recentEvents = await _status.GetRecentEventsAsync();
 
-            // -------------------------------
             // SYSTEM INFO
-            // -------------------------------
-            var uptime = _status.GetSystemUptime();
+            var uptime = _status.GetSessionUptime();
             var cpu = _status.GetCpuUsage();
             var mem = _status.GetMemoryUsage();
             var diskFree = _status.GetDiskFree();
 
-            // -------------------------------
-            // ASIGNAR A LA UI
-            // -------------------------------
+            // UI
             UpdateRaidHealthUI(raidHealth);
 
             TxtArraysSummary.Text = arraysSummary;
@@ -124,7 +185,7 @@ public partial class StatusView : UserControl
     }
 
     // ============================================================
-    // RAID HEALTH UI (COLOR DINÁMICO)
+    // RAID HEALTH UI
     // ============================================================
     private void UpdateRaidHealthUI(string state)
     {
@@ -158,9 +219,6 @@ public partial class StatusView : UserControl
         EnsureTransitions();
     }
 
-    // ============================================================
-    // HELPERS
-    // ============================================================
     private void EnsureTransitions()
     {
         if (TxtOverallRaidHealth.Transitions != null)

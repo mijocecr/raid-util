@@ -40,6 +40,11 @@
                              Foreground="{DynamicResource BMWAccentBrush}"
                              Background="{DynamicResource BMWTextDimBrush}"
                              CornerRadius="4" />
+                
+                <TextBlock
+                    TextAlignment="Center"
+                    Text="Don't Panic - Please Wait Kernel..."
+                    />
 
             </StackPanel>
 

@@ -23,7 +23,7 @@ public class DiskAlertInfo
 public class StatusService
 {
     // ============================================================
-    // ROOT EXECUTION WRAPPER
+    // ROOT EXECUTION WRAPPER (MEJORADO)
     // ============================================================
     private async Task<string> RunRoot(string cmd)
     {
@@ -37,8 +37,9 @@ public class StatusService
         Console.WriteLine($"[STATUS-SERVICE] stdout:\n{stdout}");
         Console.WriteLine($"[STATUS-SERVICE] stderr:\n{stderr}");
 
-        if (exit != 0)
-            return "";
+        // No devolver vacío si exit != 0
+        if (string.IsNullOrWhiteSpace(stdout) && !string.IsNullOrWhiteSpace(stderr))
+            return stderr;
 
         return stdout ?? "";
     }
@@ -68,15 +69,20 @@ public class StatusService
         return await RunRoot($"mdadm --detail {array}");
     }
 
+    // ============================================================
+    // PARSE ARRAYS (CORREGIDO)
+    // ============================================================
     private List<string> ParseArrays(string mdstat)
     {
         var list = new List<string>();
 
         foreach (var line in mdstat.Split('\n'))
         {
-            if (line.StartsWith("md"))
+            var trimmed = line.TrimStart();
+
+            if (trimmed.StartsWith("md") && trimmed.Contains(" :"))
             {
-                var name = line.Split(' ')[0].Trim();
+                var name = trimmed.Split(' ')[0].Trim();
                 list.Add($"/dev/{name}");
             }
         }
@@ -86,32 +92,30 @@ public class StatusService
     }
 
     // ============================================================
-    // RAID HEALTH
+    // RAID HEALTH (CORREGIDO)
     // ============================================================
     public async Task<string> GetOverallRaidHealthAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetOverallRaidHealthAsync()");
-
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
-
+        var arrays = ParseArrays(ReadMdstat());
         if (arrays.Count == 0)
             return "No RAID Detected";
 
         foreach (var array in arrays)
         {
             var detail = await GetDetailAsync(array);
-
             if (string.IsNullOrWhiteSpace(detail))
                 continue;
 
-            if (detail.Contains("State : degraded"))
+            var d = detail.ToLower();
+
+            if (d.Contains("degraded") || d.Contains("faulty"))
                 return "Critical";
 
-            if (detail.Contains("faulty"))
-                return "Critical";
-
-            if (detail.Contains("rebuild") || detail.Contains("resync"))
+            // Rebuild REAL
+            if (d.Contains("resync =") ||
+                d.Contains("rebuild =") ||
+                d.Contains("finish=") ||
+                d.Contains("speed="))
                 return "Warning";
         }
 
@@ -123,15 +127,8 @@ public class StatusService
     // ============================================================
     public async Task<string> GetArraysSummaryAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetArraysSummaryAsync()");
-
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
-
-        if (arrays.Count == 0)
-            return "No RAID Detected";
-
-        return $"Total: {arrays.Count}";
+        var arrays = ParseArrays(ReadMdstat());
+        return arrays.Count == 0 ? "No RAID Detected" : $"Total: {arrays.Count}";
     }
 
     // ============================================================
@@ -139,11 +136,7 @@ public class StatusService
     // ============================================================
     public async Task<string> GetDisksSummaryAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetDisksSummaryAsync()");
-
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
-
+        var arrays = ParseArrays(ReadMdstat());
         if (arrays.Count == 0)
             return "No RAID Detected";
 
@@ -152,17 +145,11 @@ public class StatusService
         foreach (var array in arrays)
         {
             var detail = await GetDetailAsync(array);
-
             if (string.IsNullOrWhiteSpace(detail))
                 continue;
 
-            int a = Count(detail, "active sync");
-            int f = Count(detail, "faulty");
-
-            Console.WriteLine($"[STATUS-SERVICE] {array}: active={a}, faulty={f}");
-
-            active += a;
-            failed += f;
+            active += Count(detail, "active sync");
+            failed += Count(detail, "faulty");
         }
 
         int total = active + failed;
@@ -170,119 +157,75 @@ public class StatusService
     }
 
     // ============================================================
-    // REBUILD SUMMARY
+    // REBUILD SUMMARY (CORREGIDO)
     // ============================================================
-    
-    // ============================================================
-// REBUILD SUMMARY (REAL, SIN FALSOS POSITIVOS)
-// ============================================================
-
-private bool IsRealRebuild(string detail)
-{
-    // 🔥 Un rebuild REAL siempre contiene alguno de estos patrones:
-    return
-        detail.Contains("resync =") ||        // resync = 12.3%
-        detail.Contains("rebuild =") ||       // rebuild = 45.6%
-        detail.Contains("Rebuild Status") ||  // Rebuild Status : 12% complete
-        detail.Contains("finish=") ||         // finish=123.4min
-        detail.Contains("speed=");            // speed=123MB/s
-}
-
-private string ExtractRebuildLine(string detail)
-{
-    foreach (var line in detail.Split('\n'))
+    private bool IsRealRebuild(string detail)
     {
-        if (line.Contains("resync =") ||
-            line.Contains("rebuild =") ||
-            line.Contains("Rebuild Status") ||
-            line.Contains("finish=") ||
-            line.Contains("speed="))
-        {
-            Console.WriteLine($"[STATUS-SERVICE] Rebuild line detected → {line.Trim()}");
-            return line.Trim();
-        }
+        var d = detail.ToLower();
+        return d.Contains("resync =") ||
+               d.Contains("rebuild =") ||
+               d.Contains("finish=") ||
+               d.Contains("speed=");
     }
 
-    return "";
-}
-
-public async Task<string> GetRebuildSummaryAsync()
-{
-    Console.WriteLine("[STATUS-SERVICE] GetRebuildSummaryAsync()");
-
-    var mdstat = ReadMdstat();
-    var arrays = ParseArrays(mdstat);
-
-    if (arrays.Count == 0)
-        return "No RAID Detected";
-
-    foreach (var array in arrays)
+    private string ExtractRebuildLine(string detail)
     {
-        Console.WriteLine($"[STATUS-SERVICE] Checking rebuild for {array}");
-
-        var detail = await GetDetailAsync(array);
-
-        if (string.IsNullOrWhiteSpace(detail))
+        foreach (var line in detail.Split('\n'))
         {
-            Console.WriteLine("[STATUS-SERVICE] Empty mdadm detail, skipping.");
-            continue;
+            var l = line.ToLower();
+            if (l.Contains("resync =") ||
+                l.Contains("rebuild =") ||
+                l.Contains("finish=") ||
+                l.Contains("speed="))
+                return line.Trim();
         }
-
-        //  IGNORAR "Consistency Policy : resync"
-        if (!IsRealRebuild(detail))
-        {
-            Console.WriteLine("[STATUS-SERVICE] No real rebuild detected.");
-            continue;
-        }
-
-        //  Extraer la línea real del rebuild
-        var line = ExtractRebuildLine(detail);
-
-        if (!string.IsNullOrWhiteSpace(line))
-            return $"{array}: {line}";
+        return "";
     }
 
-    return "No rebuild in progress";
-}
+    public async Task<string> GetRebuildSummaryAsync()
+    {
+        var arrays = ParseArrays(ReadMdstat());
+        if (arrays.Count == 0)
+            return "No RAID Detected";
 
+        foreach (var array in arrays)
+        {
+            var detail = await GetDetailAsync(array);
+            if (string.IsNullOrWhiteSpace(detail))
+                continue;
+
+            if (!IsRealRebuild(detail))
+                continue;
+
+            var line = ExtractRebuildLine(detail);
+            if (!string.IsNullOrWhiteSpace(line))
+                return $"{array}: {line}";
+        }
+
+        return "No rebuild in progress";
+    }
 
     // ============================================================
     // ARRAYS AT RISK
     // ============================================================
     public async Task<IList<ArrayRiskInfo>> GetArraysAtRiskAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetArraysAtRiskAsync()");
-
         var list = new List<ArrayRiskInfo>();
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
+        var arrays = ParseArrays(ReadMdstat());
 
         foreach (var array in arrays)
         {
             var detail = await GetDetailAsync(array);
-
             if (string.IsNullOrWhiteSpace(detail))
                 continue;
 
-            if (detail.Contains("State : degraded"))
-            {
-                list.Add(new ArrayRiskInfo
-                {
-                    Name = array,
-                    Status = "DEGRADED",
-                    Details = "Array is degraded"
-                });
-            }
+            var d = detail.ToLower();
 
-            if (detail.Contains("faulty"))
-            {
-                list.Add(new ArrayRiskInfo
-                {
-                    Name = array,
-                    Status = "FAILED DISK",
-                    Details = "One or more disks are faulty"
-                });
-            }
+            if (d.Contains("degraded"))
+                list.Add(new ArrayRiskInfo { Name = array, Status = "DEGRADED", Details = "Array is degraded" });
+
+            if (d.Contains("faulty"))
+                list.Add(new ArrayRiskInfo { Name = array, Status = "FAILED DISK", Details = "One or more disks are faulty" });
         }
 
         return list;
@@ -293,42 +236,29 @@ public async Task<string> GetRebuildSummaryAsync()
     // ============================================================
     public async Task<IList<DiskAlertInfo>> GetDiskAlertsAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetDiskAlertsAsync()");
-
         var list = new List<DiskAlertInfo>();
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
+        var arrays = ParseArrays(ReadMdstat());
 
         foreach (var array in arrays)
         {
             var detail = await GetDetailAsync(array);
-
             if (string.IsNullOrWhiteSpace(detail))
                 continue;
 
-            if (detail.Contains("faulty"))
-            {
-                list.Add(new DiskAlertInfo
-                {
-                    Device = array,
-                    Alert = "Faulty disk detected"
-                });
-            }
+            if (detail.ToLower().Contains("faulty"))
+                list.Add(new DiskAlertInfo { Device = array, Alert = "Faulty disk detected" });
         }
 
         return list;
     }
 
     // ============================================================
-    // RECENT EVENTS
+    // RECENT EVENTS (CORREGIDO)
     // ============================================================
     public async Task<IList<string>> GetRecentEventsAsync()
     {
-        Console.WriteLine("[STATUS-SERVICE] GetRecentEventsAsync()");
-
         var list = new List<string>();
-        var mdstat = ReadMdstat();
-        var arrays = ParseArrays(mdstat);
+        var arrays = ParseArrays(ReadMdstat());
 
         if (arrays.Count == 0)
         {
@@ -339,17 +269,22 @@ public async Task<string> GetRebuildSummaryAsync()
         foreach (var array in arrays)
         {
             var detail = await GetDetailAsync(array);
-
             if (string.IsNullOrWhiteSpace(detail))
                 continue;
 
-            if (detail.Contains("faulty"))
+            var d = detail.ToLower();
+
+            if (d.Contains("faulty"))
                 list.Add($"{array}: Faulty disk detected");
 
-            if (detail.Contains("State : degraded"))
+            if (d.Contains("degraded"))
                 list.Add($"{array}: Array degraded");
 
-            if (detail.Contains("rebuild") || detail.Contains("resync"))
+            // Rebuild REAL
+            if (d.Contains("resync =") ||
+                d.Contains("rebuild =") ||
+                d.Contains("finish=") ||
+                d.Contains("speed="))
                 list.Add($"{array}: Rebuild in progress");
         }
 
@@ -357,62 +292,47 @@ public async Task<string> GetRebuildSummaryAsync()
     }
 
     // ============================================================
-    // SYSTEM INFO (FIXED)
+    // SYSTEM INFO
     // ============================================================
-    public string GetSystemUptime()
+    public string GetSessionUptime()
     {
         try
         {
-            var seconds = double.Parse(File.ReadAllText("/proc/uptime").Split(' ')[0]);
-            var ts = TimeSpan.FromSeconds(seconds);
-
-            Console.WriteLine($"[STATUS-SERVICE] Uptime raw seconds={seconds}");
-
-            return $"{ts.Days}d {ts.Hours}h {ts.Minutes}m";
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[STATUS-SERVICE] ERROR uptime: {ex}");
+            var (exit, stdout, stderr) = ShellHelper.EjecutarSinRoot("uptime -p");
+            if (!string.IsNullOrWhiteSpace(stdout))
+                return stdout.Trim();
             return "Unknown";
         }
+        catch { return "Unknown"; }
     }
 
     public int GetCpuUsage()
     {
         try
         {
-            var parts1 = File.ReadAllText("/proc/stat").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            long idle1 = long.Parse(parts1[4]);
-            long total1 = parts1.Skip(1).Take(7).Sum(x => long.Parse(x));
+            var p1 = File.ReadAllText("/proc/stat").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            long idle1 = long.Parse(p1[4]);
+            long total1 = p1.Skip(1).Take(7).Sum(x => long.Parse(x));
 
             Task.Delay(120).Wait();
 
-            var parts2 = File.ReadAllText("/proc/stat").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            long idle2 = long.Parse(parts2[4]);
-            long total2 = parts2.Skip(1).Take(7).Sum(x => long.Parse(x));
+            var p2 = File.ReadAllText("/proc/stat").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            long idle2 = long.Parse(p2[4]);
+            long total2 = p2.Skip(1).Take(7).Sum(x => long.Parse(x));
 
             long idleDelta = idle2 - idle1;
             long totalDelta = total2 - total1;
 
-            int usage = (int)(100 * (totalDelta - idleDelta) / totalDelta);
-
-            Console.WriteLine($"[STATUS-SERVICE] CPU usage={usage}%");
-
-            return usage;
+            return (int)(100 * (totalDelta - idleDelta) / totalDelta);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[STATUS-SERVICE] ERROR CPU: {ex}");
-            return 0;
-        }
+        catch { return 0; }
     }
 
     public int GetMemoryUsage()
     {
         try
         {
-            long total = 0;
-            long available = 0;
+            long total = 0, available = 0;
 
             foreach (var line in File.ReadAllLines("/proc/meminfo"))
             {
@@ -424,17 +344,9 @@ public async Task<string> GetRebuildSummaryAsync()
             }
 
             long used = total - available;
-            int percent = (int)((used * 100) / total);
-
-            Console.WriteLine($"[STATUS-SERVICE] RAM total={total}kB available={available}kB used%={percent}");
-
-            return percent;
+            return (int)((used * 100) / total);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[STATUS-SERVICE] ERROR RAM: {ex}");
-            return 0;
-        }
+        catch { return 0; }
     }
 
     public int GetDiskFree()
@@ -442,17 +354,9 @@ public async Task<string> GetRebuildSummaryAsync()
         try
         {
             var info = new DriveInfo("/");
-            int gb = (int)(info.AvailableFreeSpace / 1024 / 1024 / 1024);
-
-            Console.WriteLine($"[STATUS-SERVICE] Disk free={gb}GB");
-
-            return gb;
+            return (int)(info.AvailableFreeSpace / 1024 / 1024 / 1024);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[STATUS-SERVICE] ERROR disk: {ex}");
-            return 0;
-        }
+        catch { return 0; }
     }
 
     // ============================================================
@@ -460,20 +364,6 @@ public async Task<string> GetRebuildSummaryAsync()
     // ============================================================
     private int Count(string text, string token)
     {
-        int c = text.Split(token, StringSplitOptions.None).Length - 1;
-        Console.WriteLine($"[STATUS-SERVICE] Count('{token}')={c}");
-        return c;
-    }
-
-    private string ExtractLine(string text, string token)
-    {
-        foreach (var line in text.Split('\n'))
-            if (line.Contains(token))
-            {
-                Console.WriteLine($"[STATUS-SERVICE] ExtractLine('{token}') → {line.Trim()}");
-                return line.Trim();
-            }
-
-        return "";
+        return text.Split(token, StringSplitOptions.None).Length - 1;
     }
 }
