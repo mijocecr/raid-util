@@ -2273,7 +2273,7 @@ public partial class RaidView : UserControl
                 break;
 
             default:
-                LogService.Write($"[RESHAPE] Filesystem '{fsType}' not supported for auto-resize.");
+                LogService.Info($"[RESHAPE] Filesystem '{fsType}' not supported for auto-resize.");
                 break;
         }
     }

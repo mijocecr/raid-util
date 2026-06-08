@@ -31,7 +31,8 @@ public partial class DisksView : UserControl
     public DisksView()
     {
         InitializeComponent();
-        LogService.Write("[DISKSVIEW] Constructor ejecutado.");
+        LogService.Debug("[DISKSVIEW] Constructor ejecutado.");
+
     }
 
     private static void EnsureResources()
@@ -56,7 +57,8 @@ public partial class DisksView : UserControl
 
     public void Initialize(bool sudoReady, bool forceFake)
     {
-        LogService.Write($"[DISKSVIEW] Initialize() sudoReady={sudoReady}, forceFake={forceFake}");
+        LogService.Info($"[DISKSVIEW] Initialize() sudoReady={sudoReady}, forceFake={forceFake}");
+
 
         _disks.Clear();
 
@@ -78,7 +80,8 @@ public partial class DisksView : UserControl
     // ⭐ NUEVO — MÉTODO PÚBLICO DE REFRESCO
     public Task RefreshDisksAsync()
     {
-        LogService.Write("[DISKSVIEW] RefreshDisksAsync() called.");
+        LogService.Debug("[DISKSVIEW] RefreshDisksAsync() called.");
+
 
         _disks.Clear();
         LoadRealData();
@@ -125,7 +128,8 @@ public partial class DisksView : UserControl
         try
         {
             var list = DiskService.GetAllDisks();
-            LogService.Write($"[DISKSVIEW] Discos detectados: {list.Count}");
+            LogService.Info($"[DISKSVIEW] Discos detectados: {list.Count}");
+
 
             var eligible = list.Where(d =>
                 (d.RaidMembership == RaidMembership.None ||

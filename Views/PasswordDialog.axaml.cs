@@ -24,7 +24,7 @@ namespace RAID_Util.Views
 
                 if (_closeApp)
                 {
-                    LogService.Write("[PWD_DIALOG] Cerrando aplicación por cierre del diálogo.");
+                    LogService.Info("[PWD_DIALOG] Cerrando aplicación por cierre del diálogo.");
 
                     var lifetime = Avalonia.Application.Current?.ApplicationLifetime
                         as IClassicDesktopStyleApplicationLifetime;
@@ -45,7 +45,7 @@ namespace RAID_Util.Views
                 return;
             }
 
-            LogService.Write("[PWD_DIALOG] Contraseña aceptada por el usuario.");
+            LogService.Info("[PWD_DIALOG] Contraseña aceptada por el usuario.");
 
             _closeApp = false;
             Close(pass);
@@ -53,14 +53,14 @@ namespace RAID_Util.Views
 
         private void OnCancel(object? sender, RoutedEventArgs e)
         {
-            LogService.Write("[PWD_DIALOG] Cancelado por el usuario. Cerrando aplicación.");
+            LogService.Info("[PWD_DIALOG] Cancelado por el usuario. Cerrando aplicación.");
             _closeApp = true;
             Close(null);
         }
 
         private void OnClose(object? sender, RoutedEventArgs e)
         {
-            LogService.Write("[PWD_DIALOG] Botón Close pulsado. Cerrando aplicación.");
+            LogService.Info("[PWD_DIALOG] Botón Close pulsado. Cerrando aplicación.");
             _closeApp = true;
             Close(null);
         }

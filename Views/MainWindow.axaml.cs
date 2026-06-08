@@ -68,7 +68,7 @@ public partial class MainWindow : Window
         LogService.Debug("[MAIN] OnOpened ENTER");
         base.OnOpened(e);
 
-        LogService.Write("[MAIN] RAID-Util startup sequence initiated.");
+        LogService.Info("[MAIN] RAID-Util startup sequence initiated.");
 
         _config = ConfigManager.Load();
         LogService.Debug("[MAIN] Configuration loaded.");
@@ -77,7 +77,7 @@ public partial class MainWindow : Window
         await Task.Delay(150);
 
         // ============================================================
-        // 1) UNIVERSAL SUDO VALIDATION (NO EJECUTA NADA MÁS)
+        // 1) UNIVERSAL SUDO VALIDATION
         // ============================================================
 
         const int maxAttempts = 2;
@@ -100,7 +100,6 @@ public partial class MainWindow : Window
             StatusBarText.Text = "Validating password...";
             LogService.Debug("[MAIN] Validating admin password...");
 
-            // ÚNICA llamada sudo permitida aquí
             var sudoResult = await Task.Run(() => ShellHelper.EjecutarComoRoot("true"));
             var (exit, stdout, stderr) = sudoResult;
 
@@ -135,11 +134,10 @@ public partial class MainWindow : Window
             }
 
             // ⭐ Password correct
-            LogService.Write("[MAIN] Password validated successfully.");
+            LogService.Info("[MAIN] Password validated successfully.");
             _sudoReady = true;
             Credentials.AllowRaidCalls = true;
 
-            // Refrescar StatusView una vez
             Dispatcher.UIThread.Post(async () =>
             {
                 await Task.Delay(50);

@@ -2,12 +2,7 @@ namespace RAID_Util.Models;
 
 public class AppConfig
 {
-    // Timers
-    public int GeneralRefreshMs { get; set; } = 2000;
-    public int RebuildRefreshMs { get; set; } = 500;
-    public int HotplugRefreshMs { get; set; } = 1500;
-
     // Logs
-    public string LogsPath { get; set; } = "/var/log/raid-util/";
-    public int LogLevel { get; set; } = 1;
+    public string LogsPath { get; set; } = "~/.config/raid-util/logs";
+    public int LogLevel { get; set; } = 1; // 0=ERROR, 1=INFO, 2=DEBUG
 }

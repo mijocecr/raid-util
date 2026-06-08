@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using RAID_Util.Models;
 using RAID_Util.Services;
+using RAID_Util.Core;
 
 namespace RAID_Util.Views;
 
@@ -22,20 +24,32 @@ public partial class ArrayConfigWindow : Window
     {
         InitializeComponent();
 
-        _array = array;                       // ⭐ Recibimos el array completo
+        _array = array;
         _config = ArrayConfigService.Load(array.BaseName);
+
+        LogThread("CTOR");
 
         LoadUI();
         HookEvents();
     }
 
+    private void Log(string msg)
+    {
+        Console.WriteLine($"[CFG] {msg}");
+    }
+
+    private void LogThread(string tag)
+    {
+        Console.WriteLine($"[THREAD] {tag} → ManagedThreadId={Environment.CurrentManagedThreadId}");
+    }
+
     private void LoadUI()
     {
-        // Identity
+        LogThread("LoadUI");
+
         TxtName.Text = _config.Name;
         TxtFsLabel.Text = _config.FsLabel;
 
-        // Mount
         TxtMountPoint.Text = _config.MountPoint;
 
         TgNoAtime.IsChecked = _config.Mount_NoAtime;
@@ -44,17 +58,13 @@ public partial class ArrayConfigWindow : Window
         TgSync.IsChecked = _config.Mount_Sync;
         TgReadOnly.IsChecked = _config.Mount_ReadOnly;
 
-        // Persistencia real (fstab)
         TgPersistMount.IsChecked = _config.PersistMount;
 
-        // Mount permissions
         TxtMountPermissions.Text = _config.MountPermissions;
 
-        // Performance
         NumResyncPriority.Value = _config.ResyncPriority;
         NumResyncMaxSpeed.Value = _config.ResyncMaxSpeed;
 
-        // Alerts
         TgAlertDegraded.IsChecked = _config.AlertDegraded;
         TgAlertDiskFail.IsChecked = _config.AlertDiskFail;
         TgAlertSlowResync.IsChecked = _config.AlertSlowResync;
@@ -62,6 +72,8 @@ public partial class ArrayConfigWindow : Window
 
     private void HookEvents()
     {
+        LogThread("HookEvents");
+
         BtnSave.Click += OnSaveClicked;
         BtnCancel.Click += OnCancelClicked;
         BtnPickMountPoint.Click += OnPickMountPointClicked;
@@ -69,51 +81,27 @@ public partial class ArrayConfigWindow : Window
 
     private async Task ShowError(string message)
     {
-        var dlg = new Window
-        {
-            Width = 380,
-            Height = 140,
-            Background = Background,
-            Foreground = Foreground,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Title = "Validation Error",
-            CanResize = false
-        };
+        Log($"ShowError: {message}");
+        LogThread("ShowError");
 
-        var panel = new StackPanel
-        {
-            Margin = new Thickness(16),
-            Spacing = 12
-        };
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = message,
-            FontSize = 14,
-            Foreground = Foreground,
-            TextWrapping = TextWrapping.Wrap
-        });
-
-        var btn = new Button
-        {
-            Content = "OK",
-            Width = 80,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-
-        btn.Click += (_, _) => dlg.Close();
-
-        panel.Children.Add(btn);
-        dlg.Content = panel;
-
+        var dlg = new InfoDialog("Error", message);
         await dlg.ShowDialog(this);
     }
 
-    // ============================================================
-    // ⭐ BuildMountOptions FINAL
-    // ============================================================
+    private async Task ShowInfo(string title, string message)
+    {
+        Log($"ShowInfo: {title}");
+        LogThread("ShowInfo");
+
+        var dlg = new InfoDialog(title, message);
+        await dlg.ShowDialog(this);
+    }
+
     private string BuildMountOptions()
     {
+        Log("BuildMountOptions()");
+        LogThread("BuildMountOptions");
+
         var opts = new List<string>();
 
         if (TgNoAtime.IsChecked == true) opts.Add("noatime");
@@ -127,6 +115,9 @@ public partial class ArrayConfigWindow : Window
 
     private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
     {
+        Log("OnPickMountPointClicked()");
+        LogThread("OnPickMountPointClicked");
+
         var dialog = new OpenFolderDialog { Title = "Select mount point" };
         var result = await dialog.ShowAsync(this);
 
@@ -136,9 +127,10 @@ public partial class ArrayConfigWindow : Window
 
     private async void OnSaveClicked(object? sender, RoutedEventArgs e)
     {
-        // ============================
-        // 1) VALIDACIÓN DE NOMBRE
-        // ============================
+        Log("OnSaveClicked()");
+        LogThread("OnSaveClicked");
+
+        // VALIDACIONES
         if (string.IsNullOrWhiteSpace(TxtName.Text))
         {
             await ShowError("Array name cannot be empty.");
@@ -151,9 +143,6 @@ public partial class ArrayConfigWindow : Window
             return;
         }
 
-        // ============================
-        // 2) VALIDACIÓN DE MOUNT POINT
-        // ============================
         if (TgPersistMount.IsChecked == true)
         {
             var mp = TxtMountPoint.Text ?? "";
@@ -188,18 +177,12 @@ public partial class ArrayConfigWindow : Window
             }
         }
 
-        // ============================
-        // 3) OPCIONES INCOMPATIBLES
-        // ============================
         if (TgReadOnly.IsChecked == true && TgDiscard.IsChecked == true)
         {
             await ShowError("discard cannot be used on read-only mounts.");
             return;
         }
 
-        // ============================
-        // 4) PERFORMANCE
-        // ============================
         if (NumResyncPriority.Value is null ||
             NumResyncPriority.Value < 1 || NumResyncPriority.Value > 200000)
         {
@@ -214,9 +197,6 @@ public partial class ArrayConfigWindow : Window
             return;
         }
 
-        // ============================
-        // 5) PERMISOS
-        // ============================
         if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text) ||
             !Regex.IsMatch(TxtMountPermissions.Text, @"^[0-7]{3}$"))
         {
@@ -224,9 +204,10 @@ public partial class ArrayConfigWindow : Window
             return;
         }
 
-        // ============================
-        // 6) GUARDAR CONFIG
-        // ============================
+        // GUARDAR CONFIG EN MEMORIA (UI)
+        Log("Saving config to memory");
+        LogThread("SaveMemory");
+
         _config.Name = TxtName.Text ?? "";
         _config.FsLabel = TxtFsLabel.Text ?? "";
 
@@ -248,54 +229,69 @@ public partial class ArrayConfigWindow : Window
         _config.AlertDiskFail = TgAlertDiskFail.IsChecked ?? false;
         _config.AlertSlowResync = TgAlertSlowResync.IsChecked ?? false;
 
-        ArrayConfigService.Save(_array.BaseName, _config);
+        BtnSave.IsEnabled = false;
 
-        // ============================
-        // 7) FSTAB (USAR RUTA REAL)
-        // ============================
-        var device = _array.Path;   // ⭐ CORRECTO
+        // ⚠️ AQUÍ VIENE EL CAMBIO CLAVE:
+        // lo que dependa de la UI se calcula ANTES del Task.Run
+        var device = _array.Path;
         var mountPoint = _config.MountPoint;
-        var options = BuildMountOptions();
+        var options = BuildMountOptions(); // ← ahora en el hilo de UI
 
-        try
+        Exception? backgroundError = null;
+
+        await Task.Run(() =>
         {
-            var fs = FstabService.DetectFilesystem(device);
-
-            if (string.IsNullOrWhiteSpace(fs))
+            try
             {
-                await ShowError("Could not detect filesystem type.");
-                return;
+                LogThread("Worker START");
+
+                var sw = Stopwatch.StartNew();
+
+                Log("[SAVE] ArrayConfigService.Save()");
+                ArrayConfigService.Save(_array.BaseName, _config);
+
+                Log("[FSTAB] DetectFilesystem()");
+                var fs = FstabService.DetectFilesystem(device);
+                if (string.IsNullOrWhiteSpace(fs))
+                    throw new Exception("Could not detect filesystem type.");
+
+                if (_config.PersistMount)
+                {
+                    Log("[FSTAB] WriteEntry()");
+                    FstabService.WriteEntry(device, mountPoint, fs, options);
+                }
+                else
+                {
+                    Log("[FSTAB] RemoveEntry()");
+                    FstabService.RemoveEntry(device);
+                }
+
+                Log("[MDADM] ApplyConfig()");
+                MdadmService.ApplyConfig(_array.BaseName, _config);
+
+                sw.Stop();
+                Log($"[TIMING] Worker thread finished in {sw.ElapsedMilliseconds} ms");
             }
+            catch (Exception ex)
+            {
+                backgroundError = ex;
+            }
+        });
 
-            if (_config.PersistMount)
-                FstabService.WriteEntry(device, mountPoint, fs, options);
-            else
-                FstabService.RemoveEntry(device);
-        }
-        catch (Exception ex)
+        if (backgroundError != null)
         {
-            await ShowError("Failed to update /etc/fstab:\n" + ex.Message);
+            BtnSave.IsEnabled = true;
+            await ShowError("Failed to save configuration:\n" + backgroundError.Message);
             return;
         }
 
-        // ============================
-        // 8) APLICAR CONFIG RAID
-        // ============================
-        try
-        {
-            MdadmService.ApplyConfig(_array.BaseName, _config);
-        }
-        catch (Exception ex)
-        {
-            await ShowError("Failed to apply RAID settings:\n" + ex.Message);
-            return;
-        }
-
+        await ShowInfo("Configuration Saved", "The array configuration has been successfully updated.");
         Close();
     }
 
     private void OnCancelClicked(object? sender, RoutedEventArgs e)
     {
+        Log("OnCancelClicked()");
         Close();
     }
 }

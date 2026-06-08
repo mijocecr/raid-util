@@ -55,10 +55,6 @@ public partial class ConfigWindow : Window
     {
         LogService.Debug("[CONFIG] LoadConfig ENTER");
 
-        GeneralRefreshBox.Text = _config.GeneralRefreshMs.ToString();
-        RebuildRefreshBox.Text = _config.RebuildRefreshMs.ToString();
-        HotplugRefreshBox.Text = _config.HotplugRefreshMs.ToString();
-
         LogsPathBox.Text = _config.LogsPath;
 
         LogLevelCombo.SelectedIndex =
@@ -67,6 +63,27 @@ public partial class ConfigWindow : Window
                 : 1;
 
         LogService.Debug("[CONFIG] LoadConfig EXIT");
+    }
+
+    // ============================================================
+    // VALIDAR PERMISOS DE ESCRITURA
+    // ============================================================
+    private bool CanWriteToDirectory(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path))
+                Directory.CreateDirectory(path);
+
+            var testFile = Path.Combine(path, ".write_test");
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ============================================================
@@ -115,7 +132,7 @@ public partial class ConfigWindow : Window
     }
 
     // ============================================================
-    // GUARDAR CONFIG (ASYNC + INSTRUMENTADO)
+    // GUARDAR CONFIG
     // ============================================================
     private async Task SaveConfigAsync()
     {
@@ -128,22 +145,30 @@ public partial class ConfigWindow : Window
         try
         {
             // -----------------------------
-            // PARSE REFRESH INTERVALS
-            // -----------------------------
-            var swParse = Stopwatch.StartNew();
-            _config.GeneralRefreshMs = ParseInt(GeneralRefreshBox.Text, 2000);
-            _config.RebuildRefreshMs = ParseInt(RebuildRefreshBox.Text, 500);
-            _config.HotplugRefreshMs = ParseInt(HotplugRefreshBox.Text, 1500);
-            swParse.Stop();
-            LogService.Debug($"[CONFIG] Parse refresh values: {swParse.ElapsedMilliseconds} ms");
-
-            // -----------------------------
-            // NORMALIZE PATH
+            // NORMALIZE PATH + PERMISSION CHECK
             // -----------------------------
             var swNorm = Stopwatch.StartNew();
-            _config.LogsPath = NormalizeLogsPath(LogsPathBox.Text);
+            var normalized = NormalizeLogsPath(LogsPathBox.Text);
             swNorm.Stop();
             LogService.Debug($"[CONFIG] NormalizeLogsPath duration: {swNorm.ElapsedMilliseconds} ms");
+
+            if (!CanWriteToDirectory(normalized))
+            {
+                await new InfoDialog(
+                    "Permission denied",
+                    "RAID-Util cannot write to the selected logs folder.\n" +
+                    "The logs path has been reset to the default location."
+                ).ShowDialog(this);
+
+                normalized = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".config",
+                    "raid-util",
+                    "logs"
+                );
+            }
+
+            _config.LogsPath = normalized;
 
             // -----------------------------
             // LOG LEVEL
@@ -168,6 +193,11 @@ public partial class ConfigWindow : Window
             });
             swSave.Stop();
             LogService.Debug($"[CONFIG] ConfigManager.Save duration: {swSave.ElapsedMilliseconds} ms");
+
+            // -----------------------------
+            // APPLY CONFIG TO LOGSERVICE
+            // -----------------------------
+            LogService.ApplyConfig(_config);
         }
         catch (Exception ex)
         {
@@ -181,17 +211,6 @@ public partial class ConfigWindow : Window
             LogService.Debug($"[CONFIG] SaveConfigAsync EXIT (TOTAL {swTotal.ElapsedMilliseconds} ms)");
             LogService.Debug("====================================================");
         }
-    }
-
-    private int ParseInt(string? text, int fallback)
-    {
-        if (!int.TryParse(text, out var value))
-        {
-            LogService.Debug($"[CONFIG] ParseInt fallback → '{text}'");
-            return fallback;
-        }
-
-        return value;
     }
 
     private async void OnBrowseLogs(object? sender, RoutedEventArgs e)
@@ -215,7 +234,7 @@ public partial class ConfigWindow : Window
     }
 
     // ============================================================
-    // BOTÓN GUARDAR (ASYNC + INSTRUMENTADO)
+    // BOTÓN GUARDAR
     // ============================================================
     private async void OnSaveSettingsAsync(object? sender, RoutedEventArgs e)
     {

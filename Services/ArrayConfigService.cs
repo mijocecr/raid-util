@@ -17,8 +17,7 @@ public static class ArrayConfigService
     private static string Normalize(string arrayName)
     {
         // Solo letras, números, guion y guion bajo
-        return Regex
-            .Replace(arrayName, @"[^a-zA-Z0-9\-_]", "");
+        return Regex.Replace(arrayName, @"[^a-zA-Z0-9\-_]", "");
     }
 
     // ============================
@@ -60,7 +59,7 @@ public static class ArrayConfigService
 
             if (!File.Exists(path))
             {
-                LogService.Write($"[CFG] No existe config para {arrayName}, usando defaults.");
+                LogService.Info($"[CFG] No existe config para {arrayName}, usando defaults.");
                 return new ArrayConfig();
             }
 
@@ -86,6 +85,7 @@ public static class ArrayConfigService
             cfg.ResyncPriority = Math.Clamp(cfg.ResyncPriority, 1, 200000);
             cfg.ResyncMaxSpeed = Math.Clamp(cfg.ResyncMaxSpeed, 100, 500000);
 
+            LogService.Debug($"[CFG] Config cargada correctamente: {path}");
             return cfg;
         }
         catch (Exception ex)
@@ -120,7 +120,7 @@ public static class ArrayConfigService
             {
                 var backup = path + ".bak";
                 ShellHelper.EjecutarComoRoot($"cp \"{path}\" \"{backup}\"");
-                LogService.Write($"[CFG] Backup creado: {backup}");
+                LogService.Info($"[CFG] Backup creado: {backup}");
             }
 
             // Copiar con permisos root
@@ -130,7 +130,7 @@ public static class ArrayConfigService
             ShellHelper.EjecutarComoRoot($"chmod 644 \"{path}\"");
             ShellHelper.EjecutarComoRoot($"chown root:root \"{path}\"");
 
-            LogService.Write($"[CFG] Config guardada correctamente: {path}");
+            LogService.Info($"[CFG] Config guardada correctamente: {path}");
         }
         catch (Exception ex)
         {

@@ -17,11 +17,10 @@ public static class ConfigManager
     private static readonly string ConfigPath =
         Path.Combine(ConfigDir, "config.json");
 
-    // Instancia interna real
     private static AppConfig _config = new();
 
     // ============================================================
-    // LOAD → devuelve AppConfig
+    // LOAD
     // ============================================================
     public static AppConfig Load()
     {
@@ -31,6 +30,7 @@ public static class ConfigManager
 
             if (!File.Exists(ConfigPath))
             {
+                NormalizeConfig(_config);
                 Save(_config);
                 return _config;
             }
@@ -41,14 +41,12 @@ public static class ConfigManager
             if (cfg is null)
             {
                 BackupCorruptConfig();
+                NormalizeConfig(_config);
                 Save(_config);
                 return _config;
             }
 
-            // Validar campos críticos
-            cfg.LogsPath ??= Path.Combine(ConfigDir, "logs");
-            cfg.GeneralRefreshMs = Math.Clamp(cfg.GeneralRefreshMs, 500, 60000);
-
+            NormalizeConfig(cfg);
             _config = cfg;
 
             EnsureLogsDirectory();
@@ -57,23 +55,21 @@ public static class ConfigManager
         catch
         {
             BackupCorruptConfig();
+            NormalizeConfig(_config);
             Save(_config);
             return _config;
         }
     }
 
     // ============================================================
-    // SAVE → guarda AppConfig
+    // SAVE
     // ============================================================
     public static void Save(AppConfig config)
     {
         try
         {
             EnsureConfigDirectory();
-
-            // Validar campos antes de guardar
-            config.LogsPath ??= Path.Combine(ConfigDir, "logs");
-            config.GeneralRefreshMs = Math.Clamp(config.GeneralRefreshMs, 500, 60000);
+            NormalizeConfig(config);
 
             _config = config;
 
@@ -93,12 +89,26 @@ public static class ConfigManager
     }
 
     // ============================================================
-    // GET → obtener instancia actual
+    // NORMALIZAR CONFIG
     // ============================================================
-    public static AppConfig Get()
+    private static void NormalizeConfig(AppConfig cfg)
     {
-        return _config;
+        // Ruta de logs
+        if (string.IsNullOrWhiteSpace(cfg.LogsPath))
+            cfg.LogsPath = Path.Combine(ConfigDir, "logs");
+
+        if (!Path.IsPathRooted(cfg.LogsPath))
+            cfg.LogsPath = Path.Combine(ConfigDir, cfg.LogsPath);
+
+        // Nivel de logs
+        if (cfg.LogLevel < 0 || cfg.LogLevel > 2)
+            cfg.LogLevel = 1;
     }
+
+    // ============================================================
+    // GET
+    // ============================================================
+    public static AppConfig Get() => _config;
 
     // ============================================================
     // DIRECTORIOS
@@ -124,7 +134,7 @@ public static class ConfigManager
     }
 
     // ============================================================
-    // BACKUP DE CONFIGURACIÓN CORRUPTA
+    // BACKUP
     // ============================================================
     private static void BackupCorruptConfig()
     {

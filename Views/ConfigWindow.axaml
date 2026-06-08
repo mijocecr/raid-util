@@ -3,14 +3,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     x:Class="RAID_Util.Views.ConfigWindow"
     Width="420"
-    Height="430"
+    Height="360"
     CanResize="False"
     Title="Configuration"
-
     Background="{DynamicResource BMWBackgroundBrush}"
     Foreground="{DynamicResource BMWTextBrush}">
 
-    <!-- IMPORTA TU DICCIONARIO BMW -->
+    <!-- BMW COLORS -->
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -27,62 +26,6 @@
             CornerRadius="10">
 
         <StackPanel Spacing="18">
-
-            <!-- TIMERS PANEL -->
-            <StackPanel Spacing="10">
-
-                <TextBlock Text="System Timers"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource BMWTextBrush}" />
-
-                <StackPanel Spacing="6">
-
-                    <DockPanel LastChildFill="False">
-                        <TextBlock Text="General refresh (ms)"
-                                   VerticalAlignment="Center"
-                                   Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}" />
-                        <TextBox x:Name="GeneralRefreshBox"
-                                 Width="80"
-                                 Background="{DynamicResource BMWInputBrush}"
-                                 Foreground="{DynamicResource BMWTextBrush}"
-                                 BorderBrush="{DynamicResource BMWBorderBrush}"
-                                 BorderThickness="1"
-                                 CornerRadius="6" />
-                    </DockPanel>
-
-                    <DockPanel LastChildFill="False">
-                        <TextBlock Text="Rebuild refresh (ms)"
-                                   VerticalAlignment="Center"
-                                   Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}" />
-                        <TextBox x:Name="RebuildRefreshBox"
-                                 Width="80"
-                                 Background="{DynamicResource BMWInputBrush}"
-                                 Foreground="{DynamicResource BMWTextBrush}"
-                                 BorderBrush="{DynamicResource BMWBorderBrush}"
-                                 BorderThickness="1"
-                                 CornerRadius="6" />
-                    </DockPanel>
-
-                    <DockPanel LastChildFill="False">
-                        <TextBlock Text="Hotplug refresh (ms)"
-                                   VerticalAlignment="Center"
-                                   Width="170"
-                                   Foreground="{DynamicResource BMWTextBrush}" />
-                        <TextBox x:Name="HotplugRefreshBox"
-                                 Width="80"
-                                 Background="{DynamicResource BMWInputBrush}"
-                                 Foreground="{DynamicResource BMWTextBrush}"
-                                 BorderBrush="{DynamicResource BMWBorderBrush}"
-                                 BorderThickness="1"
-                                 CornerRadius="6" />
-                    </DockPanel>
-
-                </StackPanel>
-
-            </StackPanel>
 
             <!-- LOGS PANEL -->
             <StackPanel Spacing="10">
@@ -104,6 +47,7 @@
                              BorderBrush="{DynamicResource BMWBorderBrush}"
                              BorderThickness="1"
                              CornerRadius="6" />
+
                     <Button x:Name="BrowseLogsButton"
                             Content="Browse..."
                             Width="90"
@@ -114,6 +58,9 @@
                             BorderThickness="1"
                             CornerRadius="6" />
                 </DockPanel>
+
+                <TextBlock Text="Log level"
+                           Foreground="{DynamicResource BMWTextBrush}" />
 
                 <ComboBox x:Name="LogLevelCombo"
                           Width="150"
@@ -158,7 +105,6 @@
                         Grid.Column="1"
                         Background="{DynamicResource BMWSurfaceBrush}"
                         Foreground="{DynamicResource BMWTextBrush}"
-
                         BorderBrush="{DynamicResource BMWAccentBrush}"
                         BorderThickness="1"
                         CornerRadius="6" />

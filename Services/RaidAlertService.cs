@@ -39,6 +39,8 @@ public static class RaidAlertService
 
         var baseName = BaseName(arrayName);
 
+        LogService.Info($"[RaidAlertService] Monitoring started for {baseName}");
+
         Task.Run(async () =>
         {
             while (!token.IsCancellationRequested)
@@ -99,6 +101,8 @@ public static class RaidAlertService
         _currentArray = null;
         _lastMdstat = "";
         _lastDetail = "";
+
+        LogService.Info("[RaidAlertService] Monitoring stopped");
     }
 
     // ============================================================
@@ -159,7 +163,7 @@ public static class RaidAlertService
         try
         {
             onAlert(message);
-            LogService.Write($"[RaidAlertService] ALERT: {message}");
+            LogService.Info($"[RaidAlertService] ALERT: {message}");
         }
         catch (Exception ex)
         {
