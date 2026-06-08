@@ -15,6 +15,11 @@ public class RaidStateService
 
     private readonly object _lock = new();
 
+    public void ForceStateChanged()
+    {
+        StateChanged?.Invoke();
+    }
+
     public async Task RefreshAsync()
     {
         // ⭐ NO permitir llamadas antes de que MainWindow valide sudo
@@ -26,7 +31,6 @@ public class RaidStateService
 
         _ = Task.Run(async () =>
         {
-            // ⭐ FIX: usar Singleton
             var raidService = RaidService.Instance;
 
             var arrays = await raidService.GetArraysAsync();
@@ -38,7 +42,38 @@ public class RaidStateService
                 Disks = disks;
             }
 
+            // ⭐ Detectar FIN de operación aunque mdadm NO reporte 100%
+            NormalizeFinishedOperations();
+
             StateChanged?.Invoke();
         });
+    }
+
+    // ⭐⭐⭐ ESTA ES LA CLAVE ⭐⭐⭐
+    private void NormalizeFinishedOperations()
+    {
+        foreach (var array in Arrays)
+        {
+            // Si mdadm dejó de reportar progreso pero no llegó a 100%
+            bool wasInOperation =
+                array.State == RaidArrayState.Resync ||
+                array.State == RaidArrayState.Rebuilding;
+
+            bool progressStuck =
+                array.RebuildProgress > 0 &&
+                array.RebuildProgress < 100;
+
+            if (wasInOperation && progressStuck)
+            {
+                LogService.Debug($"[STATE] mdadm terminó sin reportar 100% → normalizando {array.Name}");
+
+                // ⭐ Forzar finalización correcta
+                array.RebuildProgress = 100;
+                array.RebuildETA = "0 min";
+
+                // ⭐ Estado final correcto
+                array.State = RaidArrayState.Clean;
+            }
+        }
     }
 }

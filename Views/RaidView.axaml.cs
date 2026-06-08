@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -30,10 +29,8 @@ public partial class RaidView : UserControl
 {
     private const bool FORCE_FAKE_DATA = false;
 
-    private  RaidStateService? _stateService;
-    
+    private RaidStateService? _stateService;
 
-    
     private static readonly Thickness DiskCardPadding = new(12);
     private static readonly Thickness DiskCardMargin = new(0, 0, 0, 10);
     private static readonly CornerRadius DiskCardRadius = new(8);
@@ -62,162 +59,27 @@ public partial class RaidView : UserControl
     };
 
     private static readonly Dictionary<string, IImage> _iconCache = new();
+
     private List<RaidArrayInfo> _arrays = new();
-    private RaidArrayInfo? _currentArray;
+    private RaidArrayInfo? _selectedArray;
 
     private bool _monitorBlinkState;
     private DispatcherTimer? _monitorBlinkTimer;
     private string? _monitoringArrayName;
     private Border? _monitoringBorder;
 
-    private RaidArrayInfo? _selectedArray;
-    private bool _isBuildingUI = false;
+    private bool _isBuildingUI;
 
-    
+    // ----------------- INTEGRACIÓN CON RaidStateService -----------------
+
     public RaidView(RaidStateService stateService)
-        : this() // reutiliza el constructor actual
+        : this()
     {
         _stateService = stateService;
         _stateService.StateChanged += OnRaidStateChanged;
-
-        // Carga inicial desde el estado en memoria
         LoadFromState();
     }
 
-    //-----------------------------------
-    
-
-
-// ⭐ Conectar RaidView al RaidStateService desde MainWindow
-public void AttachStateService(RaidStateService stateService)
-{
-    _stateService = stateService;
-
-    // Asumimos que StateChanged es un Action o similar sin parámetros
-    _stateService.StateChanged += OnRaidStateChanged;
-
-    // Carga inicial desde el estado en memoria
-    LoadFromState();
-}
-
-// ⭐ Se llama automáticamente cuando cambia el estado en memoria
-private void OnRaidStateChanged()
-{
-    if (FORCE_FAKE_DATA)
-        return;
-
-    LogService.Debug("[RAIDVIEW] StateChanged recibido.");
-    // No bloqueamos, no tocamos mdadm, solo refrescamos desde el estado
-    Dispatcher.UIThread.Post(LoadFromState);
-}
-
-// ⭐ Carga arrays desde RaidStateService y reutiliza tu lógica actual
-private void LoadFromState()
-{
-    if (_stateService == null)
-        return;
-
-    var arrays = _stateService.Arrays ?? new List<RaidArrayInfo>();
-
-    // Reutilizamos SetArrays tal cual, para no romper nada
-    SetArrays(arrays);
-    LogService.Debug($"[RAIDVIEW] LoadFromState() → {_stateService?.Arrays?.Count} arrays");
-
-}
-
-// ⭐ SetArrays completo, tal como debe quedar
-
-
-public void SetArrays(List<RaidArrayInfo> arrays)
-{
-    // ⭐ 1) Guardar estado anterior
-    var expanded = _arrays
-        .Where(a => a.IsExpanded)
-        .Select(a => a.Name)
-        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-    var selected = _arrays
-        .Where(a => a.IsSelected)
-        .Select(a => a.Name)
-        .FirstOrDefault();
-
-    var monitoring = _monitoringArrayName;
-
-    // ⭐ 2) Reemplazar arrays
-    _arrays = arrays ?? new List<RaidArrayInfo>();
-
-    // ⭐ 3) Restaurar estado + fallbacks
-    foreach (var a in _arrays)
-    {
-        a.IsExpanded = expanded.Contains(a.Name);
-
-        a.IsSelected = selected != null &&
-                       a.Name.Equals(selected, StringComparison.OrdinalIgnoreCase);
-
-        if (monitoring != null &&
-            a.Name.Equals(monitoring, StringComparison.OrdinalIgnoreCase))
-        {
-            _monitoringArrayName = a.Name;
-        }
-
-        if (!Enum.IsDefined(typeof(RaidArrayState), a.State))
-            a.State = RaidArrayState.Unknown;
-
-        a.StateIcon = string.IsNullOrWhiteSpace(a.StateIcon)
-            ? GetStateIcon(a.State)
-            : a.StateIcon;
-
-        a.Level = string.IsNullOrWhiteSpace(a.Level) ? "N/A" : a.Level;
-        a.TotalSize = string.IsNullOrWhiteSpace(a.TotalSize) ? "Unknown" : a.TotalSize;
-        a.UsableSize = string.IsNullOrWhiteSpace(a.UsableSize) ? a.TotalSize : a.UsableSize;
-        a.ParitySize = string.IsNullOrWhiteSpace(a.ParitySize) ? "N/A" : a.ParitySize;
-        a.Path = string.IsNullOrWhiteSpace(a.Path) ? "/dev/unknown" : a.Path;
-        a.Uptime = string.IsNullOrWhiteSpace(a.Uptime) ? "Unknown" : a.Uptime;
-
-        if (a.Disks == null)
-            a.Disks = new List<RaidDiskInfo>();
-
-        foreach (var d in a.Disks)
-        {
-            d.Model = string.IsNullOrWhiteSpace(d.Model) ? "Unknown" : d.Model;
-            d.Serial = string.IsNullOrWhiteSpace(d.Serial) ? "Unknown" : d.Serial;
-            d.Size = string.IsNullOrWhiteSpace(d.Size) ? "Unknown" : d.Size;
-
-            if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
-                d.Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
-        }
-
-        a.DiskSummary = $"{a.Disks.Count}× Disk";
-
-        if (a.RebuildProgress < 0 || a.RebuildProgress > 100)
-            a.RebuildProgress = 0;
-
-        if (string.IsNullOrWhiteSpace(a.RebuildETA))
-            a.RebuildETA = "N/A";
-    }
-
-    // ⭐ IMPORTANTE:
-    // NO llamar a BuildUI() aquí.
-}
-
-
-
-
-
-    
-    
-    //------------------------------------
-    
-    
-    
-    
-   
-
-    // ⭐ Permite conectar RaidView al RaidStateService sin romper nada
-    
-
-    
-    
     public RaidView()
     {
         InitializeComponent();
@@ -248,258 +110,109 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
     public bool IsFakeMode => FORCE_FAKE_DATA;
 
-    
-    
-
-    
-    
-    
-    private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
+    public void AttachStateService(RaidStateService stateService)
     {
-        // ⭐ FIX: usar Singleton
-        var service = RaidService.Instance;
-        var parent = GetWindow();
-
-        var loading = new LoadingDialog("Assembling arrays...");
-        loading.Show(parent);
-
-        await Task.Delay(50);
-
-        var ok = await Task.Run(() => service.AutoAssemble());
-
-        loading.Close();
-
-        if (!ok)
-        {
-            await ShowInfo("Error", "Could not assemble stopped arrays.");
-            return;
-        }
-
-        await ShowInfo("Success", "Arrays assembled correctly.");
-        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        _stateService = stateService;
+        _stateService.StateChanged += OnRaidStateChanged;
+        LoadFromState();
     }
 
-    
-
-    private async void OnInitializeClicked(object? sender, RoutedEventArgs e)
+    private void OnRaidStateChanged()
     {
-        if (_selectedArray == null)
-        {
-            await ShowInfo("Error", "Select an array first.");
-            return;
-        }
-
-        var array = _selectedArray;
-
-        // ⭐ Abrir diálogo de formato
-        var dlg = new FormatArrayDialog(array.Name);
-        var owner = this.GetVisualRoot() as Window;
-        var result = await dlg.ShowDialog<FormatArrayResult?>(owner);
-
-        if (result == null)
+        if (FORCE_FAKE_DATA)
             return;
 
-        var loading = new LoadingDialog($"Initializing {array.Name}...");
-        loading.Show(owner);
+        LogService.Debug("[RAIDVIEW] StateChanged recibido.");
 
-        var ok = false;
-
-        try
+        Dispatcher.UIThread.Post(() =>
         {
-            ok = await Task.Run(async () =>
-            {
-                // ⭐ FIX: usar Singleton
-                var service = RaidService.Instance;
+            LoadFromState();              // actualiza datos
+            foreach (var a in _arrays)    // actualiza solo progreso
+                UpdateArrayCardProgress(a);
+        });
+    }
 
-                return await service.InitializeArrayAsync(
-                    array.Path,          // ⭐ Path real del array
-                    result.Filesystem,   // FS elegido
-                    result.Label         // Label opcional
-                );
-            });
-        }
-        finally
-        {
-            loading.Close();
-        }
-
-        if (!ok)
-        {
-            await ShowInfo("Error", "Could not initialize the array.");
+    private void LoadFromState()
+    {
+        if (_stateService == null)
             return;
-        }
 
-        await ShowInfo("Success", $"The array {array.Name} was initialized.");
-
-        // ⭐ Refrescar arrays
-        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-    }
-
-
-    private async Task<bool> ShowConfirm(string title, string message)
-    {
-        var dlg = new ConfirmDialog(title, message);
-        var owner = this.GetVisualRoot() as Window;
-        if (owner != null)
-            return await dlg.ShowDialog<bool>(owner);
-
-        return await dlg.ShowDialog<bool>(new Window());
-    }
-
-    private async Task<bool> ShowInfo(string title, string message)
-    {
-        var dlg = new InfoDialog(title, message);
-        var owner = this.GetVisualRoot() as Window;
-        if (owner != null)
-            return await dlg.ShowDialog<bool>(owner);
-
-        return await dlg.ShowDialog<bool>(new Window());
-    }
-
-   
-
-    private void LoadFakeData()
-    {
-        _arrays = new List<RaidArrayInfo>
-        {
-            new()
-            {
-                Name = "md0",
-                Path = "/dev/md0",
-                Level = "RAID1",
-                State = RaidArrayState.Clean,
-                StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
-                IsExpanded = false,
-                IsMounted = true,
-                PersistMount = true,
-                MountPath = "/mnt/md0",
-                TotalSize = "500 GB",
-                UsableSize = "500 GB",
-                ParitySize = "0 GB",
-                AverageTemp = 34,
-                DiskSummary = "2× SSD SATA",
-                Uptime = "12 days",
-                RebuildProgress = 0,
-                RebuildETA = "",
-                Disks = new List<RaidDiskInfo>
-                {
-                    new()
-                    {
-                        Name = "sda1",
-                        Model = "Samsung SSD 860 EVO",
-                        Size = "500G",
-                        RaidMembership = RaidMembership.Active,
-                        State = "OK",
-                        Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
-                        ArrayName = "md0"
-                    },
-                    new()
-                    {
-                        Name = "sdb1",
-                        Model = "Samsung SSD 860 EVO",
-                        Size = "500G",
-                        RaidMembership = RaidMembership.Active,
-                        State = "OK",
-                        Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
-                        ArrayName = "md0"
-                    }
-                }
-            },
-            new()
-            {
-                Name = "md1",
-                Path = "/dev/md1",
-                Level = "RAID5",
-                State = RaidArrayState.Degraded,
-                StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
-                IsExpanded = true,
-                IsMounted = false,
-                PersistMount = false,
-                MountPath = "/mnt/md1",
-                TotalSize = "3 TB",
-                UsableSize = "2 TB",
-                ParitySize = "1 TB",
-                AverageTemp = 41,
-                DiskSummary = "3× HDD 7200 RPM",
-                Uptime = "3 days",
-                RebuildProgress = 37,
-                RebuildETA = "12 min",
-                Disks = new List<RaidDiskInfo>
-                {
-                    new()
-                    {
-                        Name = "sdc1",
-                        Model = "WD Blue 1TB",
-                        Size = "1T",
-                        RaidMembership = RaidMembership.Active,
-                        State = "OK",
-                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
-                        ArrayName = "md1"
-                    },
-                    new()
-                    {
-                        Name = "sdd1",
-                        Model = "WD Blue 1TB",
-                        Size = "1T",
-                        RaidMembership = RaidMembership.Active,
-                        State = "OK",
-                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
-                        ArrayName = "md1"
-                    },
-                    new()
-                    {
-                        Name = "sde1",
-                        Model = "WD Blue 1TB",
-                        Size = "1T",
-                        RaidMembership = RaidMembership.Faulty,
-                        State = "FAULTY",
-                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
-                        ArrayName = "md1"
-                    }
-                }
-            }
-        };
-
+        var arrays = _stateService.Arrays ?? new List<RaidArrayInfo>();
+        SetArrays(arrays);
         BuildUI();
+
+        LogService.Debug($"[RAIDVIEW] LoadFromState() → {_stateService.Arrays?.Count} arrays");
     }
+    // ----------------- ESTADO DE ARRAYS -----------------
 
-    private Color GetArrayGlowColor(RaidArrayState state)
+    public void SetArrays(List<RaidArrayInfo> arrays)
     {
-        var isDark = Application.Current!.ActualThemeVariant == ThemeVariant.Dark;
+        var expanded = _arrays
+            .Where(a => a.IsExpanded)
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return state switch
+        var selected = _arrays
+            .Where(a => a.IsSelected)
+            .Select(a => a.Name)
+            .FirstOrDefault();
+
+        var monitoring = _monitoringArrayName;
+
+        _arrays = arrays ?? new List<RaidArrayInfo>();
+
+        foreach (var a in _arrays)
         {
-            RaidArrayState.Clean or RaidArrayState.Active =>
-                isDark ? Color.Parse("#1C69D4") : Color.Parse("#0A4FB3"),
+            a.IsExpanded = expanded.Contains(a.Name);
 
-            RaidArrayState.Degraded or RaidArrayState.Rebuilding or RaidArrayState.Resync =>
-                isDark ? Color.Parse("#F2C94C") : Color.Parse("#D9B03F"),
+            a.IsSelected = selected != null &&
+                           a.Name.Equals(selected, StringComparison.OrdinalIgnoreCase);
 
-            RaidArrayState.ReadOnly =>
-                isDark ? Color.Parse("#A7C7FF") : Color.Parse("#7AA8FF"),
+            if (monitoring != null &&
+                a.Name.Equals(monitoring, StringComparison.OrdinalIgnoreCase))
+            {
+                _monitoringArrayName = a.Name;
+            }
 
-            RaidArrayState.Failed =>
-                isDark ? Color.Parse("#D32F2F") : Color.Parse("#B71C1C"),
+            if (!Enum.IsDefined(typeof(RaidArrayState), a.State))
+                a.State = RaidArrayState.Unknown;
 
-            _ =>
-                isDark ? Color.Parse("#F2C94C") : Color.Parse("#D9B03F")
-        };
-    }
+            a.StateIcon = string.IsNullOrWhiteSpace(a.StateIcon)
+                ? GetStateIcon(a.State)
+                : a.StateIcon;
 
-    private async void AnimateArrayGlow(Border border, SolidColorBrush brush)
-    {
-        while (true)
-        {
-            brush.Opacity = 0.25;
-            await Task.Delay(500);
+            a.Level = string.IsNullOrWhiteSpace(a.Level) ? "N/A" : a.Level;
+            a.TotalSize = string.IsNullOrWhiteSpace(a.TotalSize) ? "Unknown" : a.TotalSize;
+            a.UsableSize = string.IsNullOrWhiteSpace(a.UsableSize) ? a.TotalSize : a.UsableSize;
+            a.ParitySize = string.IsNullOrWhiteSpace(a.ParitySize) ? "N/A" : a.ParitySize;
+            a.Path = string.IsNullOrWhiteSpace(a.Path) ? "/dev/unknown" : a.Path;
+            a.Uptime = string.IsNullOrWhiteSpace(a.Uptime) ? "Unknown" : a.Uptime;
 
-            brush.Opacity = 0.55;
-            await Task.Delay(500);
+            if (a.Disks == null)
+                a.Disks = new List<RaidDiskInfo>();
+
+            foreach (var d in a.Disks)
+            {
+                d.Model = string.IsNullOrWhiteSpace(d.Model) ? "Unknown" : d.Model;
+                d.Serial = string.IsNullOrWhiteSpace(d.Serial) ? "Unknown" : d.Serial;
+                d.Size = string.IsNullOrWhiteSpace(d.Size) ? "Unknown" : d.Size;
+
+                if (string.IsNullOrWhiteSpace(d.Icon) || !d.Icon.Contains("avares://"))
+                    d.Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png";
+            }
+
+            a.DiskSummary = $"{a.Disks.Count}× Disk";
+
+            if (a.RebuildProgress < 0 || a.RebuildProgress > 100)
+                a.RebuildProgress = 0;
+
+            if (string.IsNullOrWhiteSpace(a.RebuildETA))
+                a.RebuildETA = "N/A";
         }
     }
 
-    
-    
+    // ----------------- UI PRINCIPAL -----------------
+
     private void BuildUI()
     {
         if (_isBuildingUI)
@@ -525,20 +238,10 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         foreach (var array in _arrays)
         {
-            // ⭐ FILTRO SEGURO:
-            //    - NO compara con BaseName (eso rompía md0 degradado)
-            //    - Solo descarta discos sin ArrayName
-            //    - Nunca deja array.Disks en null
             array.Disks = array.Disks?
                               .Where(d => !string.IsNullOrWhiteSpace(d.ArrayName))
                               .ToList()
                           ?? new List<RaidDiskInfo>();
-
-            // ⭐ Si quedó vacío, no romper la UI
-            if (array.Disks.Count == 0)
-            {
-                Console.WriteLine($"[UI] Array {array.Name} sin discos tras filtro seguro → continuando sin romper UI.");
-            }
 
             var card = BuildArrayCard(array);
             ListArrays.Children.Add(card);
@@ -554,291 +257,457 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         _isBuildingUI = false;
     }
 
-    
-    
-    private void RestartBlinking()
+    private Color GetArrayGlowColor(RaidArrayState state)
     {
-        if (_monitorBlinkTimer != null)
-            _monitorBlinkTimer.Stop();
+        var isDark = Application.Current!.ActualThemeVariant == ThemeVariant.Dark;
 
-        _monitorBlinkTimer = new DispatcherTimer
+        return state switch
         {
-            Interval = TimeSpan.FromMilliseconds(500)
+            RaidArrayState.Clean or RaidArrayState.Active =>
+                isDark ? Color.Parse("#1C69D4") : Color.Parse("#0A4FB3"),
+
+            RaidArrayState.Degraded or RaidArrayState.Rebuilding or RaidArrayState.Resync =>
+                isDark ? Color.Parse("#F2C94C") : Color.Parse("#D9B03F"),
+
+            RaidArrayState.ReadOnly =>
+                isDark ? Color.Parse("#A7C7FF") : Color.Parse("#7AA8FF"),
+
+            RaidArrayState.Failed =>
+                isDark ? Color.Parse("#D32F2F") : Color.Parse("#B71C1C"),
+
+            _ =>
+                isDark ? Color.Parse("#F2C94C") : Color.Parse("#D9B03F")
         };
-
-        _monitorBlinkTimer.Tick += (_, _) =>
-        {
-            if (_monitoringBorder == null)
-                return;
-
-            _monitorBlinkState = !_monitorBlinkState;
-
-            _monitoringBorder.BorderBrush = _monitorBlinkState
-                ? Brushes.Orange
-                : Brushes.Transparent;
-
-            _monitoringBorder.BorderThickness = new Thickness(3);
-        };
-
-        _monitorBlinkTimer.Start();
     }
 
+    private string GetOperationLabel(RaidArrayInfo array)
+    {
+        if (array.IsResyncing || array.State == RaidArrayState.Resync)
+            return "Resyncing";
+
+        if (array.IsRecovering)
+            return "Recovering";
+
+        if (array.IsChecking)
+            return "Checking";
+
+        if (array.IsRepairing)
+            return "Repairing";
+
+        if (array.RebuildProgress > 0 && array.RebuildProgress <= 100)
+            return "Rebuilding";
+
+        return "";
+    }
     private Border BuildArrayCard(RaidArrayInfo array)
-{
-    // ⭐ Fallbacks seguros
-    var safeName = array.Name ?? "Unknown";
-    var safeLevel = array.Level ?? "N/A";
-
-    // ⭐ State es enum → NO usar ?.ToString()
-    var safeState = Enum.IsDefined(typeof(RaidArrayState), array.State)
-        ? array.State.ToString()
-        : "Unknown";
-
-    var safeTotalSize = array.TotalSize ?? "Unknown";
-    var safePath = array.Path ?? "/dev/unknown";
-    var safeParity = array.ParitySize ?? "N/A";
-    var safeETA = array.RebuildETA ?? "N/A";
-
-    var safeDisks = array.Disks ?? new List<RaidDiskInfo>();
-    var activeCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Active);
-    var faultyCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Faulty);
-
-    // ⭐ Icono seguro
-    var safeIcon = string.IsNullOrWhiteSpace(array.StateIcon)
-        ? GetStateIcon(array.State)
-        : array.StateIcon;
-
-    var icon = LoadImage(safeIcon, 150);
-    icon.Margin = new Thickness(4);
-    icon.VerticalAlignment = VerticalAlignment.Center;
-
-    var name = new TextBlock
     {
-        Text = $"{safeName} ({safeLevel})",
-        FontSize = 22,
-        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
-        FontWeight = FontWeight.Bold,
-        Margin = new Thickness(0, 0, 0, 4)
-    };
+        var safeName = array.Name ?? "Unknown";
+        var safeLevel = array.Level ?? "N/A";
 
-    var info = new StackPanel { Spacing = 2 };
-    info.Children.Add(name);
+        var safeState = Enum.IsDefined(typeof(RaidArrayState), array.State)
+            ? array.State.ToString()
+            : "Unknown";
 
-    var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
+        var safeTotalSize = array.TotalSize ?? "Unknown";
+        var safePath = array.Path ?? "/dev/unknown";
+        var safeParity = array.ParitySize ?? "N/A";
+        var safeETA = array.RebuildETA ?? "N/A";
 
-    info.Children.Add(new TextBlock
-    {
-        Text = $"State: {safeState}",
-        FontSize = 14,
-        Foreground = dimBrush
-    });
+        var safeDisks = array.Disks ?? new List<RaidDiskInfo>();
+        var activeCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Active);
+        var faultyCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Faulty);
 
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Disks: {safeDisks.Count} ({activeCount} OK, {faultyCount} Faulty)",
-        FontSize = 14,
-        Foreground = dimBrush
-    });
+        var safeIcon = string.IsNullOrWhiteSpace(array.StateIcon)
+            ? GetStateIcon(array.State)
+            : array.StateIcon;
 
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Size: {safeTotalSize}",
-        FontSize = 14,
-        Foreground = dimBrush
-    });
+        var icon = LoadImage(safeIcon, 150);
+        icon.Margin = new Thickness(4);
+        icon.VerticalAlignment = VerticalAlignment.Center;
 
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Path: {safePath}",
-        FontSize = 14,
-        Foreground = dimBrush
-    });
-
-    info.Children.Add(new TextBlock
-    {
-        Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {safeParity}",
-        FontSize = 14,
-        Foreground = dimBrush
-    });
-
-    // ⭐ Indicador de operación (rebuild, resync, recover…)
-    if (array.RebuildProgress > 0 && array.RebuildProgress <= 100)
-    {
-        var opText = new TextBlock
+        var name = new TextBlock
         {
-            Text = $"{safeState}: {array.RebuildProgress}%"
-                   + (safeETA != "N/A" ? $" (ETA {safeETA})" : ""),
+            Text = $"{safeName} ({safeLevel})",
+            FontSize = 22,
+            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+            FontWeight = FontWeight.Bold,
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+
+        var info = new StackPanel { Spacing = 2 };
+        info.Children.Add(name);
+
+        var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
+
+        info.Children.Add(new TextBlock
+        {
+            Text = $"State: {safeState}",
             FontSize = 14,
-            Foreground = dimBrush,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
+            Foreground = dimBrush
+        });
 
-        // ⭐ Barra de progreso custom (100% estable)
-        var barContainer = new Border
+        info.Children.Add(new TextBlock
         {
-            Background = Brushes.Gray,
-            Height = 10,
-            CornerRadius = new CornerRadius(3),
-            Margin = new Thickness(0, 2, 0, 0)
-        };
+            Text = $"Disks: {safeDisks.Count} ({activeCount} OK, {faultyCount} Faulty)",
+            FontSize = 14,
+            Foreground = dimBrush
+        });
 
-        var barFill = new Border
+        info.Children.Add(new TextBlock
         {
-            Background = Brushes.LimeGreen,
-            Width = Math.Clamp(array.RebuildProgress, 0, 100) * 2, // 100% = 200px
-            Height = 10,
-            CornerRadius = new CornerRadius(3)
-        };
+            Text = $"Size: {safeTotalSize}",
+            FontSize = 14,
+            Foreground = dimBrush
+        });
 
-        barContainer.Child = barFill;
-
-        info.Children.Add(opText);
-        info.Children.Add(barContainer);
-    }
-
-    var grid = new Grid
-    {
-        ColumnDefinitions =
+        info.Children.Add(new TextBlock
         {
-            new ColumnDefinition(GridLength.Auto),
-            new ColumnDefinition(GridLength.Star)
-        }
-    };
+            Text = $"Path: {safePath}",
+            FontSize = 14,
+            Foreground = dimBrush
+        });
 
-    grid.Children.Add(icon);
-    Grid.SetColumn(icon, 0);
-
-    grid.Children.Add(info);
-    Grid.SetColumn(info, 1);
-
-    var overlay = new Grid
-    {
-        RowDefinitions =
+        info.Children.Add(new TextBlock
         {
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(GridLength.Star)
-        }
-    };
+            Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {safeParity}",
+            FontSize = 14,
+            Foreground = dimBrush
+        });
 
-    var topRightPanel = new StackPanel
-    {
-        Orientation = Orientation.Horizontal,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        VerticalAlignment = VerticalAlignment.Top,
-        Spacing = 6
-    };
+        var opLabel = GetOperationLabel(array);
 
-    var chkSelect = new CheckBox
-    {
-        VerticalAlignment = VerticalAlignment.Top,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        IsChecked = _selectedArray == array
-    };
-
-    chkSelect.Checked += (_, _) =>
-    {
-        _selectedArray = array;
-        ClearOtherSelections(array);
-        BtnDeleteArray.IsEnabled = true;
-        BtnConfigArrays.IsEnabled = true;
-        BtnInitialize.IsEnabled = true;
-    };
-
-    chkSelect.Unchecked += (_, _) =>
-    {
-        if (_selectedArray == array)
-            _selectedArray = null;
-
-        BtnDeleteArray.IsEnabled = false;
-        BtnConfigArrays.IsEnabled = false;
-        BtnInitialize.IsEnabled = false;
-    };
-
-    topRightPanel.Children.Add(chkSelect);
-
-    var btnMore = new Button
-    {
-        Content = "More",
-        Classes = { "MoreButton" },
-        VerticalContentAlignment = VerticalAlignment.Center,
-        HorizontalContentAlignment = HorizontalAlignment.Center
-    };
-
-    btnMore.Click += (_, _) =>
-    {
-        _selectedArray = array;
-        ArrayMenu.PlacementTarget = btnMore;
-        ArrayMenu.Open(btnMore);
-    };
-
-    topRightPanel.Children.Add(btnMore);
-
-    overlay.Children.Add(topRightPanel);
-    Grid.SetRow(topRightPanel, 0);
-
-    overlay.Children.Add(grid);
-    Grid.SetRow(grid, 1);
-
-    var glowColor = GetArrayGlowColor(array.State);
-    var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
-
-    var glowBorder = new Border
-    {
-        Background = glowBrush,
-        CornerRadius = GlowRadius,
-        Padding = new Thickness(0),
-        Margin = CardMargin
-    };
-
-    var cardBorder = new Border
-    {
-        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-        CornerRadius = CardRadius,
-        Cursor = new Cursor(StandardCursorType.Hand),
-        Padding = CardPadding,
-        Child = overlay
-    };
-
-    glowBorder.Child = cardBorder;
-
-    AnimateArrayGlow(glowBorder, glowBrush);
-
-    cardBorder.PointerPressed += (_, _) =>
-    {
-        array.IsExpanded = !array.IsExpanded;
-
-        var parent = ListArrays;
-        var index = parent.Children.IndexOf(glowBorder);
-
-        if (array.IsExpanded)
+        if (array.RebuildProgress > 0 && array.RebuildProgress <= 100)
         {
-            NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Started");
-            StartMonitoringArray(array, cardBorder);
+            var opText = new TextBlock
+            {
+                Text = $"{opLabel}: {array.RebuildProgress}%"
+                       + (safeETA != "N/A" ? $" (ETA {safeETA})" : ""),
+                FontSize = 14,
+                Foreground = dimBrush,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
 
-            var expanded = BuildExpandedCard(array);
-            expanded.Tag = $"expanded:{safeName}";
-            parent.Children.Insert(index + 1, expanded);
+            var barContainer = new Border
+            {
+                Background = Brushes.Gray,
+                Height = 10,
+                CornerRadius = new CornerRadius(3),
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+
+            var barFill = new Border
+            {
+                Background = Brushes.LimeGreen,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 0,
+                Height = 10,
+                CornerRadius = new CornerRadius(3)
+            };
+
+            barContainer.LayoutUpdated += (_, _) =>
+            {
+                var width = barContainer.Bounds.Width;
+                var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
+                barFill.Width = width * pct;
+            };
+
+            barContainer.Child = barFill;
+
+            info.Children.Add(opText);
+            info.Children.Add(barContainer);
         }
         else
         {
-            StopMonitoringArray();
-            NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Stopped");
-
-            foreach (var child in parent.Children.ToList())
-                if (child is Border b &&
-                    b.Tag is string tag &&
-                    tag == $"expanded:{safeName}")
-                {
-                    parent.Children.Remove(b);
-                    break;
-                }
+            var opText = new TextBlock
+            {
+                Text = opLabel,
+                FontSize = 14,
+                Foreground = dimBrush,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            info.Children.Add(opText);
         }
-    };
 
-    return glowBorder;
-}
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star)
+            }
+        };
 
+        grid.Children.Add(icon);
+        Grid.SetColumn(icon, 0);
 
+        grid.Children.Add(info);
+        Grid.SetColumn(info, 1);
+
+        var overlay = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Star)
+            }
+        };
+
+        var topRightPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Spacing = 6
+        };
+
+        var chkSelect = new CheckBox
+        {
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            IsChecked = _selectedArray == array
+        };
+
+        chkSelect.Checked += (_, _) =>
+        {
+            _selectedArray = array;
+            ClearOtherSelections(array);
+            BtnDeleteArray.IsEnabled = true;
+            BtnConfigArrays.IsEnabled = true;
+            BtnInitialize.IsEnabled = true;
+        };
+
+        chkSelect.Unchecked += (_, _) =>
+        {
+            if (_selectedArray == array)
+                _selectedArray = null;
+
+            BtnDeleteArray.IsEnabled = false;
+            BtnConfigArrays.IsEnabled = false;
+            BtnInitialize.IsEnabled = false;
+        };
+
+        topRightPanel.Children.Add(chkSelect);
+
+        var btnMore = new Button
+        {
+            Content = "More",
+            Classes = { "MoreButton" },
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center
+        };
+
+        btnMore.Click += (_, _) =>
+        {
+            _selectedArray = array;
+            ArrayMenu.PlacementTarget = btnMore;
+            ArrayMenu.Open(btnMore);
+        };
+
+        topRightPanel.Children.Add(btnMore);
+
+        overlay.Children.Add(topRightPanel);
+        Grid.SetRow(topRightPanel, 0);
+
+        overlay.Children.Add(grid);
+        Grid.SetRow(grid, 1);
+
+        var glowColor = GetArrayGlowColor(array.State);
+        var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
+
+        var glowBorder = new Border
+        {
+            Background = glowBrush,
+            CornerRadius = GlowRadius,
+            Padding = new Thickness(0),
+            Margin = CardMargin
+        };
+
+        var cardBorder = new Border
+        {
+            Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+            CornerRadius = CardRadius,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Padding = CardPadding,
+            Child = overlay
+        };
+
+        glowBorder.Child = cardBorder;
+
+        AnimateArrayGlow(glowBorder);
+
+        cardBorder.PointerPressed += (_, _) =>
+        {
+            array.IsExpanded = !array.IsExpanded;
+
+            var parent = ListArrays;
+            var index = parent.Children.IndexOf(glowBorder);
+            if (array.IsExpanded)
+            {
+                NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Started");
+                StartMonitoringArray(array, cardBorder);
+
+                var expanded = BuildExpandedCard(array);
+                expanded.Tag = $"expanded:{safeName}";
+                parent.Children.Insert(index + 1, expanded);
+            }
+            else
+            {
+                StopMonitoringArray();
+                NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Stopped");
+
+                foreach (var child in parent.Children.ToList())
+                    if (child is Border b &&
+                        b.Tag is string tag &&
+                        tag == $"expanded:{safeName}")
+                    {
+                        parent.Children.Remove(b);
+                        break;
+                    }
+            }
+        };
+
+        return glowBorder;
+    }
+
+    private void UpdateArrayCardProgress(RaidArrayInfo array)
+    {
+        foreach (var child in ListArrays.Children)
+        {
+            if (child is not Border glowBorder)
+                continue;
+
+            if (glowBorder.Child is not Border cardBorder)
+                continue;
+
+            if (cardBorder.Child is not Grid overlay)
+                continue;
+
+            var grid = overlay.Children.OfType<Grid>().FirstOrDefault();
+            if (grid == null) continue;
+
+            var infoPanel = grid.Children.OfType<StackPanel>().FirstOrDefault();
+            if (infoPanel == null) continue;
+
+            var nameBlock = infoPanel.Children.OfType<TextBlock>().FirstOrDefault();
+            if (nameBlock == null) continue;
+
+            if (!nameBlock.Text.StartsWith(array.Name))
+                continue;
+
+            var progressText = infoPanel.Children
+                .OfType<TextBlock>()
+                .FirstOrDefault(t =>
+                    t.Text.Contains("%") ||
+                    t.Text.Contains("Resyncing") ||
+                    t.Text.Contains("Rebuilding") ||
+                    t.Text.Contains("Checking") ||
+                    t.Text.Contains("Repairing") ||
+                    t.Text.Contains("Recovering"));
+
+            var barContainer = infoPanel.Children
+                .OfType<Border>()
+                .FirstOrDefault(b => b.Height == 10);
+
+            var op = GetOperationLabel(array);
+
+            if (string.IsNullOrWhiteSpace(op))
+            {
+                if (progressText != null)
+                    progressText.Text = "";
+
+                if (barContainer != null)
+                    barContainer.IsVisible = false;
+
+                return;
+            }
+
+            if (progressText == null)
+            {
+                progressText = new TextBlock
+                {
+                    FontSize = 14,
+                    Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!,
+                    Margin = new Thickness(0, 8, 0, 0)
+                };
+                infoPanel.Children.Add(progressText);
+            }
+
+            if (barContainer == null)
+            {
+                barContainer = new Border
+                {
+                    Background = Brushes.Gray,
+                    Height = 10,
+                    CornerRadius = new CornerRadius(3),
+                    Margin = new Thickness(0, 2, 0, 0)
+                };
+
+                var barFillNew = new Border
+                {
+                    Background = Brushes.LimeGreen,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Width = 0,
+                    Height = 10,
+                    CornerRadius = new CornerRadius(3)
+                };
+
+                barContainer.Child = barFillNew;
+                infoPanel.Children.Add(barContainer);
+            }
+
+            progressText.Text = $"{op}: {array.RebuildProgress}%"
+                                + (array.RebuildETA != "N/A" ? $" (ETA {array.RebuildETA})" : " (ETA N/A)");
+
+            var barFill = barContainer.Child as Border;
+            if (barFill != null)
+            {
+                var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
+                barFill.Width = barContainer.Bounds.Width * pct;
+            }
+
+            barContainer.IsVisible = true;
+            return;
+        }
+    }
+
+    private void AnimateArrayGlow(Border glowBorder)
+    {
+        var animation = new Animation
+        {
+            Duration = TimeSpan.FromSeconds(1.2),
+            IterationCount = IterationCount.Infinite,
+            Easing = new SineEaseInOut()
+        };
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.85)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(0.5),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.65)
+            }
+        });
+
+        animation.Children.Add(new KeyFrame
+        {
+            Cue = new Cue(1),
+            Setters =
+            {
+                new Setter(Border.OpacityProperty, 0.85)
+            }
+        });
+
+        animation.RunAsync(glowBorder);
+    }
 
     private void ClearOtherSelections(RaidArrayInfo selected)
     {
@@ -891,7 +760,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             Child = panel
         };
     }
-
     private Control BuildMountOptions(RaidArrayInfo array)
     {
         var cfg = ArrayConfigService.Load(array.Name);
@@ -924,31 +792,39 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             Width = 100
         };
 
-        btnMount.Click += (_, _) =>
+        btnMount.Click += async (_, _) =>
         {
-            if (MountService.IsMounted(mountPoint))
+            try
             {
-                MountService.Unmount(mountPoint);
+                if (MountService.IsMounted(mountPoint))
+                {
+                    MountService.Unmount(mountPoint);
+                }
+                else
+                {
+                    var opts = new List<string>();
+
+                    if (cfg.Mount_NoAtime) opts.Add("noatime");
+                    if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
+                    if (cfg.Mount_Discard) opts.Add("discard");
+                    if (cfg.Mount_Sync) opts.Add("sync");
+                    if (cfg.Mount_ReadOnly) opts.Add("ro");
+
+                    var mountOpts = opts.Count == 0
+                        ? "defaults"
+                        : string.Join(",", opts);
+
+                    MountService.Mount(array.Path, mountPoint, mountOpts);
+                    ShellHelper.EjecutarComoRoot($"chmod {cfg.MountPermissions} \"{mountPoint}\"");
+                }
+
+                BuildUI();
             }
-            else
+            catch (Exception ex)
             {
-                var opts = new List<string>();
-
-                if (cfg.Mount_NoAtime) opts.Add("noatime");
-                if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
-                if (cfg.Mount_Discard) opts.Add("discard");
-                if (cfg.Mount_Sync) opts.Add("sync");
-                if (cfg.Mount_ReadOnly) opts.Add("ro");
-
-                var mountOpts = opts.Count == 0
-                    ? "defaults"
-                    : string.Join(",", opts);
-
-                MountService.Mount(array.Path, mountPoint, mountOpts);
-                ShellHelper.EjecutarComoRoot($"chmod {cfg.MountPermissions} \"{mountPoint}\"");
+                NotificadorLinux.Enviar($"Mount error:\n{ex.Message}", 6000, "critical");
+                await ShowInfo("Error", $"Mount operation failed:\n{ex.Message}");
             }
-
-            BuildUI();
         };
 
         var btnOpen = new Button
@@ -982,6 +858,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         return panel;
     }
+
     private Border BuildDiskCard(RaidArrayInfo array, RaidDiskInfo disk)
     {
         var icon = LoadImage(disk.Icon, 72);
@@ -1106,179 +983,172 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     }
 
     private Border BuildStatusDot(RaidDiskInfo disk)
-{
-    // 1. Determinar color base según RAID Membership
-    Color color = disk.RaidMembership switch
     {
-        RaidMembership.Active      => Color.FromRgb(0, 200, 0),
-        RaidMembership.Spare       => Color.FromRgb(0, 150, 255),
-        RaidMembership.Rebuilding  => Color.FromRgb(255, 200, 0),
-        RaidMembership.Syncing     => Color.FromRgb(255, 200, 0),
-        RaidMembership.Faulty      => Color.FromRgb(220, 0, 0),
-        _                          => Color.FromRgb(90, 90, 90)
-    };
-
-    // 2. Glow (círculo grande)
-    var glow = new Border
-    {
-        Width = 28,
-        Height = 28,
-        CornerRadius = new CornerRadius(14),
-        Background = new SolidColorBrush(color) { Opacity = 0.35 },
-        HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Center
-    };
-
-    // 3. Dot (círculo pequeño)
-    var dot = new Border
-    {
-        Width = 16,
-        Height = 16,
-        CornerRadius = new CornerRadius(8),
-        Background = new SolidColorBrush(color),
-        HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Center
-    };
-
-    // 4. Contenedor
-    var container = new Grid
-    {
-        Width = 28,
-        Height = 28
-    };
-
-    container.Children.Add(glow);
-    container.Children.Add(dot);
-
-    // 5. Animaciones según estado
-    Dispatcher.UIThread.Post(() =>
-    {
-        string state = disk.State?.ToLowerInvariant() ?? "unknown";
-
-        // WARNING → parpadeo suave amarillo
-        if (state == "warning")
+        Color color = disk.RaidMembership switch
         {
-            AnimateWarning(glow, dot);
-            return;
-        }
+            RaidMembership.Active      => Color.FromRgb(0, 200, 0),
+            RaidMembership.Spare       => Color.FromRgb(0, 150, 255),
+            RaidMembership.Rebuilding  => Color.FromRgb(255, 200, 0),
+            RaidMembership.Syncing     => Color.FromRgb(255, 200, 0),
+            RaidMembership.Faulty      => Color.FromRgb(220, 0, 0),
+            _                          => Color.FromRgb(90, 90, 90)
+        };
 
-        // FAULTY → animación SOS
-        if (state == "faulty")
+        var glow = new Border
         {
-            AnimateSOS(glow, dot);
-            return;
-        }
+            Width = 28,
+            Height = 28,
+            CornerRadius = new CornerRadius(14),
+            Background = new SolidColorBrush(color) { Opacity = 0.35 },
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
 
-        // REBUILD / SYNC → animación de reconstrucción
-        if (disk.RaidMembership == RaidMembership.Rebuilding ||
-            disk.RaidMembership == RaidMembership.Syncing)
+        var dot = new Border
         {
-            AnimateRebuild(glow, dot);
-            return;
-        }
+            Width = 16,
+            Height = 16,
+            CornerRadius = new CornerRadius(8),
+            Background = new SolidColorBrush(color),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
 
-        // Estados normales → sin animación
-    });
+        var container = new Grid
+        {
+            Width = 28,
+            Height = 28
+        };
 
-    // 6. Devolver borde contenedor
-    return new Border
-    {
-        Child = container,
-        Background = Brushes.Transparent
-    };
-}
+        container.Children.Add(glow);
+        container.Children.Add(dot);
+        Dispatcher.UIThread.Post(() =>
+        {
+            string state = disk.State?.ToLowerInvariant() ?? "unknown";
 
+            if (state == "warning")
+            {
+                AnimateWarning(glow);
+                return;
+            }
+
+            if (state == "faulty")
+            {
+                AnimateSOS(glow);
+                return;
+            }
+
+            if (disk.RaidMembership == RaidMembership.Rebuilding ||
+                disk.RaidMembership == RaidMembership.Syncing)
+            {
+                AnimateRebuild(glow);
+                return;
+            }
+        });
+
+        return new Border
+        {
+            Child = container,
+            Background = Brushes.Transparent
+        };
+    }
 
     private async Task OnDiskMenuClick(RaidArrayInfo array, RaidDiskInfo disk, string? action)
-{
-    // ⭐ FIX: usar Singleton
-    var service = RaidService.Instance;
-
-    switch (action)
     {
-        case "smart":
-        {
-            var result = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
-            var info = result.Stdout + "\n" + result.Stderr;
+        var service = RaidService.Instance;
 
-            var dlg = new ConsoleDialog($"SMART — {disk.Name}", info);
-            var owner = this.GetVisualRoot() as Window;
-            await dlg.ShowDialog(owner ?? new Window());
-            break;
-        }
-
-        case "faulty":
+        try
         {
-            if (array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
-                array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase))
+            switch (action)
             {
-                ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --remove /dev/{disk.Name}");
-            }
-            else
-            {
-                ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --fail /dev/{disk.Name}");
-            }
-
-            await LoadRaidAsync();
-            break;
-        }
-
-        case "spare":
-        {
-            ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --set-spare /dev/{disk.Name}");
-            await LoadRaidAsync();
-            break;
-        }
-
-        case "remove":
-        {
-            await RemoveDiskFromArrayUI(array, disk.Name);
-            break;
-        }
-
-        case "convert_spare":
-        {
-            int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
-            int newCount = active + 1;
-
-            bool confirm = await ShowConfirm(
-                "Convert Spare to Active",
-                $"Convert {disk.Name} from spare to active?\n" +
-                $"This will increase RAID devices from {active} to {newCount}."
-            );
-
-            if (!confirm)
-                return;
-
-            using (LoadingService.Show("Converting spare to active...", this.GetVisualRoot() as Window))
-            {
-                await Task.Run(() =>
+                case "smart":
                 {
-                    string cmd = $"mdadm --grow {array.Path} --raid-devices={newCount}";
-                    ShellHelper.EjecutarComoRoot(cmd);
-                });
+                    var result = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
+                    var info = result.Stdout + "\n" + result.Stderr;
+
+                    var dlg = new ConsoleDialog($"SMART — {disk.Name}", info);
+                    var owner = this.GetVisualRoot() as Window;
+                    await dlg.ShowDialog(owner ?? new Window());
+                    break;
+                }
+
+                case "faulty":
+                {
+                    if (array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
+                        array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --remove /dev/{disk.Name}");
+                    }
+                    else
+                    {
+                        ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --fail /dev/{disk.Name}");
+                    }
+
+                    await LoadRaidAsync();
+                    break;
+                }
+
+                case "spare":
+                {
+                    ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --set-spare /dev/{disk.Name}");
+                    await LoadRaidAsync();
+                    break;
+                }
+
+                case "remove":
+                {
+                    await RemoveDiskFromArrayUI(array, disk.Name);
+                    break;
+                }
+
+                case "convert_spare":
+                {
+                    int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
+                    int newCount = active + 1;
+
+                    bool confirm = await ShowConfirm(
+                        "Convert Spare to Active",
+                        $"Convert {disk.Name} from spare to active?\n" +
+                        $"This will increase RAID devices from {active} to {newCount}."
+                    );
+
+                    if (!confirm)
+                        return;
+
+                    using (LoadingService.Show("Converting spare to active...", this.GetVisualRoot() as Window))
+                    {
+                        await Task.Run(() =>
+                        {
+                            string cmd = $"mdadm --grow {array.Path} --raid-devices={newCount}";
+                            ShellHelper.EjecutarComoRoot(cmd);
+                        });
+                    }
+
+                    await ShowConfirm("Done", $"{disk.Name} is now active.");
+                    await LoadRaidAsync();
+                    break;
+                }
+
+                case "recover_faulty":
+                {
+                    ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --remove /dev/{disk.Name}");
+                    ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --add /dev/{disk.Name}");
+                    await LoadRaidAsync();
+
+                    NotificadorLinux.Enviar(
+                        $"Disk recovered:\n/dev/{disk.Name} re-added to {array.Name}\nRebuild started."
+                    );
+
+                    break;
+                }
             }
-
-            await ShowConfirm("Done", $"{disk.Name} is now active.");
-            await LoadRaidAsync();
-            break;
         }
-
-        case "recover_faulty":
+        catch (Exception ex)
         {
-            ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --remove /dev/{disk.Name}");
-            ShellHelper.EjecutarComoRoot($"mdadm {array.Path} --add /dev/{disk.Name}");
-            await LoadRaidAsync();
-
-            NotificadorLinux.Enviar(
-                $"Disk recovered:\n/dev/{disk.Name} re-added to {array.Name}\nRebuild started."
-            );
-
-            break;
+            NotificadorLinux.Enviar($"Disk action error:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Disk action failed:\n{ex.Message}");
         }
     }
-}
-
 
     private void StartMonitoringArray(RaidArrayInfo array, Border cardBorder)
     {
@@ -1336,7 +1206,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         _monitoringArrayName = null;
     }
 
-    private void AnimateWarning(Border glow, Border dot)
+    private void AnimateWarning(Border glow)
     {
         var animation = new Animation
         {
@@ -1375,7 +1245,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         animation.RunAsync(glow);
     }
 
-    private void AnimateRebuild(Border glow, Border dot)
+    private void AnimateRebuild(Border glow)
     {
         var animation = new Animation
         {
@@ -1413,8 +1283,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         animation.RunAsync(glow);
     }
-
-    private async void AnimateSOS(Border glow, Border dot)
+    private async void AnimateSOS(Border glow)
     {
         while (true)
         {
@@ -1445,6 +1314,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             await Task.Delay(800);
         }
     }
+
     private Image LoadImage(string uriString, int size)
     {
         try
@@ -1525,6 +1395,215 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         win.ShowDialog(GetWindow());
     }
 
+    // ----------------- BOTONES Y ACCIONES RAID -----------------
+
+    private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
+    {
+        var service = RaidService.Instance;
+        var parent = GetWindow();
+
+        var loading = new LoadingDialog("Assembling arrays...");
+        loading.Show(parent);
+
+        await Task.Delay(50);
+
+        var ok = await Task.Run(() => service.AutoAssemble());
+
+        loading.Close();
+
+        if (!ok)
+        {
+            NotificadorLinux.Enviar("Error assembling arrays.", 6000, "critical");
+            await ShowInfo("Error", "Could not assemble stopped arrays.");
+            return;
+        }
+
+        await ShowInfo("Success", "Arrays assembled correctly.");
+        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    }
+
+    private async void OnInitializeClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_selectedArray == null)
+        {
+            await ShowInfo("Error", "Select an array first.");
+            return;
+        }
+
+        var array = _selectedArray;
+
+        var dlg = new FormatArrayDialog(array.Name);
+        var owner = this.GetVisualRoot() as Window;
+        var result = await dlg.ShowDialog<FormatArrayResult?>(owner);
+
+        if (result == null)
+            return;
+
+        var loading = new LoadingDialog($"Initializing {array.Name}...");
+        loading.Show(owner);
+
+        var ok = false;
+
+        try
+        {
+            ok = await Task.Run(async () =>
+            {
+                var service = RaidService.Instance;
+
+                return await service.InitializeArrayAsync(
+                    array.Path,
+                    result.Filesystem,
+                    result.Label
+                );
+            });
+        }
+        catch (Exception ex)
+        {
+            NotificadorLinux.Enviar($"Initialize error:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Could not initialize the array:\n{ex.Message}");
+            loading.Close();
+            return;
+        }
+        finally
+        {
+            loading.Close();
+        }
+
+        if (!ok)
+        {
+            NotificadorLinux.Enviar($"Initialize error:\n{array.Name}", 6000, "critical");
+            await ShowInfo("Error", "Could not initialize the array.");
+            return;
+        }
+
+        await ShowInfo("Success", $"The array {array.Name} was initialized.");
+        BtnRefreshArrays.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    }
+
+    private async Task<bool> ShowConfirm(string title, string message)
+    {
+        var dlg = new ConfirmDialog(title, message);
+        var owner = this.GetVisualRoot() as Window;
+        if (owner != null)
+            return await dlg.ShowDialog<bool>(owner);
+
+        return await dlg.ShowDialog<bool>(new Window());
+    }
+
+    private async Task<bool> ShowInfo(string title, string message)
+    {
+        var dlg = new InfoDialog(title, message);
+        var owner = this.GetVisualRoot() as Window;
+        if (owner != null)
+            return await dlg.ShowDialog<bool>(owner);
+
+        return await dlg.ShowDialog<bool>(new Window());
+    }
+
+    private void LoadFakeData()
+    {
+        _arrays = new List<RaidArrayInfo>
+        {
+            new()
+            {
+                Name = "md0",
+                Path = "/dev/md0",
+                Level = "RAID1",
+                State = RaidArrayState.Clean,
+                StateIcon = "avares://RAID-Util/Assets/Icons/array-ok.png",
+                IsExpanded = false,
+                IsMounted = true,
+                PersistMount = true,
+                MountPath = "/mnt/md0",
+                TotalSize = "500 GB",
+                UsableSize = "500 GB",
+                ParitySize = "0 GB",
+                AverageTemp = 34,
+                DiskSummary = "2× SSD SATA",
+                Uptime = "12 days",
+                RebuildProgress = 0,
+                RebuildETA = "",
+                Disks = new List<RaidDiskInfo>
+                {
+                    new()
+                    {
+                        Name = "sda1",
+                        Model = "Samsung SSD 860 EVO",
+                        Size = "500G",
+                        RaidMembership = RaidMembership.Active,
+                        State = "OK",
+                        Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                        ArrayName = "md0"
+                    },
+                    new()
+                    {
+                        Name = "sdb1",
+                        Model = "Samsung SSD 860 EVO",
+                        Size = "500G",
+                        RaidMembership = RaidMembership.Active,
+                        State = "OK",
+                        Icon = "avares://RAID-Util/Assets/Icons/disk-ssd.png",
+                        ArrayName = "md0"
+                    }
+                }
+            },
+            new()
+            {
+                Name = "md1",
+                Path = "/dev/md1",
+                Level = "RAID5",
+                State = RaidArrayState.Degraded,
+                StateIcon = "avares://RAID-Util/Assets/Icons/array-caution.png",
+                IsExpanded = true,
+                IsMounted = false,
+                PersistMount = false,
+                MountPath = "/mnt/md1",
+                TotalSize = "3 TB",
+                UsableSize = "2 TB",
+                ParitySize = "1 TB",
+                AverageTemp = 41,
+                DiskSummary = "3× HDD 7200 RPM",
+                Uptime = "3 days",
+                RebuildProgress = 37,
+                RebuildETA = "12 min",
+                Disks = new List<RaidDiskInfo>
+                {
+                    new()
+                    {
+                        Name = "sdc1",
+                        Model = "WD Blue 1TB",
+                        Size = "1T",
+                        RaidMembership = RaidMembership.Active,
+                        State = "OK",
+                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                        ArrayName = "md1"
+                    },
+                    new()
+                    {
+                        Name = "sdd1",
+                        Model = "WD Blue 1TB",
+                        Size = "1T",
+                        RaidMembership = RaidMembership.Active,
+                        State = "OK",
+                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                        ArrayName = "md1"
+                    },
+                    new()
+                    {
+                        Name = "sde1",
+                        Model = "WD Blue 1TB",
+                        Size = "1T",
+                        RaidMembership = RaidMembership.Faulty,
+                        State = "FAULTY",
+                        Icon = "avares://RAID-Util/Assets/Icons/disk-hdd.png",
+                        ArrayName = "md1"
+                    }
+                }
+            }
+        };
+
+        BuildUI();
+    }
 
     private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
     {
@@ -1535,28 +1614,19 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         var allDisks = await service.GetAllDisksAsync();
         var nodes = RaidService.Nodes;
 
-        // ⭐ FILTRO UNIVERSAL
         var freeDisks = allDisks
             .Where(d =>
-                // 1. No pertenece a un array (salvo removed)
                 (d.RaidMembership == RaidMembership.None ||
                  d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
-
-                // 2. No está montado
                 && !d.IsMounted
-
-                // 3. No tiene particiones montadas
                 && (d.Children == null || d.Children.Count == 0)
-
-                // 4. No es disco del sistema
                 && !d.IsSystemDisk
             )
             .ToList();
 
         if (freeDisks.Count == 0)
         {
-            new ConfirmDialog("No disks", "No free disks available to create a RAID array.")
-                .ShowDialog(parent);
+            await ShowInfo("No disks", "No free disks available to create a RAID array.");
             return;
         }
 
@@ -1573,28 +1643,36 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         bool ok;
 
-        if (IsFakeMode)
-            ok = await Task.Run(() =>
-            {
-                CreateFakeArray(result);
-                return true;
-            });
-        else
-            ok = await CreateRealArray(result);
+        try
+        {
+            if (IsFakeMode)
+                ok = await Task.Run(() =>
+                {
+                    CreateFakeArray(result);
+                    return true;
+                });
+            else
+                ok = await CreateRealArray(result);
+        }
+        catch (Exception ex)
+        {
+            loading.Close();
+            NotificadorLinux.Enviar($"Error creating array:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Failed to create RAID array:\n{ex.Message}");
+            return;
+        }
 
         loading.Close();
 
         if (!ok)
         {
-            new ConfirmDialog("Error", "Failed to create RAID array.")
-                .ShowDialog(parent);
+            NotificadorLinux.Enviar("Error creating RAID array.", 6000, "critical");
+            await ShowInfo("Error", "Failed to create RAID array.");
             return;
         }
 
         await LoadRaidAsync(true);
     }
-
-
 
     private void CreateFakeArray(CreateArrayResult result)
     {
@@ -1641,86 +1719,69 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     }
 
     private async Task<bool> CreateRealArray(CreateArrayResult result)
-{
-    var parent = GetWindow();
-
-    // ⭐ FIX: usar Singleton
-    var service = RaidService.Instance;
-
-    using (LoadingService.Show("Creating RAID array...", parent))
     {
-        await Task.Delay(50);
+        var parent = GetWindow();
 
-        // ============================================================
-        // 1) Crear array con mdadm
-        // ============================================================
-        LoadingService.Update("Executing mdadm...");
+        var service = RaidService.Instance;
 
-        var ok = await Task.Run(() =>
-            service.CreateArray(result.Level, result.Disks, result.FriendlyName)
-        );
-
-        if (!ok)
+        using (LoadingService.Show("Creating RAID array...", parent))
         {
-            LoadingService.Update("Error creating array.");
-            await Task.Delay(1200);
-            return false;
+            await Task.Delay(50);
+
+            LoadingService.Update("Executing mdadm...");
+
+            var ok = await Task.Run(() =>
+                service.CreateArray(result.Level, result.Disks, result.FriendlyName)
+            );
+
+            if (!ok)
+            {
+                LoadingService.Update("Error creating array.");
+                await Task.Delay(1200);
+                return false;
+            }
+
+            LoadingService.Update("Detecting new array...");
+
+            var mdName = service.LastCreatedMdName;
+
+            var ready = await Task.Run(() =>
+                service.WaitForArray(mdName)
+            );
+
+            if (!ready)
+            {
+                LoadingService.Update("Array created, but device did not appear.");
+                await Task.Delay(1200);
+
+                await ShowInfo("Warning",
+                    $"Array created, but /dev/{mdName} did not appear in time.");
+
+                return false;
+            }
+
+            LoadingService.Update("Updating mdadm.conf...");
+
+            var persisted = await Task.Run(() =>
+                service.PersistArrayToMdadmConf()
+            );
+
+            if (!persisted)
+            {
+                LoadingService.Update("Array created, but mdadm.conf was not updated.");
+                await Task.Delay(1200);
+
+                await ShowInfo("Warning",
+                    "Array created, but could not update mdadm.conf. Check logs.");
+            }
+
+            LoadingService.Update("Array ready.");
+            await Task.Delay(600);
         }
 
-        // ============================================================
-        // 2) Esperar a que aparezca /dev/mdX
-        // ============================================================
-        LoadingService.Update("Detecting new array...");
-
-        var mdName = service.LastCreatedMdName;
-
-        var ready = await Task.Run(() =>
-            service.WaitForArray(mdName)
-        );
-
-        if (!ready)
-        {
-            LoadingService.Update("Array created, but device did not appear.");
-            await Task.Delay(1200);
-
-            new ConfirmDialog("Warning",
-                    $"Array created, but /dev/{mdName} did not appear in time.")
-                .ShowDialog(parent);
-
-            return false;
-        }
-
-        // ============================================================
-        // 3) Persistir en mdadm.conf
-        // ============================================================
-        LoadingService.Update("Updating mdadm.conf...");
-
-        var persisted = await Task.Run(() =>
-            service.PersistArrayToMdadmConf()
-        );
-
-        if (!persisted)
-        {
-            LoadingService.Update("Array created, but mdadm.conf was not updated.");
-            await Task.Delay(1200);
-
-            new ConfirmDialog("Warning",
-                    "Array created, but could not update mdadm.conf. Check logs.")
-                .ShowDialog(parent);
-        }
-
-        // ============================================================
-        // 4) Finalización
-        // ============================================================
-        LoadingService.Update("Array ready.");
-        await Task.Delay(600);
+        await LoadRaidAsync(true);
+        return true;
     }
-
-    // ⭐ Recargar RAID
-    await LoadRaidAsync(true);
-    return true;
-}
-
 
     private async void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
     {
@@ -1741,9 +1802,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         if (!result)
             return;
 
-        // ============================================================
-        // FAKE MODE
-        // ============================================================
         if (IsFakeMode)
         {
             _arrays.Remove(array);
@@ -1756,7 +1814,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         using (LoadingService.Show("Deleting array..."))
         {
-            // ⭐ FIX: usar Singleton
             var service = RaidService.Instance;
 
             ok = await Task.Run(() =>
@@ -1766,6 +1823,7 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         if (!ok)
         {
+            NotificadorLinux.Enviar($"Deletion incomplete:\n{array.Name}", 6000, "critical");
             await ShowInfo(
                 "Deletion incomplete",
                 "The array could not be fully deleted. Some operations failed.\n\n" +
@@ -1785,7 +1843,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
         await LoadRaidAsync();
     }
 
-
     private Window GetWindow()
     {
         return (Window)VisualRoot!;
@@ -1804,13 +1861,11 @@ public void SetArrays(List<RaidArrayInfo> arrays)
     {
         OpenArrayConfigWindow();
     }
-    
+
     public Task RefreshArraysAsync()
     {
         return LoadRaidAsync();
     }
-
-
     private async Task LoadRaidAsync(bool afterCreate = false)
     {
         try
@@ -1829,7 +1884,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             {
                 var (arrays, disks) = await Task.Run(async () =>
                 {
-                    // ⭐ FIX: usar Singleton
                     var service = RaidService.Instance;
 
                     if (afterCreate)
@@ -1865,11 +1919,13 @@ public void SetArrays(List<RaidArrayInfo> arrays)
             LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
             LogService.Error(ex.ToString());
 
+            NotificadorLinux.Enviar($"Error loading RAID information:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Error loading RAID information:\n{ex.Message}");
+
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                 (desktop.MainWindow as MainWindow)?.UpdateStatus("Error loading RAID information.");
         }
     }
-
 
     private string GetStateIcon(RaidArrayState state)
     {
@@ -1891,178 +1947,274 @@ public void SetArrays(List<RaidArrayInfo> arrays)
                 "avares://RAID-Util/Assets/Icons/array-caution.png"
         };
     }
-    
+
     private async void OnMoreMenuClick(RaidArrayInfo array, string? action)
-{
-    // ⭐ FIX: usar Singleton
-    var service = RaidService.Instance;
-
-    if (array == null)
     {
-        await ShowConfirm("Error", "Array not found.");
-        return;
-    }
+        var service = RaidService.Instance;
 
-    var act = action?.Trim().ToLowerInvariant() ?? "";
-
-    bool isRaid0 = array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
-    bool isLinear = array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase);
-
-    if ((isRaid0 || isLinear) && act is not ("stop" or "details"))
-    {
-        await ShowConfirm("Error", "This RAID level does not support this action.");
-        return;
-    }
-
-    if (array.State == RaidArrayState.Failed && act != "details")
-    {
-        await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
-        return;
-    }
-
-    bool isMountedRO = false;
-
-    if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
-    {
-        var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
-
-        if (mountInfo.ExitCode == 0)
+        if (array == null)
         {
-            var line = mountInfo.Stdout.ToLowerInvariant();
-            if (line.Contains("(ro,") || line.Contains(" ro,"))
-                isMountedRO = true;
-        }
-    }
-
-    switch (act)
-    {
-        case "resync":
-            if (!array.SupportsRepair)
-            {
-                await ShowConfirm("Error", "This RAID level does not support resync.");
-                return;
-            }
-
-            if (array.IsResyncing || array.IsRecovering)
-            {
-                await ShowConfirm("Info", "This array is already rebuilding.");
-                return;
-            }
-
-            if (isMountedRO)
-            {
-                await ShowConfirm("Error", "Array is mounted read-only. Cannot start resync.");
-                return;
-            }
-
-            await service.StartArrayResyncAsync(array.Name);
-
-            var ownerrs = this.GetVisualRoot() as Window;
-            var dlgrb = new RebuildDialog(array.Name);
-
-            if (ownerrs != null)
-                await dlgrb.ShowDialog(ownerrs);
-            else
-                await dlgrb.ShowDialog(new Window());
-
-            break;
-
-        case "check":
-            if (!array.SupportsCheck)
-            {
-                await ShowConfirm("Error", "This RAID level does not support consistency checks.");
-                return;
-            }
-
-            if (!array.IsMounted)
-            {
-                await ShowConfirm("Error", "Array must be mounted to perform a check.");
-                return;
-            }
-
-            if (array.IsResyncing || array.IsRecovering)
-            {
-                await ShowConfirm("Error", "Cannot check while rebuilding.");
-                return;
-            }
-
-            await service.ForceArrayCheckAsync(array.Name);
-            await ShowConfirm("Success", "Check started.");
-            break;
-
-        case "repair":
-            if (!array.SupportsRepair)
-            {
-                await ShowConfirm("Error", "This RAID level does not support repair.");
-                return;
-            }
-
-            if (!array.IsDegraded)
-            {
-                await ShowConfirm("Error", "Repair is only available for degraded arrays.");
-                return;
-            }
-
-            if (!array.Disks.Any(d => d.RaidMembership == RaidMembership.Spare))
-            {
-                await ShowConfirm("Error", "No spare disk available for repair.");
-                return;
-            }
-
-            if (array.IsResyncing || array.IsRecovering)
-            {
-                await ShowConfirm("Error", "Cannot repair while rebuilding.");
-                return;
-            }
-
-            await service.ForceArrayRepairAsync(array.Name);
-            await ShowConfirm("Success", "Repair started.");
-            break;
-
-        case "stop":
-        {
-            var (ok, msg) = await service.StopArraySafeAsync(array.Name);
-
-            if (!ok)
-            {
-                await ShowConfirm("Error", msg);
-                return;
-            }
-
-            await ShowConfirm("Success", msg);
-            await LoadRaidAsync();
-            break;
+            await ShowConfirm("Error", "Array not found.");
+            return;
         }
 
-        case "add_disk":
-            await AddDiskToArrayUI(array);
-            break;
+        var act = action?.Trim().ToLowerInvariant() ?? "";
 
-        case "details":
+        bool isRaid0 = array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
+        bool isLinear = array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase);
+
+        if ((isRaid0 || isLinear) && act is not ("stop" or "details"))
         {
-            var detail = await service.GetArrayDetailsAsync(array.Name);
-
-            var dlg = new ConsoleDialog($"Array Details — {array.Name}", detail);
-            var owner = this.GetVisualRoot() as Window;
-
-            if (owner != null)
-                await dlg.ShowDialog(owner);
-            else
-                await dlg.ShowDialog(new Window());
-
-            break;
+            await ShowConfirm("Error", "This RAID level does not support this action.");
+            return;
         }
 
-        case "reshape":
-            await HandleReshape(array);
-            break;
+        if (array.State == RaidArrayState.Failed && act != "details")
+        {
+            await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
+            return;
+        }
 
-        default:
-            await ShowConfirm("Error", $"Unknown action '{action}'.");
-            break;
+        bool isMountedRO = false;
+
+        if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+        {
+            var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
+
+            if (mountInfo.ExitCode == 0)
+            {
+                var line = mountInfo.Stdout.ToLowerInvariant();
+                if (line.Contains("(ro,") || line.Contains(" ro,"))
+                    isMountedRO = true;
+            }
+        }
+
+        try
+        {
+            switch (act)
+            {
+                case "resync":
+                    if (!array.SupportsRepair)
+                    {
+                        await ShowConfirm("Error", "This RAID level does not support resync.");
+                        return;
+                    }
+
+                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                    {
+                        await ShowConfirm("Info", "This array is already rebuilding.");
+                        return;
+                    }
+
+                    if (isMountedRO)
+                    {
+                        await ShowConfirm("Error", "Array is mounted read-only. Cannot start resync.");
+                        return;
+                    }
+
+                    // ⭐ Estado inmediato en UI
+                    array.State = RaidArrayState.Resync;
+                    array.RebuildProgress = 0;
+                    array.RebuildETA = "N/A";
+                    UpdateArrayCardProgress(array);
+
+                    // ⭐ Fuerza actualización inmediata
+                    _stateService?.ForceStateChanged();
+
+                    await service.StartArrayResyncAsync(array.Name);
+
+                    var ownerrs = this.GetVisualRoot() as Window;
+                    var dlgrb = new RebuildDialog(array.Name);
+
+                    if (ownerrs != null)
+                        await dlgrb.ShowDialog(ownerrs);
+                    else
+                        await dlgrb.ShowDialog(new Window());
+
+                    break;
+
+                case "check":
+                    if (!array.SupportsCheck)
+                    {
+                        await ShowConfirm("Error", "This RAID level does not support consistency checks.");
+                        return;
+                    }
+
+                    if (!array.IsMounted)
+                    {
+                        await ShowConfirm("Error", "Array must be mounted to perform a check.");
+                        return;
+                    }
+
+                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                    {
+                        await ShowConfirm("Error", "Cannot check while rebuilding.");
+                        return;
+                    }
+
+                    // ⭐ Estado inmediato en UI
+                    array.State = RaidArrayState.Resync; // mdadm usa resync para check
+                    array.RebuildProgress = 0;
+                    array.RebuildETA = "N/A";
+                    UpdateArrayCardProgress(array);
+
+                    // ⭐ Fuerza actualización inmediata
+                    _stateService?.ForceStateChanged();
+
+                    await service.ForceArrayCheckAsync(array.Name);
+                    await ShowConfirm("Success", "Check started.");
+                    break;
+
+                case "repair":
+                    if (!array.SupportsRepair)
+                    {
+                        await ShowConfirm("Error", "This RAID level does not support repair.");
+                        return;
+                    }
+
+                    if (!array.IsDegraded)
+                    {
+                        await ShowConfirm("Error", "Repair is only available for degraded arrays.");
+                        return;
+                    }
+
+                    if (!array.Disks.Any(d => d.RaidMembership == RaidMembership.Spare))
+                    {
+                        await ShowConfirm("Error", "No spare disk available for repair.");
+                        return;
+                    }
+
+                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                    {
+                        await ShowConfirm("Error", "Cannot repair while rebuilding.");
+                        return;
+                    }
+
+                    // ⭐ Estado inmediato en UI
+                    array.State = RaidArrayState.Rebuilding;
+                    array.RebuildProgress = 0;
+                    array.RebuildETA = "N/A";
+                    UpdateArrayCardProgress(array);
+
+                    // ⭐ Fuerza actualización inmediata
+                    _stateService?.ForceStateChanged();
+
+                    await service.ForceArrayRepairAsync(array.Name);
+                    await ShowConfirm("Success", "Repair started.");
+                    break;
+
+              
+
+                case "stop":
+                {
+                    var (ok, msg) = await service.StopArraySafeAsync(array.Name);
+
+                    if (!ok)
+                    {
+                        NotificadorLinux.Enviar($"Error stopping array:\n{msg}", 6000, "critical");
+                        await ShowConfirm("Error", msg);
+                        return;
+                    }
+
+                    await ShowConfirm("Success", msg);
+                    await LoadRaidAsync();
+                    break;
+                }
+
+                case "add_disk":
+                    await AddDiskToArrayUI(array);
+                    break;
+
+                case "details":
+                {
+                    var detail = await service.GetArrayDetailsAsync(array.Name);
+
+                    var dlg = new ConsoleDialog($"Array Details — {array.Name}", detail);
+                    var owner1 = this.GetVisualRoot() as Window;
+
+                    if (owner1 != null)
+                        await dlg.ShowDialog(owner1);
+                    else
+                        await dlg.ShowDialog(new Window());
+
+                    break;
+                }
+
+                case "reshape":
+                    if (!ArrayAllowsExpansion(array))
+                    {
+                        await ShowConfirm("Not allowed", "This array cannot be expanded.");
+                        return;
+                    }
+
+                    int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
+                    int spares = array.Disks.Count(d => d.RaidMembership == RaidMembership.Spare);
+                    int newCount = active + spares;
+
+                    bool confirm = await ShowConfirm(
+                        "Expand RAID Array",
+                        $"Expand array {array.Name} from {active} to {newCount} devices?\n" +
+                        $"This will start a RAID reshape."
+                    );
+
+                    if (!confirm)
+                        return;
+
+                    // ⭐ Estado inmediato en UI
+                    array.State = RaidArrayState.Rebuilding;
+                    array.RebuildProgress = 0;
+                    array.RebuildETA = "N/A";
+                    UpdateArrayCardProgress(array);
+
+                    // ⭐ Fuerza actualización inmediata
+                    _stateService?.ForceStateChanged();
+
+                    var owner = this.GetVisualRoot() as Window;
+
+                    using (LoadingService.Show("Expanding RAID array...", owner))
+                    {
+                        await Task.Run(() =>
+                        {
+                            string cmd = $"mdadm --grow {array.Path} --raid-devices={newCount}";
+                            ShellHelper.EjecutarComoRoot(cmd);
+                        });
+                    }
+
+                    await ShowConfirm("Reshape started",
+                        $"The array {array.Name} is now reshaping.");
+
+                    await Task.Run(() =>
+                    {
+                        while (true)
+                        {
+                            var stat = File.ReadAllText("/proc/mdstat");
+                            if (!stat.Contains("reshape"))
+                                break;
+
+                            Thread.Sleep(2000);
+                        }
+                    });
+
+                    string fs = DetectArrayFileSystem(array.Name);
+
+                    if (!string.IsNullOrWhiteSpace(fs))
+                        ResizeArrayFileSystem(array.Name, fs);
+
+                    await LoadRaidAsync();
+                    break;
+
+
+                default:
+                    await ShowConfirm("Error", $"Unknown action '{action}'.");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificadorLinux.Enviar($"Array action error:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Array action failed:\n{ex.Message}");
+        }
     }
-}
-
 
     private async Task HandleReshape(RaidArrayInfo array)
     {
@@ -2177,76 +2329,71 @@ public void SetArrays(List<RaidArrayInfo> arrays)
                 break;
         }
     }
-    
+
     private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
-{
-    try
     {
-        var owner = this.GetVisualRoot() as Window;
-
-        // Normalizar el nombre recibido
-        string normalized = RaidService.NormalizeDev(diskName);
-
-        // Buscar el disco real dentro del array
-        var disk = array.Disks.FirstOrDefault(d =>
-            d.Name.Equals(diskName, StringComparison.OrdinalIgnoreCase) ||
-            RaidService.NormalizeDev(d.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase)
-        );
-
-        // Si lo encontramos, normalizamos usando su Name real
-        if (disk != null)
-            normalized = RaidService.NormalizeDev(disk.Name);
-
-        // Confirmación
-        var confirm = new ConfirmDialog(
-            "Remove Disk",
-            $"Are you sure you want to remove {normalized} from {array.Name}?"
-        );
-
-        var ok = await confirm.ShowDialog<bool>(owner ?? new Window());
-        if (!ok)
-            return;
-
-        // Loading
-        var loading = new LoadingDialog($"Removing {normalized}...");
-        loading.Show(owner);
-
         try
         {
-            // ⭐ FIX: usar Singleton
-            var service = RaidService.Instance;
+            var owner = this.GetVisualRoot() as Window;
 
-            bool removed = await service.RemoveDiskFromArrayAsync(array.Name, normalized);
+            string normalized = RaidService.NormalizeDev(diskName);
 
-            if (!removed)
-            {
-                await ShowConfirm(
-                    "Error removing disk",
-                    $"mdadm could not remove {normalized} from {array.Name}.\n" +
-                    $"Check logs for details."
-                );
+            var disk = array.Disks.FirstOrDefault(d =>
+                d.Name.Equals(diskName, StringComparison.OrdinalIgnoreCase) ||
+                RaidService.NormalizeDev(d.Name).Equals(normalized, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (disk != null)
+                normalized = RaidService.NormalizeDev(disk.Name);
+
+            var confirm = new ConfirmDialog(
+                "Remove Disk",
+                $"Are you sure you want to remove {normalized} from {array.Name}?"
+            );
+
+            var ok = await confirm.ShowDialog<bool>(owner ?? new Window());
+            if (!ok)
                 return;
+
+            var loading = new LoadingDialog($"Removing {normalized}...");
+            loading.Show(owner);
+
+            try
+            {
+                var service = RaidService.Instance;
+
+                bool removed = await service.RemoveDiskFromArrayAsync(array.Name, normalized);
+
+                if (!removed)
+                {
+                    NotificadorLinux.Enviar(
+                        $"Error removing disk:\n{normalized} from {array.Name}", 6000, "critical");
+
+                    await ShowConfirm(
+                        "Error removing disk",
+                        $"mdadm could not remove {normalized} from {array.Name}.\n" +
+                        $"Check logs for details."
+                    );
+                    return;
+                }
+
+                await LoadRaidAsync();
+            }
+            finally
+            {
+                loading.Close();
             }
 
-            await LoadRaidAsync();
+            NotificadorLinux.Enviar(
+                $"Disk removed and cleaned:\n{normalized} removed from {array.Name}"
+            );
         }
-        finally
+        catch (Exception ex)
         {
-            loading.Close();
+            NotificadorLinux.Enviar($"Exception removing disk:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Exception removing disk:\n{ex.Message}");
         }
-
-        NotificadorLinux.Enviar(
-            $"Disk removed and cleaned:\n{normalized} removed from {array.Name}"
-        );
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine("[UI] EXCEPTION in RemoveDiskFromArrayUI:");
-        Console.WriteLine(ex.ToString());
-    }
-}
-
-
 
     private List<RaidDiskInfo> GetDisksForArray(RaidArrayInfo array, List<RaidDiskInfo> allDisks)
     {
@@ -2269,20 +2416,12 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         var allDisks = await service.GetAllDisksAsync();
 
-        // ⭐ FILTRO UNIVERSAL
         var candidates = allDisks
             .Where(d =>
-                // 1. No pertenece a un array (salvo removed)
                 (d.RaidMembership == RaidMembership.None ||
                  d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
-
-                // 2. No está montado
                 && !d.IsMounted
-
-                // 3. No tiene particiones montadas
                 && (d.Children == null || d.Children.Count == 0)
-
-                // 4. No es disco del sistema
                 && !d.IsSystemDisk
             )
             .ToList();
@@ -2319,6 +2458,9 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
             if (!ok)
             {
+                NotificadorLinux.Enviar(
+                    $"Error adding disk:\n{selectedDisk} → {array.Name}", 6000, "critical");
+
                 await ShowConfirm("Error", "Failed to add disk to array.");
                 return;
             }
@@ -2326,8 +2468,6 @@ public void SetArrays(List<RaidArrayInfo> arrays)
 
         await LoadRaidAsync();
     }
-
-
 
     private bool ArrayAllowsExpansion(RaidArrayInfo array)
     {

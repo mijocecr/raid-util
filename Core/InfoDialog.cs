@@ -1,3 +1,4 @@
+using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -19,6 +20,14 @@ public class InfoDialog : Window
 
         Background = this.FindResource("BMWSurfaceBrush") as IBrush;
 
+        bool isError =
+            title.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            title.Contains("failed", StringComparison.OrdinalIgnoreCase);
+
+        var titleBrush = isError
+            ? Brushes.OrangeRed
+            : this.FindResource("BMWTextBrush") as IBrush;
+
         var panel = new StackPanel
         {
             Margin = new Thickness(22),
@@ -30,7 +39,7 @@ public class InfoDialog : Window
             Text = title,
             FontSize = 20,
             FontWeight = FontWeight.Bold,
-            Foreground = this.FindResource("BMWTextBrush") as IBrush
+            Foreground = titleBrush
         });
 
         panel.Children.Add(new ScrollViewer
