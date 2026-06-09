@@ -13,7 +13,7 @@ public static class DiskService
     // ============================================================
     // MÉTODO PRINCIPAL
     // ============================================================
-    
+
     public static List<RaidDiskInfo> GetAllDisks()
     {
         var list = new List<RaidDiskInfo>();
@@ -54,9 +54,9 @@ public static class DiskService
 
                 // Tipo físico
                 IsRotational = dev.Rotational == "1",
-                IsNvme = dev.Name.StartsWith("nvme"),
+                IsNvme = dev.Name.StartsWith("nvme") || dev.Transport == "nvme",
                 IsUsb = dev.Transport == "usb",
-                IsVirtual = IsVirtualDisk(dev.Model),
+                IsVirtual = IsVirtualDisk(dev.Model) || dev.Transport == "none",
                 IsIscsi = dev.Transport == "iscsi",
 
                 // Sistema de archivos
@@ -78,7 +78,10 @@ public static class DiskService
                 IsSystemDisk = SystemDiskDetector.IsSystemDisk(dev.Name),
 
                 // Icono (se normaliza en DisksView)
-                Icon = ""
+                Icon = "",
+
+                // ⭐ Nuevo: Estado SMART
+                SmartStatus = GetSmartStatus(dev.Name)
             };
 
             list.Add(info);
@@ -86,7 +89,6 @@ public static class DiskService
 
         return list;
     }
-
 
     // ============================================================
     // DETECTAR SI ES DISCO VIRTUAL
@@ -96,14 +98,46 @@ public static class DiskService
         if (string.IsNullOrWhiteSpace(model))
             return false;
 
-        model = model.ToLower();
+        model = model.ToLowerInvariant();
 
         return model.Contains("vmware") ||
                model.Contains("vbox") ||
                model.Contains("virtual") ||
                model.Contains("qemu") ||
                model.Contains("hyper-v") ||
-               model.Contains("virtio");
+               model.Contains("virtio") ||
+               model.Contains("fileio") ||
+               model.Contains("lun");
+    }
+
+    // ============================================================
+    // SMART STATUS
+    // ============================================================
+    private static string GetSmartStatus(string diskName)
+    {
+        try
+        {
+            var r = ShellHelper.EjecutarComoRoot($"smartctl -H /dev/{diskName}");
+            var text = (r.Stdout + "\n" + r.Stderr).Trim().ToLowerInvariant();
+
+            if (text.Contains("passed"))
+                return "Healthy";
+
+            if (text.Contains("failed"))
+                return "Failing";
+
+            if (text.Contains("not supported") || text.Contains("unsupported"))
+                return "Unsupported";
+
+            if (text.Contains("unknown"))
+                return "Unknown";
+        }
+        catch
+        {
+            // Ignorar errores
+        }
+
+        return "Unknown";
     }
 
     // ============================================================

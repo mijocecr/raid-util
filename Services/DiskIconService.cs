@@ -2,41 +2,48 @@ namespace RAID_Util.Services;
 
 public static class DiskIconService
 {
-    public static string GetIcon(string? name, string? model, bool isRotational)
+    public static string GetIcon(string? currentIcon, string? model, bool isRotational)
     {
         // Si ya viene con ruta completa, respetarla
-        if (!string.IsNullOrWhiteSpace(name) && name.Contains("avares://"))
-            return name;
+        if (!string.IsNullOrWhiteSpace(currentIcon) && currentIcon.StartsWith("avares://"))
+            return currentIcon;
 
-        var m = (model ?? "").ToLowerInvariant();
-        var n = (name ?? "").ToLowerInvariant();
+        // Forzados desde la vista (sin cambiar firmas)
+        var forced = (currentIcon ?? "").ToLowerInvariant();
 
-        // ============================
-        // 1) NVMe (detección REAL)
-        // ============================
-        if (n.StartsWith("nvme") || m.Contains("nvme"))
+        if (forced == "nvme")
             return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
 
-        // ============================
-        // 2) USB
-        // ============================
-        if (m.Contains("usb"))
+        if (forced == "usb")
             return "avares://RAID-Util/Assets/Icons/disk-usb.png";
 
-        // ============================
-        // 3) Discos virtuales (name o model)
-        // ============================
-        if (n.StartsWith("loop") ||
-            n.StartsWith("dm-") ||
-            n.StartsWith("mapper") ||
-            n.StartsWith("nbd") ||
-            n.StartsWith("zram") ||
-            m.Contains("virtual") ||
+        if (forced == "iscsi")
+            return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
+
+        if (forced == "virtual")
+            return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
+
+        // Heurísticas antiguas (fallback)
+        var m = (model ?? "").ToLowerInvariant();
+
+        // 1) NVMe por modelo
+        if (m.Contains("nvme"))
+            return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
+
+        // 2) USB por modelo
+        if (m.Contains("usb") || m.Contains("flash") || m.Contains("pen"))
+            return "avares://RAID-Util/Assets/Icons/disk-usb.png";
+
+        // 3) iSCSI / FILEIO / LUN
+        if (m.Contains("iscsi") || m.Contains("fileio") || m.Contains("lun"))
+            return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
+
+        // 4) Virtual
+        if (m.Contains("virtual") ||
             m.Contains("vmware") ||
             m.Contains("qemu") ||
             m.Contains("vbox") ||
             m.Contains("loop") ||
-            m.Contains("file") ||
             m.Contains("nbd") ||
             m.Contains("ram") ||
             m.Contains("zram") ||
@@ -49,15 +56,11 @@ public static class DiskIconService
             return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
         }
 
-        // ============================
-        // 4) HDD
-        // ============================
+        // 5) HDD
         if (isRotational)
             return "avares://RAID-Util/Assets/Icons/disk-hdd.png";
 
-        // ============================
-        // 5) SSD SATA (default)
-        // ============================
+        // 6) SSD SATA (default)
         return "avares://RAID-Util/Assets/Icons/disk-ssd.png";
     }
 }

@@ -9,6 +9,7 @@ public class RaidDiskInfo
     public string Model { get; set; } = "";
     public string Serial { get; set; } = "";
     public string Size { get; set; } = "";
+    public string SmartStatus { get; set; } = "Unknown";
 
     // Icono
     public string Icon { get; set; } = "";

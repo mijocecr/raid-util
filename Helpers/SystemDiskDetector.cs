@@ -8,11 +8,7 @@ namespace RAID_Util.Helpers;
 
 public static class SystemDiskDetector
 {
-    // Solo montajes realmente críticos
-    private static readonly string[] CriticalMounts =
-    {
-        "/", "/boot", "/boot/efi"
-    };
+    private static readonly string[] CriticalMounts = { "/", "/boot", "/boot/efi" };
 
     // ============================================================
     // MÉTODO PRINCIPAL
@@ -23,35 +19,35 @@ public static class SystemDiskDetector
         {
             var baseName = NormalizeDiskName(diskName);
 
-            // 1) Obtener TODAS las particiones del disco
+            // 1) Obtener particiones del disco
             var partitions = GetDiskPartitions(baseName);
 
             // 2) Revisar /proc/mounts
             var mounted = GetMountedDevices();
             foreach (var part in partitions)
             {
-                if (mounted.TryGetValue(part, out var mp))
-                    if (CriticalMounts.Contains(mp))
-                        return true;
-            }
-
-            // 3) Revisar /etc/fstab (UUID, LABEL, PARTUUID, /dev/xxx)
-            var fstab = GetFstabEntries();
-            foreach (var entry in fstab)
-            {
-                // Coincidencia exacta con particiones del disco
-                if (partitions.Contains(entry.Device))
-                {
-                    if (CriticalMounts.Contains(entry.MountPoint))
-                        return true;
-                }
-
-                // ⭐ Resolver UUID/LABEL/PARTUUID a /dev/xxx y comparar
-                if (IsCriticalByResolvedDevice(entry, partitions, baseName))
+                if (mounted.TryGetValue(part, out var mp) &&
+                    CriticalMounts.Contains(mp))
                     return true;
             }
 
-            // 4) Revisar si el root está en RAID/LVM/crypt y este disco es miembro
+            // 3) Revisar /etc/fstab
+            var fstab = GetFstabEntries();
+            foreach (var entry in fstab)
+            {
+                if (CriticalMounts.Contains(entry.MountPoint))
+                {
+                    // Coincidencia directa
+                    if (partitions.Contains(entry.Device))
+                        return true;
+
+                    // Resolver UUID/LABEL/PARTUUID
+                    if (IsCriticalByResolvedDevice(entry, partitions, baseName))
+                        return true;
+                }
+            }
+
+            // 4) Revisar si root está en RAID/LVM/crypt
             if (IsRootOnCompositeUsingDisk(baseName))
                 return true;
 
@@ -69,10 +65,13 @@ public static class SystemDiskDetector
     // ============================================================
     private static string NormalizeDiskName(string name)
     {
+        if (string.IsNullOrWhiteSpace(name))
+            return "";
+
         name = name.Trim();
 
-        if (name.StartsWith("/dev/"))
-            name = name.Substring(5);
+        if (name.StartsWith("/dev/", StringComparison.Ordinal))
+            name = name[5..];
 
         return name;
     }
@@ -98,11 +97,9 @@ public static class SystemDiskDetector
             var name = dev.GetProperty("name").GetString() ?? "";
             var pk = dev.TryGetProperty("pkname", out var pkEl) ? pkEl.GetString() ?? "" : "";
 
-            // Partición cuyo padre es el disco
             if (pk == baseName)
                 result.Add("/dev/" + name);
 
-            // El propio disco
             if (name == baseName)
                 result.Add("/dev/" + name);
         }
@@ -115,7 +112,7 @@ public static class SystemDiskDetector
     // ============================================================
     private static Dictionary<string, string> GetMountedDevices()
     {
-        var dict = new Dictionary<string, string>();
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (!File.Exists("/proc/mounts"))
             return dict;
@@ -123,20 +120,15 @@ public static class SystemDiskDetector
         foreach (var line in File.ReadAllLines("/proc/mounts"))
         {
             var parts = line.Split(' ');
-            if (parts.Length < 2)
-                continue;
-
-            var dev = parts[0];
-            var mp = parts[1];
-
-            dict[dev] = mp;
+            if (parts.Length >= 2)
+                dict[parts[0]] = parts[1];
         }
 
         return dict;
     }
 
     // ============================================================
-    // /etc/fstab (UUID, LABEL, PARTUUID, /dev/xxx)
+    // /etc/fstab
     // ============================================================
     private static List<(string Device, string MountPoint)> GetFstabEntries()
     {
@@ -153,38 +145,29 @@ public static class SystemDiskDetector
                 continue;
 
             var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
-                continue;
-
-            var dev = parts[0];
-            var mp = parts[1];
-
-            list.Add((dev, mp));
+            if (parts.Length >= 2)
+                list.Add((parts[0], parts[1]));
         }
 
         return list;
     }
 
     // ============================================================
-    // Resolver UUID/LABEL/PARTUUID y comprobar si es crítico
+    // Resolver UUID/LABEL/PARTUUID
     // ============================================================
     private static bool IsCriticalByResolvedDevice(
         (string Device, string MountPoint) entry,
         List<string> partitions,
         string baseName)
     {
-        if (!CriticalMounts.Contains(entry.MountPoint))
-            return false;
-
         var dev = entry.Device;
 
-        // Si ya es /dev/xxx y contiene el nombre base → marcar como sistema
-        if (dev.StartsWith("/dev/", StringComparison.Ordinal))
+        // Caso directo: /dev/xxx
+        if (dev.StartsWith("/dev/", StringComparison.OrdinalIgnoreCase))
         {
             if (partitions.Contains(dev))
                 return true;
 
-            // ⭐ Coincidencia por nombre base (sda, nvme0n1, etc.)
             if (dev.Contains(baseName, StringComparison.OrdinalIgnoreCase))
                 return true;
 
@@ -192,98 +175,86 @@ public static class SystemDiskDetector
         }
 
         // UUID=..., LABEL=..., PARTUUID=...
-        if (dev.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase) ||
-            dev.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase) ||
-            dev.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase))
+        if (!(dev.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase) ||
+              dev.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase) ||
+              dev.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        try
         {
-            try
-            {
-                var blkid = ShellHelper.EjecutarSinRoot($"blkid -o export").Stdout;
-                if (string.IsNullOrWhiteSpace(blkid))
-                    return false;
-
-                // Formato típico:
-                // DEVNAME=/dev/sda1
-                // UUID=...
-                // LABEL=...
-                // PARTUUID=...
-                var blocks = blkid.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var block in blocks)
-                {
-                    var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                    string devName = "";
-                    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                    foreach (var l in lines)
-                    {
-                        var idx = l.IndexOf('=');
-                        if (idx <= 0) continue;
-                        var key = l[..idx].Trim();
-                        var val = l[(idx + 1)..].Trim();
-                        map[key] = val;
-                        if (key.Equals("DEVNAME", StringComparison.OrdinalIgnoreCase))
-                            devName = val;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(devName))
-                        continue;
-
-                    bool match = false;
-
-                    if (dev.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase) &&
-                        map.TryGetValue("UUID", out var uuidVal) &&
-                        string.Equals(dev, "UUID=" + uuidVal, StringComparison.OrdinalIgnoreCase))
-                        match = true;
-
-                    if (dev.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase) &&
-                        map.TryGetValue("LABEL", out var labelVal) &&
-                        string.Equals(dev, "LABEL=" + labelVal, StringComparison.OrdinalIgnoreCase))
-                        match = true;
-
-                    if (dev.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase) &&
-                        map.TryGetValue("PARTUUID", out var partuuidVal) &&
-                        string.Equals(dev, "PARTUUID=" + partuuidVal, StringComparison.OrdinalIgnoreCase))
-                        match = true;
-
-                    if (!match)
-                        continue;
-
-                    // Si el DEVNAME pertenece a nuestras particiones o contiene el baseName → sistema
-                    if (partitions.Contains(devName))
-                        return true;
-
-                    if (devName.Contains(baseName, StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-            }
-            catch
-            {
-                // Si algo falla, no marcamos aquí, pero el catch global de IsSystemDisk protege
+            var blkid = ShellHelper.EjecutarSinRoot("blkid -o export").Stdout;
+            if (string.IsNullOrWhiteSpace(blkid))
                 return false;
+
+            var blocks = blkid.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var block in blocks)
+            {
+                var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                string devName = "";
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var l in lines)
+                {
+                    var idx = l.IndexOf('=');
+                    if (idx <= 0) continue;
+
+                    var key = l[..idx].Trim();
+                    var val = l[(idx + 1)..].Trim();
+                    map[key] = val;
+
+                    if (key.Equals("DEVNAME", StringComparison.OrdinalIgnoreCase))
+                        devName = val;
+                }
+
+                if (string.IsNullOrWhiteSpace(devName))
+                    continue;
+
+                bool match =
+                    (dev.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase) &&
+                     map.TryGetValue("UUID", out var uuidVal) &&
+                     dev.Equals("UUID=" + uuidVal, StringComparison.OrdinalIgnoreCase))
+                    ||
+                    (dev.StartsWith("LABEL=", StringComparison.OrdinalIgnoreCase) &&
+                     map.TryGetValue("LABEL", out var labelVal) &&
+                     dev.Equals("LABEL=" + labelVal, StringComparison.OrdinalIgnoreCase))
+                    ||
+                    (dev.StartsWith("PARTUUID=", StringComparison.OrdinalIgnoreCase) &&
+                     map.TryGetValue("PARTUUID", out var partuuidVal) &&
+                     dev.Equals("PARTUUID=" + partuuidVal, StringComparison.OrdinalIgnoreCase));
+
+                if (!match)
+                    continue;
+
+                if (partitions.Contains(devName))
+                    return true;
+
+                if (devName.Contains(baseName, StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
+        }
+        catch
+        {
+            return false;
         }
 
         return false;
     }
 
     // ============================================================
-    // DETECTAR SI EL ROOT ESTÁ EN RAID/LVM/CRYPT Y ESTE DISCO ES MIEMBRO
+    // DETECTAR SI ROOT ESTÁ EN RAID/LVM/CRYPT
     // ============================================================
     private static bool IsRootOnCompositeUsingDisk(string baseName)
     {
         var mounts = GetMountedDevices();
 
-        // Buscar qué dispositivo contiene /
         var rootDev = mounts.FirstOrDefault(x => x.Value == "/").Key;
         if (string.IsNullOrWhiteSpace(rootDev))
             return false;
 
-        // Si root está directamente en este disco/partición
         if (rootDev.Contains(baseName, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // ⭐ Usar lsblk para seguir la cadena de padres (LVM, crypt, RAID, etc.)
         try
         {
             var exec = ShellHelper.EjecutarSinRoot("lsblk -J -o NAME,PKNAME");
@@ -295,8 +266,7 @@ public static class SystemDiskDetector
             if (!doc.RootElement.TryGetProperty("blockdevices", out var root))
                 return false;
 
-            // Construir mapa hijo → padre
-            var parentMap = new Dictionary<string, string>();
+            var parentMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var dev in root.EnumerateArray())
             {
@@ -307,10 +277,8 @@ public static class SystemDiskDetector
                     parentMap[name] = pk;
             }
 
-            // rootDev puede venir como /dev/xxx
             var rootName = rootDev.StartsWith("/dev/") ? rootDev[5..] : rootDev;
 
-            // Subir por la cadena de padres hasta llegar al disco físico
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var current = rootName;
 
@@ -329,17 +297,15 @@ public static class SystemDiskDetector
         }
         catch
         {
-            // Si falla, no marcamos aquí, pero el catch global de IsSystemDisk protege
             return false;
         }
 
-        // Caso especial: root en /dev/mdX → comprobar /proc/mdstat
+        // Caso especial: root en /dev/mdX
         if (rootDev.StartsWith("/dev/md", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
                 var mdstat = File.ReadAllText("/proc/mdstat").ToLowerInvariant();
-                // ⭐ Buscar baseName explícitamente como sdX o nvmeX
                 if (mdstat.Contains(baseName.ToLowerInvariant()))
                     return true;
             }
