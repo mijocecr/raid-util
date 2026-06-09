@@ -43,7 +43,7 @@
                 
                 <TextBlock
                     TextAlignment="Center"
-                    Text="Don't Panic - Please wait Linux kernel."
+                    Text="Don't Panic - Please wait Linux's kernel."
                     />
 
             </StackPanel>

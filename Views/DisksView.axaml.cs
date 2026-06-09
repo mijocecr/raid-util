@@ -34,6 +34,17 @@ public partial class DisksView : UserControl
     {
         InitializeComponent();
         LogService.Debug("[DISKSVIEW] Constructor ejecutado.");
+        
+        var btn = this.FindControl<Button>("BtnRefresh");
+        if (btn != null)
+        {
+            btn.Click += async (_, _) =>
+            {
+                await RefreshDisksAsync();
+            };
+        }
+        
+        
     }
 
     private static void EnsureResources()
@@ -55,8 +66,8 @@ public partial class DisksView : UserControl
 
         _resourcesReady = true;
     }
-
-    public void Initialize(bool sudoReady, bool forceFake)
+ 
+    async public void Initialize(bool sudoReady, bool forceFake)
     {
         LogService.Info($"[DISKSVIEW] Initialize() sudoReady={sudoReady}, forceFake={forceFake}");
 
@@ -71,22 +82,26 @@ public partial class DisksView : UserControl
             if (forceFake)
                 LoadFakeData();
             else
-                LoadRealData();
+                await LoadRealDataAsync();
+
         }
 
         RenderDisks();
     }
 
-    public Task RefreshDisksAsync()
+    public async Task RefreshDisksAsync()
     {
         LogService.Debug("[DISKSVIEW] RefreshDisksAsync() called.");
 
-        _disks.Clear();
-        LoadRealData();
-        RenderDisks();
+        using (LoadingService.Show("Refreshing disks..."))
+        {
+            await LoadRealDataAsync();   // ⬅️ async, sin Task.Run
+        }
 
-        return Task.CompletedTask;
+        RenderDisks();
     }
+
+
 
     private void LoadFakeData()
     {
@@ -113,54 +128,62 @@ public partial class DisksView : UserControl
         });
     }
 
-    private void LoadRealData()
+    private async Task LoadRealDataAsync()
     {
-        _disks.Clear();
-
-        try
+        using (LoadingService.Show("Loading disks..."))
         {
-            var list = DiskService.GetAllDisks();
-            LogService.Info($"[DISKSVIEW] Discos detectados: {list.Count}");
-
-            var eligible = list.Where(d =>
-                !d.IsSystemDisk &&
-                (
-                    d.RaidMembership == RaidMembership.None ||
-                    d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase)
-                )
-            );
-
-            foreach (var d in eligible)
+            await Task.Run(() =>
             {
-                d.Model ??= "Unknown";
-                d.Serial ??= "Unknown";
-                d.Size ??= "Unknown";
-                d.FsType ??= "";
-                d.MountPath ??= "";
-                d.State ??= "UNKNOWN";
+                _disks.Clear();
 
-                // ⭐ Forzar tipo real sin cambiar firmas
-                string iconHint = d.Icon;
+                try
+                {
+                    var list = DiskService.GetAllDisks();
+                    LogService.Info($"[DISKSVIEW] Discos detectados: {list.Count}");
 
-                if (d.IsNvme)
-                    iconHint = "nvme";
-                else if (d.IsUsb)
-                    iconHint = "usb";
-                else if (d.IsIscsi)
-                    iconHint = "iscsi";
-                else if (d.IsVirtual)
-                    iconHint = "virtual";
+                    var eligible = list.Where(d =>
+                        !d.IsSystemDisk &&
+                        (
+                            d.RaidMembership == RaidMembership.None ||
+                            d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase)
+                        )
+                    );
 
-                d.Icon = DiskIconService.GetIcon(iconHint, d.Model, d.IsRotational);
+                    foreach (var d in eligible)
+                    {
+                        d.Model ??= "Unknown";
+                        d.Serial ??= "Unknown";
+                        d.Size ??= "Unknown";
+                        d.FsType ??= "";
+                        d.MountPath ??= "";
+                        d.State ??= "UNKNOWN";
 
-                _disks.Add(d);
-            }
+                        string iconHint = d.Icon;
+
+                        if (d.IsNvme)
+                            iconHint = "nvme";
+                        else if (d.IsUsb)
+                            iconHint = "usb";
+                        else if (d.IsIscsi)
+                            iconHint = "iscsi";
+                        else if (d.IsVirtual)
+                            iconHint = "virtual";
+
+                        d.Icon = DiskIconService.GetIcon(iconHint, d.Model, d.IsRotational);
+
+                        _disks.Add(d);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogService.Error($"[DISKSVIEW] Error cargando discos reales: {ex}");
+                }
+            });
         }
-        catch (Exception ex)
-        {
-            LogService.Error($"[DISKSVIEW] Error cargando discos reales: {ex}");
-        }
+
+        RenderDisks();
     }
+
 
     private void RenderDisks()
     {
@@ -333,22 +356,23 @@ public partial class DisksView : UserControl
 }
 
     
-    
-
     private ContextMenu BuildDiskContextMenu(RaidDiskInfo disk)
     {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
 
+        // Siempre disponibles
         items.Add(new MenuItem { Header = "View Info", Tag = "info" });
         items.Add(new MenuItem { Header = "SMART", Tag = "smart" });
 
-        if (disk.IsSystemDisk)
+        // 1) Discos del sistema → solo info + smart
+        if (disk.IsSystemDisk || SystemDiskDetector.IsSystemDisk(disk.Name))
         {
             menu.ItemsSource = items;
             return menu;
         }
 
+        // 2) Discos RAID activos → bloquear destructivas
         if (disk.IsUsedByRaid &&
             !disk.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
         {
@@ -356,6 +380,7 @@ public partial class DisksView : UserControl
             return menu;
         }
 
+        // 3) Si el propio disco está montado → solo unmount
         if (disk.IsMounted)
         {
             items.Add(new MenuItem { Header = "Unmount", Tag = "unmount" });
@@ -363,12 +388,20 @@ public partial class DisksView : UserControl
             return menu;
         }
 
-        if (disk.Children != null && disk.Children.Count > 0)
+        // 4) Si alguna partición hija está montada → también bloquear destructivas
+        if (HasMountedChildren(disk))
         {
+            // No hay unmount directo a nivel disco, así que solo info + smart
             menu.ItemsSource = items;
             return menu;
         }
 
+        // 5) A partir de aquí:
+        //    - No es sistema
+        //    - No está en RAID activo (solo removed o fuera de RAID)
+        //    - No está montado
+        //    - No tiene particiones montadas
+        //    → se permiten operaciones destructivas
         items.Add(new MenuItem { Header = "Wipe Disk", Tag = "wipe" });
         items.Add(new MenuItem { Header = "Zero Superblock", Tag = "zerosb" });
         items.Add(new MenuItem { Header = "Create Partition Table", Tag = "ptable" });
@@ -377,6 +410,47 @@ public partial class DisksView : UserControl
         menu.ItemsSource = items;
         return menu;
     }
+
+
+    private static bool HasMountedChildren(RaidDiskInfo disk)
+    {
+        try
+        {
+            if (disk.Children == null || disk.Children.Count == 0)
+                return false;
+
+            if (!File.Exists("/proc/mounts"))
+                return false;
+
+            var lines = File.ReadAllLines("/proc/mounts");
+
+            foreach (var line in lines)
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2)
+                    continue;
+
+                var dev = parts[0];
+
+                // /dev/sdX1, /dev/nvme0n1p1, etc.
+                foreach (var child in disk.Children)
+                {
+                    if (dev.Equals($"/dev/{child}", StringComparison.Ordinal))
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+            // En caso de duda, mejor ser conservador
+            return true;
+        }
+
+        return false;
+    }
+
+
+    
 
     private async void OnMenuClick(RaidDiskInfo disk, string? action)
     {
@@ -551,7 +625,8 @@ public partial class DisksView : UserControl
 
         await ShowInfoDialog("Unmount", "Disk unmounted successfully.");
 
-        LoadRealData();
+        await LoadRealDataAsync();
+
         RenderDisks();
     }
 
@@ -570,7 +645,8 @@ public partial class DisksView : UserControl
 
         await ShowInfoDialog("Wipe Disk", "Disk wiped successfully.");
 
-        LoadRealData();
+        await LoadRealDataAsync();
+
         RenderDisks();
     }
 
@@ -589,7 +665,8 @@ public partial class DisksView : UserControl
 
         await ShowInfoDialog("Zero Superblock", "Superblock removed.");
 
-        LoadRealData();
+        await LoadRealDataAsync();
+
         RenderDisks();
     }
 
@@ -609,7 +686,8 @@ public partial class DisksView : UserControl
 
         await ShowInfoDialog("Partition Table", "GPT partition table created.");
 
-        LoadRealData();
+        await LoadRealDataAsync();
+
         RenderDisks();
     }
 
@@ -692,7 +770,8 @@ public partial class DisksView : UserControl
             $"Disk /dev/{disk.Name} initialized successfully.\n\nFS: {fs}\nLabel: {label}\nMount: {mountPoint}"
         );
 
-        LoadRealData();
+        await LoadRealDataAsync();
+
         RenderDisks();
     }
 }

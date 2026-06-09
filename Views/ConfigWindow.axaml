@@ -109,6 +109,11 @@
                         BorderThickness="1"
                         CornerRadius="6" />
             </Grid>
+            
+            <TextBlock Text="The RAID section provides a dedicated advanced settings panel for each individual array."
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource BMWTextBrush}" />
+
 
         </StackPanel>
     </Border>

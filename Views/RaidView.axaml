@@ -35,7 +35,7 @@
                         Classes="HeaderButton" />
 
                 <Button Grid.Row="0" Grid.Column="1"
-                        Content="Refresh"
+                        Content="⟳ Refresh"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
                         BorderBrush="{DynamicResource BMWAccentBrush}"

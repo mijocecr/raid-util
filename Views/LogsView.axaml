@@ -8,7 +8,7 @@
         <!-- Toolbar -->
         <StackPanel Orientation="Horizontal" Spacing="10">
             <Button x:Name="RefreshButton"
-                    Content="Refresh"
+                    Content="⟳ Refresh"
                     HorizontalContentAlignment="Center"
                     Width="100"
                     Classes="accent" />
