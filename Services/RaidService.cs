@@ -718,18 +718,47 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 
     
 
-    public bool AutoAssemble()
-    {
-        Console.WriteLine("[RAID] Ejecutando AutoAssemble()");
+public bool AutoAssemble()
+{
+    Console.WriteLine("[RAID] Ejecutando AutoAssemble()");
 
+    try
+    {
+        // 1) Asegurar que mdadm no está ocupado
+        var idle = WaitForMdadmIdleAsync().Result;
+        if (!idle)
+        {
+            Console.WriteLine("[RAID] AutoAssemble ABORTED: mdadm está ocupado.");
+            return false;
+        }
+
+        // 2) Ejecutar assemble universal (ruta absoluta obligatoria)
         var result = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --assemble --scan");
 
         Console.WriteLine($"[RAID] AutoAssemble EXIT={result.ExitCode}");
         Console.WriteLine($"[RAID] AutoAssemble STDOUT:\n{result.Stdout}");
         Console.WriteLine($"[RAID] AutoAssemble STDERR:\n{result.Stderr}");
 
-        return result.ExitCode == 0;
+        // 3) Si falla, registrar error claro
+        if (result.ExitCode != 0)
+        {
+            Console.WriteLine("[RAID] AutoAssemble FAILED: mdadm no pudo ensamblar los arrays.");
+            return false;
+        }
+
+        // 4) Esperar a que udev termine
+        ShellHelper.EjecutarComoRoot("udevadm settle || true");
+
+        return true;
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[RAID] AutoAssemble EXCEPTION:");
+        Console.WriteLine(ex.ToString());
+        return false;
+    }
+}
+
 
    public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
 {
@@ -1225,6 +1254,12 @@ private RaidArrayState ParseArrayStateEnum(string detail)
         };
     }
 
+    public async Task<bool> DiskHasMetadata(string device)
+    {
+        var result = await ShellHelper.RunCleanAsync($"mdadm --examine {device} 2>/dev/null");
+        return !string.IsNullOrWhiteSpace(result) && result.Contains("MD");
+    }
+
 
     private string GetStateIcon(RaidArrayState state)
     {
@@ -1269,14 +1304,13 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 {
     try
     {
-        var arrayPath = array.Path;
+        var arrayPath = array.Path.Trim();
         var name = array.Name;
 
         LogService.Info($"[RAID] DELETE START → {name} ({arrayPath})");
-
-
         NotificadorLinux.Enviar($"Deleting RAID array {name}… This may take a moment.");
 
+        // 1) Verificar que el array está en estado seguro
         if (!await EnsureArraySafeForModification(arrayPath))
         {
             var msg = "Array cannot be deleted because it is not in a safe state.";
@@ -1285,14 +1319,22 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             return false;
         }
 
-        // ⭐ limpiar fstab por si acaso
+        // 2) Limpiar fstab
         RemoveArrayFromFstab(arrayPath);
 
+        // 3) Asegurar que mdadm no está ocupado
+        if (!await WaitForMdadmIdleAsync())
+        {
+            NotificadorLinux.Enviar("mdadm is busy. Cannot delete array.", 5000, "critical");
+            LogService.Error("[RAID] DELETE ABORTED: mdadm busy.");
+            return false;
+        }
+
+        // 4) STOP del array
         NotificadorLinux.Enviar($"Stopping array {name}…");
         LogService.Info($"[RAID] Stopping array {arrayPath}");
 
-
-        var stop = ShellHelper.EjecutarComoRoot($"mdadm --stop {arrayPath}");
+        var stop = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --stop {arrayPath}");
         if (stop.ExitCode != 0)
         {
             var msg = $"Failed to stop array {name}.";
@@ -1301,43 +1343,35 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             return false;
         }
 
+        // 5) REMOVE del array
         NotificadorLinux.Enviar($"Removing array {name}…");
         LogService.Info($"[RAID] Removing array {arrayPath}");
 
+        var remove = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --remove {arrayPath}");
 
-        var remove = ShellHelper.EjecutarComoRoot($"mdadm --remove {arrayPath}");
-
-        if (remove.ExitCode != 0)
+        if (remove.ExitCode != 0 &&
+            !remove.Stderr.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
         {
-            if (remove.Stderr.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
-            {
-                LogService.Info("[RAID] REMOVE skipped: md device already removed after --stop.");
-
-            }
-            else
-            {
-                var msg = $"Failed to remove array {name}.";
-                NotificadorLinux.Enviar(msg, 5000, "critical");
-                LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
-                return false;
-            }
+            var msg = $"Failed to remove array {name}.";
+            NotificadorLinux.Enviar(msg, 5000, "critical");
+            LogService.Error($"[RAID] REMOVE FAILED: {remove.Stderr}");
+            return false;
         }
 
+        // 6) Limpiar metadata RAID de cada disco
         NotificadorLinux.Enviar("Cleaning RAID metadata from member disks…");
 
         foreach (var d in array.Disks)
         {
             LogService.Info($"[RAID] Wiping superblock on {d.Name}");
 
-
-            // ⭐ no tocar discos marcados como sistema
             if (d.IsSystemDisk)
             {
                 LogService.Error($"[RAID] ZERO-SB SKIPPED on system disk {d.Name}");
                 continue;
             }
 
-            var wipe = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{d.Name}");
+            var wipe = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --zero-superblock /dev/{d.Name}");
 
             if (wipe.ExitCode != 0)
             {
@@ -1347,20 +1381,22 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             }
         }
 
+        // 7) Persistir configuración
         NotificadorLinux.Enviar("Updating mdadm configuration…");
         LogService.Info("[RAID] Updating mdadm.conf");
 
-
-        // ⭐ usar método de persistencia y actualizar initramfs
         PersistArrayToMdadmConf();
         ShellHelper.EjecutarComoRoot("sync");
-        ShellHelper.EjecutarComoRoot("update-initramfs -u");
 
+        // 8) update-initramfs solo si existe (universal)
+        if (File.Exists("/usr/sbin/update-initramfs") || File.Exists("/sbin/update-initramfs"))
+            ShellHelper.EjecutarComoRoot("update-initramfs -u || true");
+
+        // 9) Final
         var success = $"Array {name} has been successfully deleted.";
         NotificadorLinux.Enviar(success, 5000, "info");
 
         LogService.Info($"[RAID] DELETE OK → {name}");
-
         return true;
     }
     catch (Exception ex)
@@ -1375,12 +1411,17 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 }
 
 
-    public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
+
+public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendlyName = null)
 {
+    LogService.Info($"[CREATE] >>> Iniciando CreateArray(level={level}, disks={disks.Count}, friendlyName={friendlyName})");
+
     try
     {
+        // 1) Bloquear discos del sistema
         foreach (var d in disks)
         {
+            LogService.Info($"[CREATE] Revisando disco: {d.Name}, IsSystemDisk={d.IsSystemDisk}");
             if (d.IsSystemDisk)
             {
                 LogService.Error($"[CREATE] ERROR: /dev/{d.Name} es disco del sistema. Operación bloqueada.");
@@ -1388,9 +1429,12 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             }
         }
 
+        // 2) Validar discos uno por uno
         foreach (var d in disks)
         {
+            LogService.Info($"[CREATE] Validando disco: {d.Name}");
             var errors = ValidateDiskForRaidAsync(d.Name).Result;
+
             if (errors.Count > 0)
             {
                 LogService.Error($"[CREATE] Validation failed for /dev/{d.Name}:");
@@ -1400,10 +1444,30 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             }
         }
 
+        // 3) Esperar a que mdadm esté libre
+        LogService.Info("[CREATE] Esperando a que mdadm esté libre...");
+        if (!WaitForMdadmIdleAsync().Result)
+        {
+            LogService.Error("[CREATE] mdadm está ocupado. Operación cancelada.");
+            return false;
+        }
+
+        // 4) Limpiar superblocks ANTES de crear
+        LogService.Info("[CREATE] Limpiando superblocks...");
+        foreach (var d in disks)
+        {
+            LogService.Info($"[CREATE] Zero-superblock en /dev/{d.Name}");
+            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --zero-superblock /dev/{d.Name}");
+        }
+
+        // 5) Obtener nombre libre (md0, md1, md2…)
         var mdName = GetNextFreeMdName();
         var arrayPath = $"/dev/{mdName}";
         LastCreatedMdName = mdName;
 
+        LogService.Info($"[CREATE] Nombre asignado al array: {mdName}");
+
+        // 6) Normalizar nivel RAID
         var mdadmLevel = level.ToLower() switch
         {
             "linear" => "linear",
@@ -1412,37 +1476,114 @@ private RaidArrayState ParseArrayStateEnum(string detail)
             _ => level.Replace("RAID", "").Trim()
         };
 
-        var deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
+        LogService.Info($"[CREATE] Nivel normalizado: {mdadmLevel}");
 
+        // 7) Lista de dispositivos
+        var deviceList = string.Join(" ", disks.Select(d => "/dev/" + d.Name));
+        LogService.Info($"[CREATE] Discos: {deviceList}");
+
+        // 8) Nombre amigable
         var nameForMdadm = string.IsNullOrWhiteSpace(friendlyName)
             ? mdName
             : friendlyName.Trim();
 
-        var cmd =
-            $"/usr/sbin/mdadm --create {arrayPath} " +
-            $"--verbose " +
-            $"--metadata=1.2 " +
-            $"--name={nameForMdadm} " +
-            $"--level={mdadmLevel} " +
-            $"--raid-devices={disks.Count} " +
-            $"{deviceList} --force --run";
+        LogService.Info($"[CREATE] FriendlyName final: {nameForMdadm}");
 
-        LogService.Info($"[CREATE] Ejecutando: {cmd}");
+        // 9) Construir comando mdadm (create)
+        string cmd;
+
+        if (mdadmLevel == "linear")
+        {
+            LogService.Info("[CREATE] Usando metadata=0.90 para linear");
+
+            cmd =
+                $"/usr/sbin/mdadm --create {arrayPath} " +
+                $"--verbose " +
+                $"--metadata=0.90 " +
+                $"--name={nameForMdadm} " +
+                $"--level=linear " +
+                $"--raid-devices={disks.Count} " +
+                $"{deviceList}";
+        }
+        else
+        {
+            LogService.Info("[CREATE] Usando metadata=1.2 para RAID normal");
+
+            cmd =
+                $"/usr/sbin/mdadm --create {arrayPath} " +
+                $"--verbose " +
+                $"--metadata=1.2 " +
+                $"--name={nameForMdadm} " +
+                $"--level={mdadmLevel} " +
+                $"--raid-devices={disks.Count} " +
+                $"{deviceList} " +
+                $"--force --run";
+        }
+
+        LogService.Info($"[CREATE] Ejecutando comando: {cmd}");
 
         var result = ShellHelper.EjecutarComoRoot(cmd);
 
+        LogService.Info($"[CREATE] mdadm exit code: {result.ExitCode}");
+        if (!string.IsNullOrWhiteSpace(result.Stdout))
+            LogService.Info($"[CREATE] mdadm STDOUT:\n{result.Stdout}");
+        if (!string.IsNullOrWhiteSpace(result.Stderr))
+            LogService.Info($"[CREATE] mdadm STDERR:\n{result.Stderr}");
+
         if (result.ExitCode != 0)
         {
-            LogService.Error("[CREATE] mdadm falló:");
-            LogService.Error(result.Stderr);
+            LogService.Error("[CREATE] mdadm falló.");
             return false;
         }
 
-        ShellHelper.EjecutarComoRoot("udevadm settle");
+        // 10) Esperar a que udev termine
+        LogService.Info("[CREATE] Ejecutando udevadm settle...");
+        ShellHelper.EjecutarComoRoot("udevadm settle || true");
 
-        // ⭐ persistir arrays y actualizar initramfs
+        // 11) Si es linear y el dispositivo no existe, intentar ensamblar
+        if (mdadmLevel == "linear" && !File.Exists(arrayPath))
+        {
+            LogService.Info($"[CREATE] {arrayPath} NO existe tras create. Intentando assemble...");
+
+            var assembleCmd =
+                $"/usr/sbin/mdadm --assemble {arrayPath} {deviceList} --run";
+
+            LogService.Info($"[CREATE] Ejecutando assemble: {assembleCmd}");
+            var assembleResult = ShellHelper.EjecutarComoRoot(assembleCmd);
+
+            LogService.Info($"[CREATE] assemble exit code: {assembleResult.ExitCode}");
+            if (!string.IsNullOrWhiteSpace(assembleResult.Stdout))
+                LogService.Info($"[CREATE] assemble STDOUT:\n{assembleResult.Stdout}");
+            if (!string.IsNullOrWhiteSpace(assembleResult.Stderr))
+                LogService.Info($"[CREATE] assemble STDERR:\n{assembleResult.Stderr}");
+
+            if (assembleResult.ExitCode != 0)
+            {
+                LogService.Error("[CREATE] mdadm --assemble falló.");
+                return false;
+            }
+
+            ShellHelper.EjecutarComoRoot("udevadm settle || true");
+        }
+
+        // 12) Verificación final
+        LogService.Info($"[CREATE] Verificando existencia de {arrayPath}...");
+        if (!File.Exists(arrayPath))
+        {
+            LogService.Error($"[CREATE] ERROR: {arrayPath} NO existe tras create/assemble.");
+            return false;
+        }
+
+        LogService.Info($"[CREATE] {arrayPath} existe correctamente.");
+
+        // 13) Persistir configuración
+        LogService.Info("[CREATE] Persistiendo configuración en mdadm.conf...");
         PersistArrayToMdadmConf();
-        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+
+        // 14) update-initramfs
+        LogService.Info("[CREATE] Ejecutando update-initramfs si existe...");
+        if (File.Exists("/usr/sbin/update-initramfs") || File.Exists("/sbin/update-initramfs"))
+            ShellHelper.EjecutarComoRoot("update-initramfs -u || true");
 
         LogService.Info($"[CREATE] Array creado correctamente → {arrayPath}");
         return true;
@@ -1454,6 +1595,22 @@ private RaidArrayState ParseArrayStateEnum(string detail)
         return false;
     }
 }
+
+    
+public bool KernelSupportsLinear()
+{
+    try
+    {
+        var text = File.ReadAllText("/proc/mdstat");
+        return text.Contains("[linear]");
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+
 
 
     public string GetNextFreeMdName()
@@ -2089,22 +2246,6 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 }
 
 
-    public bool WaitForArray(string mdName, int timeoutMs = 5000)
-    {
-        var sw = Stopwatch.StartNew();
-
-        while (sw.ElapsedMilliseconds < timeoutMs)
-        {
-            var result = ShellHelper.EjecutarComoRoot($"ls /dev/{mdName}");
-
-            if (result.ExitCode == 0)
-                return true;
-
-            Thread.Sleep(100);
-        }
-
-        return false;
-    }
 
     public bool RemoveArrayFromFstab(string arrayPath)
 {
@@ -2212,18 +2353,19 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             devPath = array != null ? array.Path : $"/dev/{arrayName}";
         }
 
+        // Check if device is mounted
         var mounts = await ShellHelper.RunCleanAsync(
             $"grep -E '^{devPath}\\b' /proc/mounts || true");
 
         if (!string.IsNullOrWhiteSpace(mounts))
         {
             NotificadorLinux.Enviar(
-                $"{devPath} está montado. Debe desmontarse antes de modificar el array.",
+                $"{devPath} is mounted. You must unmount it before modifying the array.",
                 7000, "critical");
             return false;
         }
 
-        // ⭐ también comprobar por UUID en fstab
+        // Also check UUID in fstab
         var uuidResult = ShellHelper.RunCleanAsync($"blkid -s UUID -o value {devPath}");
         var uuid = (await uuidResult)?.Trim() ?? "";
 
@@ -2243,13 +2385,14 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         if (!allowFstab && !string.IsNullOrWhiteSpace(fstab))
         {
             NotificadorLinux.Enviar(
-                $"{devPath} (o su UUID) está en /etc/fstab. Debe eliminarse antes de modificar el array.",
+                $"{devPath} (or its UUID) is listed in /etc/fstab. It must be removed before modifying the array.",
                 7000, "critical");
             return false;
         }
 
         return true;
     }
+
 
 
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -7,6 +8,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using RAID_Util.Models;
+using RAID_Util.Services;
 using RAID_Util.Views;
 
 namespace RAID_Util.Core;
@@ -79,9 +81,21 @@ public class CreateArrayDialog : Window
             Foreground = this.FindResource("BMWTextBrush") as IBrush
         });
 
+        // ⭐ LISTA DINÁMICA SEGÚN SOPORTE DEL KERNEL
+        var levels = new List<string> { "RAID0", "RAID1", "RAID5", "RAID6", "RAID10" };
+
+        if (RaidService.Instance.KernelSupportsLinear())
+        {
+            levels.Insert(0, "JBOD (Linear)");
+        }
+        else
+        {
+            Console.WriteLine("[UI] JBOD (Linear) ocultado: el kernel no soporta linear.");
+        }
+
         _levelSelector = new ComboBox
         {
-            ItemsSource = new[] { "JBOD (Linear)", "RAID0", "RAID1", "RAID5", "RAID6", "RAID10" },
+            ItemsSource = levels,
             SelectedIndex = 0,
             Width = 200,
             Background = this.FindResource("BMWInputBrush") as IBrush,

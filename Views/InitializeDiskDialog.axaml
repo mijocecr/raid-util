@@ -26,6 +26,7 @@
 
             <!-- Label -->
             <TextBlock Text="Label:"
+                       HorizontalAlignment="Center"
                        Foreground="{DynamicResource BMWAccentBrush}"
                        VerticalAlignment="Center"
                        Grid.Row="0" Grid.Column="0" />
@@ -42,6 +43,7 @@
             <TextBlock Text="Filesystem:"
                        Foreground="{DynamicResource BMWAccentBrush}"
                        VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
                        Grid.Row="1" Grid.Column="0" />
 
             <ComboBox x:Name="FsCombo"
@@ -49,7 +51,7 @@
                       Foreground="{DynamicResource BMWTextBrush}"
                       BorderBrush="{DynamicResource BMWBorderBrush}"
                       Height="24"
-                      Width="220"
+                      HorizontalAlignment="Stretch"
                       Grid.Row="1" Grid.Column="1">
 
                 <ComboBoxItem Content="ext4" />
@@ -72,13 +74,13 @@
 
             <Button x:Name="ApplyBtn"
                     Content="Initialize"
-                    Width="80"
+                    HorizontalContentAlignment="Center"
                     Height="30"
                     Classes="AccentButton" />
 
             <Button x:Name="CancelBtn"
                     Content="Cancel"
-                    Width="80"
+                    HorizontalContentAlignment="Center"
                     Height="30" />
         </StackPanel>
 

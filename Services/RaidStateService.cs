@@ -8,6 +8,8 @@ namespace RAID_Util.Services;
 
 public class RaidStateService
 {
+    public static RaidStateService Instance { get; } = new RaidStateService();
+
     public List<RaidArrayInfo> Arrays { get; private set; } = new();
     public List<RaidDiskInfo> Disks { get; private set; } = new();
 

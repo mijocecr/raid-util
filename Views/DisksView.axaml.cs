@@ -258,7 +258,7 @@ public partial class DisksView : UserControl
         var btnMore = new Button
         {
             Content = "More",
-            Width = 70,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
             Height = 32,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top

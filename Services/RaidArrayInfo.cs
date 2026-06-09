@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace RAID_Util.Models;
@@ -113,6 +114,25 @@ public class RaidArrayInfo
     // CAPACIDADES DEL ARRAY
     // ============================================================
 
+    public bool IsLinear =>
+        Level.Equals("linear", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsRaid0 =>
+        Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
+
+    public bool SupportsDiskRemoval =>
+        Level is "raid1" or "raid5" or "raid6" or "raid10";
+
+    public bool SupportsFaultyMark =>
+        Level is "raid1" or "raid5" or "raid6" or "raid10";
+
+    public bool SupportsSpare =>
+        Level is "raid1" or "raid5" or "raid6" or "raid10";
+
+    public bool SupportsRecovery =>
+        Level is "raid1" or "raid5" or "raid6" or "raid10";
+
+    
     public bool SupportsCheck =>
         Level is "raid1" or "raid5" or "raid6" or "raid10";
 

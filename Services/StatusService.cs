@@ -348,6 +348,37 @@ public class StatusService
         }
         catch { return 0; }
     }
+    
+    public double GetRebuildPercent(string detail)
+    {
+        try
+        {
+            foreach (var line in detail.Split('\n'))
+            {
+                var l = line.ToLower();
+                if (l.Contains("resync =") || l.Contains("rebuild ="))
+                {
+                    int idx = l.IndexOf('%');
+                    if (idx > 0)
+                    {
+                        int start = idx;
+                        while (start > 0 && char.IsDigit(l[start - 1]))
+                            start--;
+
+                        var num = l.Substring(start, idx - start);
+                        if (double.TryParse(num, out double pct))
+                            return pct;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        return 0;
+    }
+
+    
+    
 
     public int GetDiskFree()
     {

@@ -56,6 +56,10 @@ public partial class RaidView : UserControl
         }
     };
 
+    private readonly Dictionary<string, Border> _progressBars = new();
+    private readonly Dictionary<string, TextBlock> _progressLabels = new();
+    private CancellationTokenSource? _progressCts;
+
     private static readonly Dictionary<string, IImage> _iconCache = new();
 
     private List<RaidArrayInfo> _arrays = new();
@@ -78,6 +82,9 @@ public partial class RaidView : UserControl
         BtnConfigArrays.Click += OnConfigArraysClicked;
         BtnAssembleArrays.Click += OnAssembleArraysClicked;
         BtnInitialize.Click += OnInitializeClicked;
+
+        AttachedToVisualTree += OnAttached;
+        DetachedFromVisualTree += OnDetached;
 
         BtnDeleteArray.IsEnabled = false;
         BtnConfigArrays.IsEnabled = false;
@@ -248,278 +255,331 @@ public partial class RaidView : UserControl
 
         return "";
     }
+    
     private Border BuildArrayCard(RaidArrayInfo array)
+{
+    var safeName = array.Name ?? "Unknown";
+    var safeLevel = array.Level ?? "N/A";
+    var safeState = Enum.IsDefined(typeof(RaidArrayState), array.State)
+        ? array.State.ToString()
+        : "Unknown";
+    var safeTotalSize = array.TotalSize ?? "Unknown";
+    var safePath = array.Path ?? "/dev/unknown";
+    var safeParity = array.ParitySize ?? "N/A";
+    var safeETA = array.RebuildETA ?? "N/A";
+    var safeDisks = array.Disks ?? new List<RaidDiskInfo>();
+
+    var activeCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Active);
+    var faultyCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Faulty);
+
+    var safeIcon = string.IsNullOrWhiteSpace(array.StateIcon)
+        ? GetStateIcon(array.State)
+        : array.StateIcon;
+
+    var icon = LoadImage(safeIcon, 150);
+    icon.Margin = new Thickness(4);
+    icon.VerticalAlignment = VerticalAlignment.Center;
+
+    var name = new TextBlock
     {
-        var safeName = array.Name ?? "Unknown";
-        var safeLevel = array.Level ?? "N/A";
-        var safeState = Enum.IsDefined(typeof(RaidArrayState), array.State)
-            ? array.State.ToString()
-            : "Unknown";
-        var safeTotalSize = array.TotalSize ?? "Unknown";
-        var safePath = array.Path ?? "/dev/unknown";
-        var safeParity = array.ParitySize ?? "N/A";
-        var safeETA = array.RebuildETA ?? "N/A";
-        var safeDisks = array.Disks ?? new List<RaidDiskInfo>();
+        Text = $"{safeName} ({safeLevel})",
+        FontSize = 22,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
+        FontWeight = FontWeight.Bold,
+        Margin = new Thickness(0, 0, 0, 4)
+    };
 
-        var activeCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Active);
-        var faultyCount = safeDisks.Count(d => d.RaidMembership == RaidMembership.Faulty);
+    var info = new StackPanel { Spacing = 2 };
+    info.Children.Add(name);
 
-        var safeIcon = string.IsNullOrWhiteSpace(array.StateIcon)
-            ? GetStateIcon(array.State)
-            : array.StateIcon;
+    var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
 
-        var icon = LoadImage(safeIcon, 150);
-        icon.Margin = new Thickness(4);
-        icon.VerticalAlignment = VerticalAlignment.Center;
+    info.Children.Add(new TextBlock { Text = $"State: {safeState}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock { Text = $"Disks: {safeDisks.Count} ({activeCount} OK, {faultyCount} Faulty)", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock { Text = $"Size: {safeTotalSize}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock { Text = $"Path: {safePath}", FontSize = 14, Foreground = dimBrush });
+    info.Children.Add(new TextBlock { Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {safeParity}", FontSize = 14, Foreground = dimBrush });
 
-        var name = new TextBlock
+    // ============================================================
+    // 🔥 PROGRESS BAR (ACTUALIZADA)
+    // ============================================================
+    var opLabel = GetOperationLabel(array);
+
+    if (array.RebuildProgress > 0 && array.RebuildProgress <= 100)
+    {
+        var opText = new TextBlock
         {
-            Text = $"{safeName} ({safeLevel})",
-            FontSize = 22,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextBrush")!,
-            FontWeight = FontWeight.Bold,
-            Margin = new Thickness(0, 0, 0, 4)
+            Text = $"{opLabel}: {array.RebuildProgress:0.0}%" +
+                   (safeETA != "N/A" ? $" (ETA {safeETA})" : ""),
+            FontSize = 14,
+            Foreground = dimBrush,
+            Margin = new Thickness(0, 8, 0, 0)
         };
 
-        var info = new StackPanel { Spacing = 2 };
+        var barContainer = new Border
+        {
+            Background = Brushes.Gray,
+            Height = 10,
+            CornerRadius = new CornerRadius(3),
+            Margin = new Thickness(0, 2, 0, 0)
+        };
 
-        info.Children.Add(name);
+        var barFill = new Border
+        {
+            Background = Brushes.LimeGreen,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Height = 10,
+            CornerRadius = new CornerRadius(3)
+        };
 
-        var dimBrush = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!;
+        // Actualización suave y sin parpadeos
+        barContainer.AttachedToVisualTree += (_, _) =>
+        {
+            var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
+            barFill.Width = barContainer.Bounds.Width * pct;
+        };
 
+        barContainer.Child = barFill;
+
+        info.Children.Add(opText);
+        info.Children.Add(barContainer);
+        _progressBars[array.Name] = barFill;
+        _progressLabels[array.Name] = opText;
+
+    }
+    else
+    {
         info.Children.Add(new TextBlock
         {
-            Text = $"State: {safeState}",
+            Text = opLabel,
             FontSize = 14,
-            Foreground = dimBrush
+            Foreground = dimBrush,
+            Margin = new Thickness(0, 8, 0, 0)
         });
+    }
 
-        info.Children.Add(new TextBlock
+    
+    
+    
+    // ============================================================
+    // RESTO DE TU CÓDIGO (SIN CAMBIOS)
+    // ============================================================
+
+    var grid = new Grid
+    {
+        ColumnDefinitions =
         {
-            Text = $"Disks: {safeDisks.Count} ({activeCount} OK, {faultyCount} Faulty)",
-            FontSize = 14,
-            Foreground = dimBrush
-        });
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star)
+        }
+    };
 
-        info.Children.Add(new TextBlock
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
+
+    grid.Children.Add(info);
+    Grid.SetColumn(info, 1);
+
+    var overlay = new Grid
+    {
+        RowDefinitions =
         {
-            Text = $"Size: {safeTotalSize}",
-            FontSize = 14,
-            Foreground = dimBrush
-        });
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Star)
+        }
+    };
 
-        info.Children.Add(new TextBlock
+    var topRightPanel = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Spacing = 6
+    };
+
+    var chkSelect = new CheckBox
+    {
+        VerticalAlignment = VerticalAlignment.Top,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        IsChecked = _selectedArray == array
+    };
+
+    chkSelect.Checked += (_, _) =>
+    {
+        _selectedArray = array;
+        ClearOtherSelections(array);
+        BtnDeleteArray.IsEnabled = true;
+        BtnConfigArrays.IsEnabled = true;
+        BtnInitialize.IsEnabled = true;
+    };
+
+    chkSelect.Unchecked += (_, _) =>
+    {
+        if (_selectedArray == array)
+            _selectedArray = null;
+
+        BtnDeleteArray.IsEnabled = false;
+        BtnConfigArrays.IsEnabled = false;
+        BtnInitialize.IsEnabled = false;
+    };
+
+    topRightPanel.Children.Add(chkSelect);
+
+    var btnMore = new Button
+    {
+        Content = "More",
+        Classes = { "MoreButton" },
+        VerticalContentAlignment = VerticalAlignment.Center,
+        HorizontalContentAlignment = HorizontalAlignment.Center
+    };
+
+    btnMore.Click += (_, _) =>
+    {
+        _selectedArray = array;
+        ArrayMenu.PlacementTarget = btnMore;
+        ArrayMenu.Open(btnMore);
+    };
+
+    topRightPanel.Children.Add(btnMore);
+
+    overlay.Children.Add(topRightPanel);
+    Grid.SetRow(topRightPanel, 0);
+
+    overlay.Children.Add(grid);
+    Grid.SetRow(grid, 1);
+
+    var glowColor = GetArrayGlowColor(array.State);
+    var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
+
+    var glowBorder = new Border
+    {
+        Background = glowBrush,
+        CornerRadius = GlowRadius,
+        Padding = new Thickness(0),
+        Margin = CardMargin
+    };
+
+    var cardBorder = new Border
+    {
+        Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
+        CornerRadius = CardRadius,
+        Cursor = new Cursor(StandardCursorType.Hand),
+        Padding = CardPadding,
+        Child = overlay
+    };
+
+    glowBorder.Child = cardBorder;
+
+    AnimateArrayGlow(glowBorder);
+
+    cardBorder.PointerPressed += (_, _) =>
+    {
+        array.IsExpanded = !array.IsExpanded;
+
+        var parent = ListArrays;
+        var index = parent.Children.IndexOf(glowBorder);
+
+        if (array.IsExpanded)
         {
-            Text = $"Path: {safePath}",
-            FontSize = 14,
-            Foreground = dimBrush
-        });
+            NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Started");
+            StartMonitoringArray(array, cardBorder);
 
-        info.Children.Add(new TextBlock
-        {
-            Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")} Parity: {safeParity}",
-            FontSize = 14,
-            Foreground = dimBrush
-        });
-
-        var opLabel = GetOperationLabel(array);
-
-        if (array.RebuildProgress > 0 && array.RebuildProgress <= 100)
-        {
-            var opText = new TextBlock
-            {
-                Text = $"{opLabel}: {array.RebuildProgress}%" +
-                       (safeETA != "N/A" ? $" (ETA {safeETA})" : ""),
-                FontSize = 14,
-                Foreground = dimBrush,
-                Margin = new Thickness(0, 8, 0, 0)
-            };
-
-            var barContainer = new Border
-            {
-                Background = Brushes.Gray,
-                Height = 10,
-                CornerRadius = new CornerRadius(3),
-                Margin = new Thickness(0, 2, 0, 0)
-            };
-
-            var barFill = new Border
-            {
-                Background = Brushes.LimeGreen,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Width = 0,
-                Height = 10,
-                CornerRadius = new CornerRadius(3)
-            };
-
-            barContainer.LayoutUpdated += (_, _) =>
-            {
-                var width = barContainer.Bounds.Width;
-                var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
-                barFill.Width = width * pct;
-            };
-
-            barContainer.Child = barFill;
-
-            info.Children.Add(opText);
-            info.Children.Add(barContainer);
+            var expanded = BuildExpandedCard(array);
+            expanded.Tag = $"expanded:{safeName}";
+            parent.Children.Insert(index + 1, expanded);
         }
         else
         {
-            var opText = new TextBlock
+            StopMonitoringArray();
+            NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Stopped");
+
+            foreach (var child in parent.Children.ToList())
             {
-                Text = opLabel,
-                FontSize = 14,
-                Foreground = dimBrush,
-                Margin = new Thickness(0, 8, 0, 0)
-            };
-
-            info.Children.Add(opText);
-        }
-
-        var grid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Auto),
-                new ColumnDefinition(GridLength.Star)
-            }
-        };
-
-        grid.Children.Add(icon);
-        Grid.SetColumn(icon, 0);
-
-        grid.Children.Add(info);
-        Grid.SetColumn(info, 1);
-
-        var overlay = new Grid
-        {
-            RowDefinitions =
-            {
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Star)
-            }
-        };
-
-        var topRightPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Spacing = 6
-        };
-
-        var chkSelect = new CheckBox
-        {
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            IsChecked = _selectedArray == array
-        };
-
-        chkSelect.Checked += (_, _) =>
-        {
-            _selectedArray = array;
-            ClearOtherSelections(array);
-            BtnDeleteArray.IsEnabled = true;
-            BtnConfigArrays.IsEnabled = true;
-            BtnInitialize.IsEnabled = true;
-        };
-
-        chkSelect.Unchecked += (_, _) =>
-        {
-            if (_selectedArray == array)
-                _selectedArray = null;
-
-            BtnDeleteArray.IsEnabled = false;
-            BtnConfigArrays.IsEnabled = false;
-            BtnInitialize.IsEnabled = false;
-        };
-
-        topRightPanel.Children.Add(chkSelect);
-
-        var btnMore = new Button
-        {
-            Content = "More",
-            Classes = { "MoreButton" },
-            VerticalContentAlignment = VerticalAlignment.Center,
-            HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-
-        btnMore.Click += (_, _) =>
-        {
-            _selectedArray = array;
-            ArrayMenu.PlacementTarget = btnMore;
-            ArrayMenu.Open(btnMore);
-        };
-
-        topRightPanel.Children.Add(btnMore);
-
-        overlay.Children.Add(topRightPanel);
-        Grid.SetRow(topRightPanel, 0);
-
-        overlay.Children.Add(grid);
-        Grid.SetRow(grid, 1);
-
-        var glowColor = GetArrayGlowColor(array.State);
-        var glowBrush = new SolidColorBrush(glowColor) { Opacity = 0.35 };
-
-        var glowBorder = new Border
-        {
-            Background = glowBrush,
-            CornerRadius = GlowRadius,
-            Padding = new Thickness(0),
-            Margin = CardMargin
-        };
-
-        var cardBorder = new Border
-        {
-            Background = (IBrush)Application.Current!.FindResource("BMWSurfaceElevatedBrush")!,
-            CornerRadius = CardRadius,
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Padding = CardPadding,
-            Child = overlay
-        };
-
-        glowBorder.Child = cardBorder;
-
-        AnimateArrayGlow(glowBorder);
-
-        cardBorder.PointerPressed += (_, _) =>
-        {
-            array.IsExpanded = !array.IsExpanded;
-
-            var parent = ListArrays;
-            var index = parent.Children.IndexOf(glowBorder);
-
-            if (array.IsExpanded)
-            {
-                NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Started");
-                StartMonitoringArray(array, cardBorder);
-
-                var expanded = BuildExpandedCard(array);
-                expanded.Tag = $"expanded:{safeName}";
-                parent.Children.Insert(index + 1, expanded);
-            }
-            else
-            {
-                StopMonitoringArray();
-                NotificadorLinux.Enviar($"Monitorizing: {safeName}\n Stopped");
-
-                foreach (var child in parent.Children.ToList())
+                if (child is Border b &&
+                    b.Tag is string tag &&
+                    tag == $"expanded:{safeName}")
                 {
-                    if (child is Border b &&
-                        b.Tag is string tag &&
-                        tag == $"expanded:{safeName}")
-                    {
-                        parent.Children.Remove(b);
-                        break;
-                    }
+                    parent.Children.Remove(b);
+                    break;
                 }
             }
-        };
+        }
+    };
 
-        return glowBorder;
+    return glowBorder;
+}
+
+    
+    private void StartProgressAutoRefresh()
+    {
+        StopProgressAutoRefresh();
+
+        _progressCts = new CancellationTokenSource();
+
+        // Suscribirnos al evento global del estado RAID
+        RaidStateService.Instance.StateChanged += OnRaidStateChanged;
     }
+
+    private void StopProgressAutoRefresh()
+    {
+        if (_progressCts != null)
+        {
+            RaidStateService.Instance.StateChanged -= OnRaidStateChanged;
+
+            _progressCts.Cancel();
+            _progressCts.Dispose();
+            _progressCts = null;
+        }
+    }
+
+    
+
+    private bool IsArrayInOperation(RaidArrayInfo array)
+    {
+        return array.IsChecking
+               || array.IsRepairing
+               || array.IsResyncing
+               || array.IsRecovering
+               || array.State is RaidArrayState.Resync or RaidArrayState.Rebuilding;
+    }
+
+    
+    
+    private void OnRaidStateChanged()
+    {
+        // Si la vista no está adjunta al árbol visual → no actualizar
+        if (VisualRoot == null)
+            return;
+
+        var stateService = RaidStateService.Instance;
+
+        foreach (var updated in stateService.Arrays)
+        {
+            var local = _arrays.FirstOrDefault(a =>
+                a.Name.Equals(updated.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (local == null)
+                continue;
+
+            // Solo refrescar si está en operación
+            if (!IsArrayInOperation(updated))
+                continue;
+
+            // Actualizar SOLO lo necesario para la barra
+            local.RebuildProgress = updated.RebuildProgress;
+            local.RebuildETA      = updated.RebuildETA;
+            local.State           = updated.State;
+
+            // Actualizar UI (solo barra + texto)
+            Dispatcher.UIThread.Post(() =>
+            {
+                UpdateArrayCardProgress(local);
+            });
+        }
+    }
+
+
+    
 
     private void UpdateArrayCardProgress(RaidArrayInfo array)
     {
@@ -865,7 +925,7 @@ public partial class RaidView : UserControl
         var manageButton = new Button
         {
             Content = "More",
-            Width = 80,
+            
             Height = 32,
             Margin = new Thickness(10),
             HorizontalContentAlignment = HorizontalAlignment.Center,
@@ -921,36 +981,64 @@ public partial class RaidView : UserControl
     {
         var menu = new ContextMenu();
 
+        // Siempre disponible
         menu.Items.Add(new MenuItem { Header = "SMART Info", Tag = "smart" });
 
-        bool raid0_or_linear =
-            array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
-            array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
+        // RAID0 y Linear → NO permiten ninguna operación de gestión
+        if (array.IsRaid0 || array.IsLinear)
+        {
+            // Solo SMART, nada más
+            AttachMenuHandlers(menu, array, disk);
+            return menu;
+        }
 
-        if (disk.RaidMembership != RaidMembership.Faulty &&
-            disk.RaidMembership != RaidMembership.None &&
-            !raid0_or_linear)
+        // --- A partir de aquí solo RAID1/5/6/10 ---
+
+        // Mark as Faulty
+        if (array.SupportsFaultyMark &&
+            disk.RaidMembership is RaidMembership.Active or RaidMembership.Spare)
         {
             menu.Items.Add(new MenuItem { Header = "Mark as Faulty", Tag = "faulty" });
         }
 
-        if (disk.RaidMembership == RaidMembership.Active && array.SupportsRepair)
+        // Set as Spare
+        if (array.SupportsSpare &&
+            disk.RaidMembership == RaidMembership.Active)
+        {
             menu.Items.Add(new MenuItem { Header = "Set as Spare", Tag = "spare" });
+        }
 
-        if (disk.RaidMembership == RaidMembership.Spare && array.SupportsRepair)
+        // Convert Spare → Active
+        if (array.SupportsSpare &&
+            disk.RaidMembership == RaidMembership.Spare)
+        {
             menu.Items.Add(new MenuItem { Header = "Convert Spare to Active", Tag = "convert_spare" });
+        }
 
-        if (disk.RaidMembership == RaidMembership.Faulty && array.SupportsRepair)
+        // Recover Faulty
+        if (array.SupportsRecovery &&
+            disk.RaidMembership == RaidMembership.Faulty)
+        {
             menu.Items.Add(new MenuItem { Header = "Recover Faulty Disk", Tag = "recover_faulty" });
+        }
 
-        if (disk.RaidMembership != RaidMembership.None)
+        // Remove from Array
+        if (array.SupportsDiskRemoval &&
+            disk.RaidMembership != RaidMembership.None)
+        {
             menu.Items.Add(new MenuItem { Header = "Remove from Array", Tag = "remove" });
+        }
 
-        foreach (var item in menu.Items.OfType<MenuItem>())
-            item.Click += async (_, _) => await OnDiskMenuClick(array, disk, item.Tag?.ToString());
-
+        AttachMenuHandlers(menu, array, disk);
         return menu;
     }
+
+    private void AttachMenuHandlers(ContextMenu menu, RaidArrayInfo array, RaidDiskInfo disk)
+    {
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.Click += async (_, _) => await OnDiskMenuClick(array, disk, item.Tag?.ToString());
+    }
+
 
     private Border BuildStatusDot(RaidDiskInfo disk)
     {
@@ -1349,6 +1437,22 @@ public partial class RaidView : UserControl
         win.ShowDialog(GetWindow());
     }
 
+    private void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        Console.WriteLine("[RAIDVIEW] Attached → Auto-refresh iniciado");
+        StartProgressAutoRefresh();
+        
+    }
+
+    private void OnDetached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        Console.WriteLine("[RAIDVIEW] Detached → Auto-refresh detenido");
+        StopProgressAutoRefresh();
+        
+    }
+
+    
+    
     // ----------------- BOTONES Y ACCIONES RAID -----------------
 
     private async void OnAssembleArraysClicked(object? sender, RoutedEventArgs e)
@@ -1561,76 +1665,89 @@ public partial class RaidView : UserControl
     }
 
     private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
+{
+    var parent = GetWindow();
+    var service = RaidService.Instance;
+
+    var allDisks = await service.GetAllDisksAsync();
+    var nodes = RaidService.Nodes;
+
+    var freeDisks = allDisks
+        .Where(d =>
+            (d.RaidMembership == RaidMembership.None ||
+             d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase)) &&
+            !d.IsMounted &&
+            (d.Children == null || d.Children.Count == 0) &&
+            !d.IsSystemDisk)
+        .ToList();
+
+    if (freeDisks.Count == 0)
     {
-        var parent = GetWindow();
-        var service = RaidService.Instance;
+        var dlg = new InfoDialog("No disks", "No free disks available to create a RAID array.");
+        await dlg.ShowDialog(parent);
+        return;
+    }
 
-        var allDisks = await service.GetAllDisksAsync();
-        var nodes = RaidService.Nodes;
+    var dialog = new CreateArrayDialog(freeDisks);
+    var result = await dialog.ShowDialog<CreateArrayResult?>(parent);
 
-        var freeDisks = allDisks
-            .Where(d =>
-                (d.RaidMembership == RaidMembership.None ||
-                 d.Role.Equals("removed", StringComparison.OrdinalIgnoreCase)) &&
-                !d.IsMounted &&
-                (d.Children == null || d.Children.Count == 0) &&
-                !d.IsSystemDisk)
-            .ToList();
+    if (result == null)
+        return;
 
-        if (freeDisks.Count == 0)
+    var loading = new LoadingDialog("Creating RAID array...");
+    loading.Show(parent);
+
+    await Task.Delay(50);
+
+    bool ok;
+
+    try
+    {
+        if (IsFakeMode)
         {
-            await ShowInfo("No disks", "No free disks available to create a RAID array.");
-            return;
-        }
-
-        var dialog = new CreateArrayDialog(freeDisks);
-        var result = await dialog.ShowDialog<CreateArrayResult?>(parent);
-
-        if (result == null)
-            return;
-
-        var loading = new LoadingDialog("Creating RAID array...");
-        loading.Show(parent);
-
-        await Task.Delay(50);
-
-        bool ok;
-
-        try
-        {
-            if (IsFakeMode)
+            ok = await Task.Run(() =>
             {
-                ok = await Task.Run(() =>
-                {
-                    CreateFakeArray(result);
-                    return true;
-                });
-            }
-            else
-            {
-                ok = await CreateRealArray(result);
-            }
+                CreateFakeArray(result);
+                return true;
+            });
         }
-        catch (Exception ex)
+        else
         {
-            loading.Close();
-
-            NotificadorLinux.Enviar($"Error creating array:\n{ex.Message}", 6000, "critical");
-            await ShowInfo("Error", $"Failed to create RAID array:\n{ex.Message}");
-            return;
+            ok = await CreateRealArray(result);
         }
-
+    }
+    catch (Exception ex)
+    {
         loading.Close();
 
-        if (!ok)
-        {
-            NotificadorLinux.Enviar("Error creating RAID array.", 6000, "critical");
-            await ShowInfo("Error", "Failed to create RAID array.");
-            return;
-        }
+        NotificadorLinux.Enviar($"Error creating array:\n{ex.Message}", 6000, "critical");
 
-        await LoadRaidAsync(true);
+       // var dlg = new InfoDialog("Error", $"Failed to create RAID array:\n{ex.Message}");
+       // await dlg.ShowDialog(parent);
+
+        return;
     }
+
+    loading.Close();
+
+    if (!ok)
+    {
+        NotificadorLinux.Enviar("Error creating RAID array.", 6000, "critical");
+
+        var dlg = new InfoDialog("Error", "Failed to create RAID array.");
+        await dlg.ShowDialog(parent);
+
+        return;
+    }
+
+    var successDlg = new InfoDialog("Success", "RAID array created successfully.");
+    await successDlg.ShowDialog(parent);
+
+    await LoadRaidAsync(true);
+}
+
+    
+    
 
     private void CreateFakeArray(CreateArrayResult result)
     {
@@ -1676,6 +1793,7 @@ public partial class RaidView : UserControl
         };
     }
 
+    
     private async Task<bool> CreateRealArray(CreateArrayResult result)
     {
         var parent = GetWindow();
@@ -1695,48 +1813,30 @@ public partial class RaidView : UserControl
             {
                 LoadingService.Update("Error creating array.");
                 await Task.Delay(1200);
-                return false;
-            }
 
-            LoadingService.Update("Detecting new array...");
+                var dlg = new InfoDialog(
+                    "Error",
+                    "The RAID array could not be created.\n\n" +
+                    "One or more disks may still contain RAID metadata, be in use, or the kernel may not support the selected RAID level.\n\n" +
+                    "Check the logs for detailed diagnostics."
+                );
 
-            var mdName = service.LastCreatedMdName;
-
-            var ready = await Task.Run(() => service.WaitForArray(mdName));
-
-            if (!ready)
-            {
-                LoadingService.Update("Array created, but device did not appear.");
-                await Task.Delay(1200);
-
-                await ShowInfo(
-                    "Warning",
-                    $"Array created, but /dev/{mdName} did not appear in time.");
+                
+                await dlg.ShowDialog(parent);
 
                 return false;
             }
 
-            LoadingService.Update("Updating mdadm.conf...");
-
-            var persisted = await Task.Run(() => service.PersistArrayToMdadmConf());
-
-            if (!persisted)
-            {
-                LoadingService.Update("Array created, but mdadm.conf was not updated.");
-                await Task.Delay(1200);
-
-                await ShowInfo(
-                    "Warning",
-                    "Array created, but could not update mdadm.conf. Check logs.");
-            }
-
-            LoadingService.Update("Array ready.");
+            LoadingService.Update("Array created successfully.");
             await Task.Delay(600);
         }
 
         await LoadRaidAsync(true);
         return true;
     }
+
+
+    
 
     private async void OnDeleteArrayClicked(object? sender, RoutedEventArgs e)
     {
@@ -2157,61 +2257,7 @@ public partial class RaidView : UserControl
         }
     }
 
-    private async Task HandleReshape(RaidArrayInfo array)
-    {
-        if (!ArrayAllowsExpansion(array))
-        {
-            await ShowConfirm("Not allowed", "This array cannot be expanded.");
-            return;
-        }
-
-        int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
-        int spares = array.Disks.Count(d => d.RaidMembership == RaidMembership.Spare);
-        int newCount = active + spares;
-
-        bool confirm = await ShowConfirm(
-            "Expand RAID Array",
-            $"Expand array {array.Name} from {active} to {newCount} devices?\n" +
-            "This will start a RAID reshape."
-        );
-
-        if (!confirm)
-            return;
-
-        var owner = this.GetVisualRoot() as Window;
-
-        using (LoadingService.Show("Expanding RAID array...", owner))
-        {
-            await Task.Run(() =>
-            {
-                string cmd =
-                    $"mdadm --grow {array.Path} --raid-devices={newCount}";
-                ShellHelper.EjecutarComoRoot(cmd);
-            });
-        }
-
-        await ShowConfirm("Reshape started",
-            $"The array {array.Name} is now reshaping.");
-
-        await Task.Run(() =>
-        {
-            while (true)
-            {
-                var stat = File.ReadAllText("/proc/mdstat");
-                if (!stat.Contains("reshape"))
-                    break;
-
-                Thread.Sleep(2000);
-            }
-        });
-
-        string fs = DetectArrayFileSystem(array.Name);
-
-        if (!string.IsNullOrWhiteSpace(fs))
-            ResizeArrayFileSystem(array.Name, fs);
-
-        await LoadRaidAsync();
-    }
+   
 
     private string DetectArrayFileSystem(string arrayName)
     {

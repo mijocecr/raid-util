@@ -63,10 +63,14 @@ public partial class MainWindow : Window
             StatusBarText.Text = text;
     }
 
-    protected override async void OnOpened(EventArgs e)
+    // ============================================================
+    //  MAIN INITIALIZATION (CORRECTED → OnLoaded)
+    // ============================================================
+
+    protected override async void OnLoaded(RoutedEventArgs e)
     {
-        LogService.Debug("[MAIN] OnOpened ENTER");
-        base.OnOpened(e);
+        LogService.Debug("[MAIN] OnLoaded ENTER");
+        base.OnLoaded(e);
 
         LogService.Info("[MAIN] RAID-Util startup sequence initiated.");
 
@@ -138,6 +142,7 @@ public partial class MainWindow : Window
             _sudoReady = true;
             Credentials.AllowRaidCalls = true;
 
+            // ⭐ Ahora sí: la UI está cargada → StatusViewControl existe
             Dispatcher.UIThread.Post(async () =>
             {
                 await Task.Delay(50);
@@ -178,9 +183,13 @@ public partial class MainWindow : Window
 
         StatusBarText.Text = "System ready.";
 
-        LogService.Debug("[MAIN] OnOpened completed.");
+        LogService.Debug("[MAIN] OnLoaded completed.");
         StatusBarText.Text = "Ready.";
     }
+
+    // ============================================================
+    //  PASSWORD DIALOG
+    // ============================================================
 
     private async Task SolicitarPassword()
     {
@@ -190,6 +199,10 @@ public partial class MainWindow : Window
         Credentials.AdminPassword = pass ?? string.Empty;
         LogService.Debug("[MAIN] SolicitarPassword EXIT");
     }
+
+    // ============================================================
+    //  TAB CONTROL
+    // ============================================================
 
     private async void OnTabChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -237,11 +250,19 @@ public partial class MainWindow : Window
         }
     }
 
+    // ============================================================
+    //  CONFIG WINDOW
+    // ============================================================
+
     private async void OnOpenConfig(object? sender, RoutedEventArgs e)
     {
         var win = new ConfigWindow(_config);
         await win.ShowDialog(this);
     }
+
+    // ============================================================
+    //  STATUS BAR TEXT EVENTS
+    // ============================================================
 
     private void Set_Status(object? sender, PointerPressedEventArgs e)
     {
