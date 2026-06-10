@@ -41,7 +41,7 @@ RAID‑Util presents these capabilities through a structured interface that emph
 
 ### Modern Interface
 - Built with Avalonia for a consistent cross‑platform experience  
-- Clean, organized layout with dedicated tabs: **Arrays RAID**, **JBOD**, **Disks**, **Status**, **Logs**  
+- Clean, organized layout with dedicated tabs: **Status**,**Arrays RAID**, **Disks**, **Logs**  
 - Real‑time progress indicators for RAID operations  
 - Unified HDD icon theme for all disk types  
 - Designed for readability and operational safety  
