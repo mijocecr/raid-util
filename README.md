@@ -82,3 +82,83 @@ makepkg -si
 git clone https://github.com/mijocecr/raid-util.git
 cd raid-util
 dotnet run
+```
+
+---
+
+## Requirements
+
+To function correctly, RAID‑Util requires:
+
+- A Linux system with `mdadm` installed  
+- `systemd` for managing RAID‑related services  
+- `smartmontools` for SMART disk monitoring  
+- Administrative privileges for operations such as creating arrays, wiping metadata, or managing disks  
+- Access to `/etc/mdadm/mdadm.conf` or `/etc/mdadm.conf` depending on the distribution  
+
+---
+
+## Usage Overview
+
+RAID‑Util is organized into several sections, each focused on a specific aspect of RAID and disk management:
+
+- **Status** — Review system‑level information, RAID service state, and overall health.
+- **Arrays RAID** — Create, assemble, stop, delete, and repair RAID arrays.  
+- **Disks** — Inspect disks, view SMART data, wipe RAID metadata, mount/unmount partitions, and safely eject USB devices.    
+- **Logs** — Inspect relevant system messages and RAID events in real time.
+
+Each section is designed with clear labels, structured layouts, and informative messages to guide the user through safe and predictable workflows.
+
+---
+
+## Project Structure
+
+The application follows a modular architecture that separates interface, logic, and data handling:
+
+- **Models** — Represent arrays, disks, RAID states, SMART data, and configuration details.  
+- **Helpers** — Execute system commands, interact with `mdadm`, and handle privileged operations.  
+- **Utils** — Manage file operations, JSON persistence, path resolution, and command validation.  
+- **Views** — Provide the graphical interface for each functional area.  
+
+
+This structure ensures maintainability, clarity, and predictable growth as the project evolves.
+
+---
+
+## Roadmap
+
+Future improvements may include:
+
+- Enhanced real‑time monitoring and background event tracking  
+- Advanced visualization of RAID rebuild and reshape progress  
+- Additional tools for disk benchmarking and performance analysis  
+- Integration with other system administration utilities  
+- Optional notifications for degraded or recovering arrays  
+
+---
+
+## Contributing
+
+Contributions, suggestions, and issue reports are welcome.  
+Please use the GitHub issue tracker or submit a pull request to participate in the project’s development.
+
+---
+
+## License
+
+RAID‑Util is distributed under the **MIT License**, allowing free use, modification, and distribution.
+
+---
+
+## Project Status
+
+RAID‑Util is stable, safe, and suitable for production use in home servers, homelabs, and small office environments.  
+It focuses on reliability and does not modify any RAID configuration outside the user’s explicit actions.
+
+---
+
+
+
+---
+
+
