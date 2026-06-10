@@ -54,6 +54,25 @@ Pre‑built packages and AppImage builds are available on the project’s GitHub
 
 **https://github.com/mijocecr/raid-util/releases**
 
+AUR (Arch Linux / Manjaro / EndeavourOS)
+RAID‑Util is available in the Arch User Repository.
+
+Install with yay:
+```bash
+yay -S raid-util-bin
+```
+Install with paru:
+```bash
+paru -S raid-util-bin
+```
+Manual AUR clone:
+
+```bash
+git clone https://aur.archlinux.org/raid-util-bin.git
+cd raid-util-bin
+makepkg -si
+```
+
 ---
 
 ## Running RAID‑Util
