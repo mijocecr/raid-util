@@ -29,7 +29,6 @@ RAID‑Util presents these capabilities through a structured interface that emph
 - View all disks grouped by array  
 - Initialize, wipe, or clean RAID metadata  
 - View SMART data (temperature, health, attributes)  
-- Mount/unmount partitions  
 - Detect system disks and protect them from destructive actions  
 
 ### System Integration
