@@ -111,32 +111,6 @@ Each section is designed with clear labels, structured layouts, and informative 
 
 ---
 
-## Project Structure
-
-The application follows a modular architecture that separates interface, logic, and data handling:
-
-- **Models** — Represent arrays, disks, RAID states, SMART data, and configuration details.  
-- **Helpers** — Execute system commands, interact with `mdadm`, and handle privileged operations.  
-- **Utils** — Manage file operations, JSON persistence, path resolution, and command validation.  
-- **Views** — Provide the graphical interface for each functional area.  
-
-
-This structure ensures maintainability, clarity, and predictable growth as the project evolves.
-
----
-
-## Roadmap
-
-Future improvements may include:
-
-- Enhanced real‑time monitoring and background event tracking  
-- Advanced visualization of RAID rebuild and reshape progress  
-- Additional tools for disk benchmarking and performance analysis  
-- Integration with other system administration utilities  
-- Optional notifications for degraded or recovering arrays  
-
----
-
 ## Contributing
 
 Contributions, suggestions, and issue reports are welcome.  
