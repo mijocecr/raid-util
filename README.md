@@ -131,7 +131,7 @@ It focuses on reliability and does not modify any RAID configuration outside the
 
 ---
 
-
+<img width="1536" height="1024" alt="raid-util-poster" src="https://github.com/user-attachments/assets/d7b84f4c-3b78-43f4-9d83-57ffc7e6b880" />
 
 ---
 
