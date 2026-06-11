@@ -1,5 +1,7 @@
 # RAID‑Util
 
+RAID -> (Redundant Array of Independent Disks)
+
 RAID‑Util is a graphical application designed to simplify the management, monitoring, and maintenance of Linux software RAID arrays (`mdadm`).  
 It provides a clean, modern interface that allows administrators to work with RAID arrays, JBOD groups, and individual disks without relying on complex terminal commands.
 
