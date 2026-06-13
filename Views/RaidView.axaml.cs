@@ -301,7 +301,7 @@ public partial class RaidView : UserControl
     info.Children.Add(new TextBlock { Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {safeParity}", FontSize = 14, Foreground = dimBrush });
 
     // ============================================================
-    // 🔥 PROGRESS BAR (ACTUALIZADA)
+    // 🔥 PROGRESS BAR
     // ============================================================
     var opLabel = GetOperationLabel(array);
 
@@ -332,7 +332,6 @@ public partial class RaidView : UserControl
             CornerRadius = new CornerRadius(3)
         };
 
-        // Actualización suave y sin parpadeos
         barContainer.AttachedToVisualTree += (_, _) =>
         {
             var pct = Math.Clamp(array.RebuildProgress, 0, 100) / 100.0;
@@ -343,9 +342,9 @@ public partial class RaidView : UserControl
 
         info.Children.Add(opText);
         info.Children.Add(barContainer);
-        _progressBars[array.Name] = barFill;
-        _progressLabels[array.Name] = opText;
 
+        _progressBars[safeName] = barFill;
+        _progressLabels[safeName] = opText;
     }
     else
     {
@@ -358,44 +357,9 @@ public partial class RaidView : UserControl
         });
     }
 
-    
-    
-    
     // ============================================================
-    // RESTO DE TU CÓDIGO (SIN CAMBIOS)
+    // 🔥 CONTROLES SUPERIORES (CheckBox + More)
     // ============================================================
-
-    var grid = new Grid
-    {
-        ColumnDefinitions =
-        {
-            new ColumnDefinition(GridLength.Auto),
-            new ColumnDefinition(GridLength.Star)
-        }
-    };
-
-    grid.Children.Add(icon);
-    Grid.SetColumn(icon, 0);
-
-    grid.Children.Add(info);
-    Grid.SetColumn(info, 1);
-
-    var overlay = new Grid
-    {
-        RowDefinitions =
-        {
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(GridLength.Star)
-        }
-    };
-
-    var topRightPanel = new StackPanel
-    {
-        Orientation = Orientation.Horizontal,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        VerticalAlignment = VerticalAlignment.Top,
-        Spacing = 6
-    };
 
     var chkSelect = new CheckBox
     {
@@ -423,8 +387,6 @@ public partial class RaidView : UserControl
         BtnInitialize.IsEnabled = false;
     };
 
-    topRightPanel.Children.Add(chkSelect);
-
     var btnMore = new Button
     {
         Content = "More",
@@ -440,7 +402,68 @@ public partial class RaidView : UserControl
         ArrayMenu.Open(btnMore);
     };
 
+    // ============================================================
+    //  BOTÓN ADOPT RAID ARRAY (solo md127 sin persistencia)
+    // ============================================================
+    if (safeName == "md127" && array.PersistMount == false)
+    {
+        // Deshabilitar CheckBox y More
+        chkSelect.IsEnabled = false;
+        btnMore.IsEnabled = false;
+
+        var adoptButton = new Button
+        {
+            Content = "Adopt Raid Array",
+            Margin = new Thickness(0, 10, 0, 0),
+            Classes = { "ActionButton" }
+        };
+
+        adoptButton.Click += (_, _) =>
+        {
+            OnAdoptRequested(array);
+        };
+
+        info.Children.Add(adoptButton);
+    }
+
+    // ============================================================
+    // RESTO DE TU CÓDIGO (SIN CAMBIOS)
+    // ============================================================
+
+    var topRightPanel = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Spacing = 6
+    };
+
+    topRightPanel.Children.Add(chkSelect);
     topRightPanel.Children.Add(btnMore);
+
+    var grid = new Grid
+    {
+        ColumnDefinitions =
+        {
+            new ColumnDefinition(GridLength.Auto),
+            new ColumnDefinition(GridLength.Star)
+        }
+    };
+
+    grid.Children.Add(icon);
+    Grid.SetColumn(icon, 0);
+
+    grid.Children.Add(info);
+    Grid.SetColumn(info, 1);
+
+    var overlay = new Grid
+    {
+        RowDefinitions =
+        {
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Star)
+        }
+    };
 
     overlay.Children.Add(topRightPanel);
     Grid.SetRow(topRightPanel, 0);
@@ -508,6 +531,48 @@ public partial class RaidView : UserControl
 
     return glowBorder;
 }
+
+    private async void OnAdoptRequested(RaidArrayInfo array)
+    {
+        try
+        {
+            var service = RaidService.Instance;
+
+            string newName = service.GetNextFreeMdName();
+
+            var devices = array.Disks
+                .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+                .Select(d => "/dev/" + d.Name)
+                .ToList();
+
+            if (devices.Count == 0)
+            {
+                NotificadorLinux.Enviar("No valid devices found for adoption.");
+                return;
+            }
+
+            bool ok = await service.AdoptArrayAsync(
+                currentName: array.Name,
+                newName: newName,
+                devices: devices
+            );
+
+            if (ok)
+            {
+                NotificadorLinux.Enviar($"Array adopted as {newName}");
+                await LoadRaidAsync();
+            }
+            else
+            {
+                NotificadorLinux.Enviar("Adoption failed. Array is not in a safe state.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificadorLinux.Enviar($"Error adopting array: {ex.Message}");
+        }
+    }
+
 
     
     private void StartProgressAutoRefresh()
@@ -1796,44 +1861,34 @@ public partial class RaidView : UserControl
     
     private async Task<bool> CreateRealArray(CreateArrayResult result)
     {
-        var parent = GetWindow();
         var service = RaidService.Instance;
 
-        using (LoadingService.Show("Creating RAID array...", parent))
+        try
         {
-            await Task.Delay(50);
-
-            LoadingService.Update("Executing mdadm...");
-
+            // Ejecutar mdadm en segundo plano
             var ok = await Task.Run(() =>
                 service.CreateArray(result.Level, result.Disks, result.FriendlyName)
             );
 
             if (!ok)
             {
-                LoadingService.Update("Error creating array.");
-                await Task.Delay(1200);
-
-                var dlg = new InfoDialog(
-                    "Error",
-                    "The RAID array could not be created.\n\n" +
-                    "One or more disks may still contain RAID metadata, be in use, or the kernel may not support the selected RAID level.\n\n" +
-                    "Check the logs for detailed diagnostics."
-                );
-
-                
-                await dlg.ShowDialog(parent);
-
+                Console.WriteLine("[REAL] ERROR: mdadm no pudo crear el array.");
                 return false;
             }
 
-            LoadingService.Update("Array created successfully.");
-            await Task.Delay(600);
-        }
+            Console.WriteLine("[REAL] Array creado correctamente. Cargando RAID...");
+            await LoadRaidAsync(true);
 
-        await LoadRaidAsync(true);
-        return true;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[REAL] EXCEPCIÓN al crear array:");
+            Console.WriteLine(ex.ToString());
+            return false;
+        }
     }
+
 
 
     

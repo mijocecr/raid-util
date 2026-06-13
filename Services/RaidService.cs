@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -302,11 +303,11 @@ public class RaidService
     // ============================================================
     
 
+
 public async Task<List<RaidArrayInfo>> GetArraysAsync()
 {
     var arrays = new List<RaidArrayInfo>();
 
-    // ⭐ Blindaje: no ejecutar nada de RAID si aún no se ha validado sudo
     if (!Credentials.AllowRaidCalls)
     {
         LogService.Debug("[RAID] GetArraysAsync blocked → AllowRaidCalls = false");
@@ -318,19 +319,14 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
     string mdadmPath = string.Empty;
 
     // ============================================================
-    // 1) UNIVERSAL: which mdadm SIN ROOT (evita bloqueo)
+    // 1) Localizar mdadm
     // ============================================================
-    LogService.Debug("[RAID] Buscando mdadm con 'which mdadm' (EjecutarSinRoot)...");
     var which = ShellHelper.EjecutarSinRoot("which mdadm");
-    LogService.Debug($"[RAID] which mdadm → exit={which.ExitCode}, stdout='{which.Stdout.Trim()}', stderr='{which.Stderr.Trim()}'");
-
     if (which.ExitCode == 0 && !string.IsNullOrWhiteSpace(which.Stdout))
         mdadmPath = which.Stdout.Trim();
 
-    // 🔹 2) Intento 2: rutas conocidas
     if (string.IsNullOrWhiteSpace(mdadmPath))
     {
-        LogService.Debug("[RAID] which mdadm no devolvió ruta, probando rutas conocidas...");
         if (File.Exists("/usr/sbin/mdadm"))
             mdadmPath = "/usr/sbin/mdadm";
         else if (File.Exists("/sbin/mdadm"))
@@ -339,203 +335,181 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
     if (string.IsNullOrWhiteSpace(mdadmPath))
     {
-        LogService.Error("[RAID] mdadm no encontrado. Abortando GetArraysAsync.");
+        LogService.Error("[RAID] mdadm no encontrado.");
         return arrays;
     }
 
-    LogService.Debug($"[RAID] mdadm encontrado en: {mdadmPath}");
-
     // ============================================================
-    // 2) ESCANEO mdadm --detail --scan
+    // 2) mdadm --detail --scan (incluye arrays detenidos)
     // ============================================================
-    LogService.Debug("[RAID] Ejecutando mdadm --detail --scan...");
     var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot($"{mdadmPath} --detail --scan");
     var scan = (stdout + "\n" + stderr).Trim();
 
-    LogService.Debug($"[RAID] mdadm --detail --scan exit={exit}");
-    LogService.Debug("[RAID] mdadm --detail --scan OUTPUT:");
-    LogService.Debug(scan);
-
-    if (!string.IsNullOrWhiteSpace(scan))
+    foreach (var raw in scan.Split('\n'))
     {
-        foreach (var raw in scan.Split('\n'))
+        var line = raw.Trim();
+        if (!line.StartsWith("ARRAY"))
+            continue;
+
+        var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2)
+            continue;
+
+        var arrayPathOriginal = tokens[1];
+        var arrayPath = NormalizeDev(arrayPathOriginal);
+        var rawName = Path.GetFileName(arrayPath);
+        var arrayName = rawName.Contains(':') ? rawName.Split(':').Last() : rawName;
+
+        // ============================================================
+        // 3) Intentar obtener detalle real
+        // ============================================================
+        var detail = await RunMdadmAsync($"--detail {arrayPath}");
+
+        // 🔥 Si el array está detenido → reconstruir desde metadata
+        if (detail.Contains("No such file") ||
+            detail.Contains("cannot open") ||
+            detail.Contains("not enough devices"))
         {
-            var line = raw.Trim();
-            if (!line.StartsWith("ARRAY"))
-                continue;
+            LogService.Info($"[RAID] Array detenido detectado: {arrayPath}");
 
-            var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (tokens.Length < 2)
-                continue;
-
-            var arrayPathOriginal = tokens[1];
-            LogService.Debug($"[RAID] ARRAY line → path original='{arrayPathOriginal}'");
-
-            // ⭐ Normalización universal
-            var arrayPath = NormalizeDev(arrayPathOriginal);
-            LogService.Debug($"[RAID] ARRAY path normalizado='{arrayPath}'");
-
-            var rawName = Path.GetFileName(arrayPath);
-            var arrayName = rawName.Contains(':')
-                ? rawName.Split(':').Last()
-                : rawName;
-
-            // ============================================================
-            // 3) DETALLE DEL ARRAY
-            // ============================================================
-            LogService.Debug($"[RAID] Ejecutando mdadm --detail {arrayPath}...");
-            var detail = await RunMdadmAsync($"--detail {arrayPath}");
-
-            if (string.IsNullOrWhiteSpace(detail) ||
-                detail.Contains("No such file") ||
-                detail.Contains("cannot open") ||
-                detail.Contains("not enough devices"))
+            var uuidToken = tokens.FirstOrDefault(t => t.StartsWith("UUID="));
+            if (uuidToken != null)
             {
-                LogService.Error($"[RAID] Ignorando array inválido: {arrayPath}");
-                continue;
+                var uuid = uuidToken.Replace("UUID=", "");
+                var devices = DetectDevicesByUuid(uuid);
+
+                if (devices.Count > 0)
+                {
+                    LogService.Info($"[RAID] Reconstruyendo detalle desde metadata: {string.Join(", ", devices)}");
+                    detail = BuildSyntheticDetail(arrayPath, devices);
+                }
             }
+        }
 
-            var state = ParseArrayStateEnum(detail);
-            var level = ParseLevel(detail);
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            LogService.Error($"[RAID] Ignorando array inválido: {arrayPath}");
+            continue;
+        }
 
-            if (state == RaidArrayState.Failed)
-            {
-                LogService.Debug($"[RAID] Ignorando array FAILED: {arrayName}");
+        var state = ParseArrayStateEnum(detail);
+        var level = ParseLevel(detail);
+
+        if (state == RaidArrayState.Failed)
+            continue;
+
+        var info = new RaidArrayInfo
+        {
+            Name = arrayName,
+            Path = arrayPath,
+            Level = level,
+            State = state,
+            StateIcon = GetStateIcon(state),
+            Disks = new List<RaidDiskInfo>(),
+            TotalSize = ParseTotalSize(detail),
+            UsableSize = ParseTotalSize(detail),
+            ParitySize = "N/A",
+            AverageTemp = 0,
+            DiskSummary = "0× Disk",
+            Uptime = ParseUptime(detail),
+            RebuildProgress = ParseRebuildProgress(detail),
+            RebuildETA = ParseRebuildEta(detail)
+        };
+
+        // ============================================================
+        // 4) Parsear discos
+        // ============================================================
+        var lines = detail.Split('\n')
+                          .Where(l => Regex.IsMatch(l, @"(active|faulty|spare|removed|rebuild|sync|recover|inactive)"))
+                          .ToList();
+
+        var processed = new HashSet<string>();
+
+        foreach (var l in lines)
+        {
+            var m = Regex.Match(l, @"\/dev\/(sd[a-z]\d*|nvme\d+n\d+p\d+)");
+            if (!m.Success)
                 continue;
-            }
 
-            var info = new RaidArrayInfo
-            {
-                Name = arrayName,
-                Path = arrayPath,
-                Level = level,
-                State = state,
-                StateIcon = GetStateIcon(state),
-                Disks = new List<RaidDiskInfo>(),
-
-                TotalSize = ParseTotalSize(detail),
-                UsableSize = ParseTotalSize(detail),
-                ParitySize = "N/A",
-                AverageTemp = 0,
-                DiskSummary = "0× Disk",
-                Uptime = ParseUptime(detail),
-                RebuildProgress = ParseRebuildProgress(detail),
-                RebuildETA = ParseRebuildEta(detail)
-            };
-
-            var lines = detail.Split('\n')
-                              .Where(l => Regex.IsMatch(l, @"(active|faulty|spare|removed|rebuild|sync|recover|inactive)"))
-                              .ToList();
-
-            var processed = new HashSet<string>();
-
-            foreach (var l in lines)
-            {
-                var m = Regex.Match(l, @"\/dev\/(sd[a-z]\d*|nvme\d+n\d+p\d+)");
-                if (!m.Success)
-                    continue;
-
-                var devName = m.Groups[1].Value;
-
-                if (processed.Contains(devName))
-                    continue;
-
-                processed.Add(devName);
-
-                var diskInfo = await GetDiskInfo(devName);
-
-                if (l.Contains("faulty"))
-                    diskInfo.Role = "faulty";
-                else if (l.Contains("spare"))
-                    diskInfo.Role = "spare";
-                else if (l.Contains("active"))
-                    diskInfo.Role = "active";
-                else if (l.Contains("removed"))
-                    diskInfo.Role = "removed";
-                else if (l.Contains("rebuild"))
-                    diskInfo.Role = "rebuilding";
-                else if (l.Contains("sync"))
-                    diskInfo.Role = "syncing";
-                else if (l.Contains("recover"))
-                    diskInfo.Role = "recovering";
-                else if (l.Contains("inactive"))
-                    diskInfo.Role = "inactive";
-                else
-                    diskInfo.Role = "unknown";
-
-                diskInfo.RaidMembership = ParseMembershipFromRole(diskInfo.Role);
-
-                if (diskInfo.RaidMembership == RaidMembership.None &&
-                    diskInfo.Role == "removed")
-                    continue;
-
-                diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
-                diskInfo.ArrayName = arrayName;
-
-                info.Disks.Add(diskInfo);
-            }
-
-            if (info.Disks.Count == 0)
-            {
-                LogService.Debug($"[RAID] Ignorando array sin discos: {info.Name}");
+            var devName = m.Groups[1].Value;
+            if (processed.Contains(devName))
                 continue;
-            }
 
-            if (info.TotalSize == "Unknown" ||
-                info.TotalSize == "0" ||
-                info.TotalSize == "0B")
-            {
-                LogService.Debug($"[RAID] Ignorando array con tamaño inválido: {info.Name}");
+            processed.Add(devName);
+
+            var diskInfo = await GetDiskInfo(devName);
+
+            if (l.Contains("faulty")) diskInfo.Role = "faulty";
+            else if (l.Contains("spare")) diskInfo.Role = "spare";
+            else if (l.Contains("active")) diskInfo.Role = "active";
+            else if (l.Contains("removed")) diskInfo.Role = "removed";
+            else if (l.Contains("rebuild")) diskInfo.Role = "rebuilding";
+            else if (l.Contains("sync")) diskInfo.Role = "syncing";
+            else if (l.Contains("recover")) diskInfo.Role = "recovering";
+            else if (l.Contains("inactive")) diskInfo.Role = "inactive";
+            else diskInfo.Role = "unknown";
+
+            diskInfo.RaidMembership = ParseMembershipFromRole(diskInfo.Role);
+            diskInfo.State = ParseDiskStateFromRole(diskInfo.Role);
+            diskInfo.ArrayName = arrayName;
+
+            if (diskInfo.RaidMembership == RaidMembership.None &&
+                diskInfo.Role == "removed")
                 continue;
-            }
 
-            info.DiskSummary = $"{info.Disks.Count}× Disk";
+            info.Disks.Add(diskInfo);
+        }
+
+        if (info.Disks.Count == 0)
+            continue;
+
+        info.DiskSummary = $"{info.Disks.Count}× Disk";
+
+        // ============================================================
+        // 5) Montaje
+        // ============================================================
+        try
+        {
+            var lsblk = await ShellHelper.RunCleanAsync($"lsblk -J {arrayPath}");
+            dynamic blk = JsonConvert.DeserializeObject(lsblk)!;
+
+            var mount = "";
 
             try
             {
-                var lsblk = await ShellHelper.RunCleanAsync($"lsblk -J {arrayPath}");
-                dynamic blk = JsonConvert.DeserializeObject(lsblk)!;
-
-                var mount = "";
-
-                try
+                if (blk.blockdevices[0].mountpoints != null)
                 {
-                    if (blk.blockdevices[0].mountpoints != null)
-                    {
-                        var mps = blk.blockdevices[0].mountpoints;
-                        if (mps.Count > 0)
-                            mount = mps[0] ?? "";
-                    }
-                    else
-                    {
-                        mount = blk.blockdevices[0].mountpoint ?? "";
-                    }
+                    var mps = blk.blockdevices[0].mountpoints;
+                    if (mps.Count > 0)
+                        mount = mps[0] ?? "";
                 }
-                catch
+                else
                 {
-                    mount = "";
+                    mount = blk.blockdevices[0].mountpoint ?? "";
                 }
-
-                info.MountPath = mount;
-                info.IsMounted = !string.IsNullOrWhiteSpace(mount);
             }
             catch
             {
-                info.MountPath = "";
-                info.IsMounted = false;
+                mount = "";
             }
 
-            arrays.Add(info);
+            info.MountPath = mount;
+            info.IsMounted = !string.IsNullOrWhiteSpace(mount);
         }
+        catch
+        {
+            info.MountPath = "";
+            info.IsMounted = false;
+        }
+
+        arrays.Add(info);
     }
 
     // ============================================================
-    // Fallback /proc/mdstat
+    // 6) Fallback /proc/mdstat
     // ============================================================
     if (!arrays.Any(a => a.Disks.Count > 0) && File.Exists("/proc/mdstat"))
     {
-        LogService.Debug("[RAID] Fallback: detectando desde /proc/mdstat");
-
         var md = File.ReadAllText("/proc/mdstat");
         arrays.Clear();
 
@@ -552,10 +526,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             var arrayName = mArray.Groups[1].Value;
 
             if (line.Contains("inactive") || line.Contains("0 blocks"))
-            {
-                LogService.Debug($"[RAID] Ignorando array fantasma en /proc/mdstat: {arrayName}");
                 continue;
-            }
 
             var diskMatches = Regex.Matches(line, @"(sd[a-z]\d*|nvme\d+n\d+p\d+)");
             var disks = new List<RaidDiskInfo>();
@@ -574,10 +545,7 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
             }
 
             if (disks.Count == 0)
-            {
-                LogService.Debug($"[RAID] Ignorando array sin discos en fallback: {arrayName}");
                 continue;
-            }
 
             arrays.Add(new RaidArrayInfo
             {
@@ -607,6 +575,24 @@ public async Task<List<RaidArrayInfo>> GetArraysAsync()
 
 
 
+private string BuildSyntheticDetail(string arrayPath, List<string> devices)
+{
+    var sb = new StringBuilder();
+
+    sb.AppendLine($"Array : {arrayPath}");
+    sb.AppendLine("State : inactive");
+    sb.AppendLine("Raid Level : raid0");
+    sb.AppendLine($"Devices : {devices.Count}");
+
+    int idx = 0;
+    foreach (var dev in devices)
+    {
+        sb.AppendLine($"   {dev} : active device {idx}");
+        idx++;
+    }
+
+    return sb.ToString();
+}
 
 
     
@@ -716,48 +702,102 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 
 
 
-    
-
-public bool AutoAssemble()
+public async Task<bool> AutoAssemble()
 {
-    Console.WriteLine("[RAID] Ejecutando AutoAssemble()");
+    Console.WriteLine("========== AUTOASSEMBLE START ==========");
 
     try
     {
-        // 1) Asegurar que mdadm no está ocupado
-        var idle = WaitForMdadmIdleAsync().Result;
-        if (!idle)
+        // 1) Examinar todos los discos y particiones
+        var candidates = Directory.GetFiles("/dev")
+            .Where(f => Regex.IsMatch(f, @"^/dev/sd[a-z]\d*$"))
+            .ToList();
+
+        Console.WriteLine("[AA] Discos/particiones detectados:");
+        foreach (var c in candidates)
+            Console.WriteLine("   " + c);
+
+        // 2) Leer metadata y agrupar por UUID
+        var groups = new Dictionary<string, List<string>>();
+
+        foreach (var dev in candidates)
         {
-            Console.WriteLine("[RAID] AutoAssemble ABORTED: mdadm está ocupado.");
-            return false;
+            var ex = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --examine {dev}");
+            if (ex.ExitCode != 0)
+                continue;
+
+            var mUuid = Regex.Match(ex.Stdout, @"Array UUID\s*:\s*([0-9a-fA-F:]+)");
+            if (!mUuid.Success)
+                continue;
+
+            string uuid = mUuid.Groups[1].Value;
+
+            Console.WriteLine($"[AA] {dev} → UUID={uuid}");
+
+            if (!groups.ContainsKey(uuid))
+                groups[uuid] = new List<string>();
+
+            groups[uuid].Add(dev);
         }
 
-        // 2) Ejecutar assemble universal (ruta absoluta obligatoria)
-        var result = ShellHelper.EjecutarComoRoot("/usr/sbin/mdadm --assemble --scan");
-
-        Console.WriteLine($"[RAID] AutoAssemble EXIT={result.ExitCode}");
-        Console.WriteLine($"[RAID] AutoAssemble STDOUT:\n{result.Stdout}");
-        Console.WriteLine($"[RAID] AutoAssemble STDERR:\n{result.Stderr}");
-
-        // 3) Si falla, registrar error claro
-        if (result.ExitCode != 0)
+        // 3) Ensamblar cada grupo usando GetNextFreeMdName()
+        foreach (var kv in groups)
         {
-            Console.WriteLine("[RAID] AutoAssemble FAILED: mdadm no pudo ensamblar los arrays.");
-            return false;
+            string uuid = kv.Key;
+            var devs = kv.Value;
+
+            Console.WriteLine($"[AA] Intentando ensamblar UUID={uuid}");
+            Console.WriteLine($"[AA] Discos: {string.Join(", ", devs)}");
+
+            // Obtener nombre libre: md0, md1, md2...
+            string mdName = GetNextFreeMdName();   // ⭐ TU FUNCIÓN OFICIAL
+            string mdPath = "/dev/" + mdName;
+
+            Console.WriteLine($"[AA] Nombre asignado por GetNextFreeMdName(): {mdName}");
+
+            var cmd = $"/usr/sbin/mdadm --assemble {mdPath} {string.Join(" ", devs)}";
+            Console.WriteLine("[AA] CMD: " + cmd);
+
+            var result = ShellHelper.EjecutarComoRoot(cmd);
+
+            Console.WriteLine("[AA] EXIT=" + result.ExitCode);
+            Console.WriteLine("[AA] STDOUT:\n" + result.Stdout);
+            Console.WriteLine("[AA] STDERR:\n" + result.Stderr);
         }
 
-        // 4) Esperar a que udev termine
         ShellHelper.EjecutarComoRoot("udevadm settle || true");
 
+        Console.WriteLine("========== AUTOASSEMBLE END ==========");
         return true;
     }
     catch (Exception ex)
     {
-        Console.WriteLine("[RAID] AutoAssemble EXCEPTION:");
+        Console.WriteLine("========== AUTOASSEMBLE EXCEPTION ==========");
         Console.WriteLine(ex.ToString());
         return false;
     }
 }
+
+
+
+
+   
+
+    private List<string> DetectDevicesByUuid(string uuid)
+    {
+        var list = new List<string>();
+
+        foreach (var dev in Directory.GetFiles("/dev").Where(f => f.StartsWith("/dev/sd")))
+        {
+            var ex = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --examine {dev}");
+            if (ex.Stdout.Contains(uuid))
+                list.Add(dev);
+        }
+
+        return list;
+    }
+
+
 
 
    public async Task<bool> InitializeArrayAsync(string arrayName, string fsType, string label)
@@ -2332,66 +2372,181 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     }
 }
 
-    
-    
     public async Task<bool> EnsureArraySafeForModification(string arrayName, bool allowFstab = false)
+{
+    string devPath;
+
+    // Resolver ruta real
+    if (arrayName.StartsWith("/dev/"))
     {
-        string devPath;
+        devPath = arrayName;
+    }
+    else
+    {
+        var arrays = await GetArraysAsync();
+        var array = arrays.FirstOrDefault(a =>
+            a.Name == arrayName ||
+            a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
+            a.Path.EndsWith(arrayName, StringComparison.Ordinal));
 
-        if (arrayName.StartsWith("/dev/"))
-        {
-            devPath = arrayName;
-        }
-        else
-        {
-            var arrays = await GetArraysAsync();
-            var array = arrays.FirstOrDefault(a =>
-                a.Name == arrayName ||
-                a.Path.EndsWith("/" + arrayName, StringComparison.Ordinal) ||
-                a.Path.EndsWith(arrayName, StringComparison.Ordinal));
+        devPath = array != null ? array.Path : $"/dev/{arrayName}";
+    }
 
-            devPath = array != null ? array.Path : $"/dev/{arrayName}";
-        }
-
-        // Check if device is mounted
-        var mounts = await ShellHelper.RunCleanAsync(
-            $"grep -E '^{devPath}\\b' /proc/mounts || true");
-
-        if (!string.IsNullOrWhiteSpace(mounts))
-        {
-            NotificadorLinux.Enviar(
-                $"{devPath} is mounted. You must unmount it before modifying the array.",
-                7000, "critical");
-            return false;
-        }
-
-        // Also check UUID in fstab
-        var uuidResult = ShellHelper.RunCleanAsync($"blkid -s UUID -o value {devPath}");
-        var uuid = (await uuidResult)?.Trim() ?? "";
-
-        string fstab = "";
-        if (!allowFstab)
-        {
-            fstab = await ShellHelper.RunCleanAsync(
-                $"grep -E '^{devPath}\\b' /etc/fstab || true");
-
-            if (string.IsNullOrWhiteSpace(fstab) && !string.IsNullOrWhiteSpace(uuid))
-            {
-                fstab = await ShellHelper.RunCleanAsync(
-                    $"grep -E '^UUID={uuid}\\b' /etc/fstab || true");
-            }
-        }
-
-        if (!allowFstab && !string.IsNullOrWhiteSpace(fstab))
-        {
-            NotificadorLinux.Enviar(
-                $"{devPath} (or its UUID) is listed in /etc/fstab. It must be removed before modifying the array.",
-                7000, "critical");
-            return false;
-        }
-
+    // ⭐ Si el array NO existe como dispositivo → está detenido → es SEGURO adoptarlo
+    if (!File.Exists(devPath))
+    {
+        Console.WriteLine($"[SAFE] {devPath} no existe → array detenido → permitido.");
         return true;
     }
+
+    // 1) Comprobar si está montado
+    var mounts = await ShellHelper.RunCleanAsync(
+        $"grep -E '^{devPath}\\b' /proc/mounts || true");
+
+    if (!string.IsNullOrWhiteSpace(mounts))
+    {
+        NotificadorLinux.Enviar(
+            $"{devPath} is mounted. You must unmount it before modifying the array.",
+            7000, "critical");
+        return false;
+    }
+
+    // 2) Comprobar UUID en fstab
+    var uuidResult = ShellHelper.RunCleanAsync($"blkid -s UUID -o value {devPath}");
+    var uuid = (await uuidResult)?.Trim() ?? "";
+
+    string fstab = "";
+    if (!allowFstab)
+    {
+        fstab = await ShellHelper.RunCleanAsync(
+            $"grep -E '^{devPath}\\b' /etc/fstab || true");
+
+        if (string.IsNullOrWhiteSpace(fstab) && !string.IsNullOrWhiteSpace(uuid))
+        {
+            fstab = await ShellHelper.RunCleanAsync(
+                $"grep -E '^UUID={uuid}\\b' /etc/fstab || true");
+        }
+    }
+
+    if (!allowFstab && !string.IsNullOrWhiteSpace(fstab))
+    {
+        NotificadorLinux.Enviar(
+            $"{devPath} (or its UUID) is listed in /etc/fstab. It must be removed before modifying the array.",
+            7000, "critical");
+        return false;
+    }
+
+    return true;
+}
+
+    
+    public async Task<bool> AdoptArrayAsync(string currentName, string newName, List<string> devices)
+{
+    return await Task.Run(() =>
+    {
+        try
+        {
+            Console.Clear();
+            Console.WriteLine("========== ADOPT ARRAY START ==========");
+            Console.WriteLine($"[ADOPT] currentName = {currentName}");
+            Console.WriteLine($"[ADOPT] requested newName = {newName}");
+            Console.WriteLine($"[ADOPT] devices = {string.Join(", ", devices)}");
+
+            // 1) Obtener detalle del array actual
+            string detailCmd = $"mdadm --detail /dev/{currentName}";
+            Console.WriteLine($"[ADOPT] Ejecutando: {detailCmd}");
+
+            var detail = ShellHelper.EjecutarComoRoot(detailCmd);
+
+            Console.WriteLine($"[ADOPT] detail EXIT={detail.ExitCode}");
+            Console.WriteLine($"[ADOPT] detail STDOUT:\n{detail.Stdout}");
+            Console.WriteLine($"[ADOPT] detail STDERR:\n{detail.Stderr}");
+
+            if (detail.ExitCode != 0)
+            {
+                Console.WriteLine("[ADOPT] ERROR: mdadm --detail falló → no existe el array.");
+                return false;
+            }
+
+            bool isClean = detail.Stdout.Contains("State : clean");
+            bool isActive = detail.Stdout.Contains("Active Devices :");
+
+            if (isClean || isActive)
+                Console.WriteLine("[ADOPT] Array está CLEAN/ACTIVE → permitido si NO está montado.");
+            else
+                Console.WriteLine("[ADOPT] Array no está CLEAN/ACTIVE → igualmente permitido si no está montado.");
+
+            // 3) Normalizar dispositivos
+            Console.WriteLine("[ADOPT] Normalizando dispositivos…");
+
+            var normalized = devices
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Select(d =>
+                {
+                    d = d.Trim();
+
+                    // ⭐ Si ya viene como /dev/XXX, lo respetamos
+                    if (d.StartsWith("/dev/"))
+                        return d;
+
+                    return NormalizeDev(d);
+                })
+                .ToList();
+
+            Console.WriteLine($"[ADOPT] Normalized = {string.Join(", ", normalized)}");
+
+            if (normalized.Count == 0)
+            {
+                Console.WriteLine("[ADOPT] ERROR: No hay dispositivos válidos.");
+                return false;
+            }
+
+            // 4) Detener array actual
+            var stopCmd = $"mdadm --stop /dev/{currentName}";
+            Console.WriteLine($"[ADOPT] Ejecutando: {stopCmd}");
+
+            var stopResult = ShellHelper.EjecutarComoRoot(stopCmd);
+
+            Console.WriteLine($"[ADOPT] stop EXIT={stopResult.ExitCode}");
+            Console.WriteLine($"[ADOPT] stop STDOUT:\n{stopResult.Stdout}");
+            Console.WriteLine($"[ADOPT] stop STDERR:\n{stopResult.Stderr}");
+
+            if (stopResult.ExitCode != 0)
+            {
+                Console.WriteLine("[ADOPT] ERROR: No se pudo detener el array.");
+                return false;
+            }
+
+            // 5) Obtener nombre libre usando tu función oficial
+            string freeName = GetNextFreeMdName();
+            Console.WriteLine($"[ADOPT] Nombre asignado por GetNextFreeMdName(): {freeName}");
+
+            string mdPath = "/dev/" + freeName;
+
+            // 6) Ensamblar con el nuevo nombre
+            var devList = string.Join(" ", normalized);
+            var assembleCmd = $"mdadm --assemble {mdPath} {devList}";
+
+            Console.WriteLine($"[ADOPT] Ejecutando: {assembleCmd}");
+
+            var assembleResult = ShellHelper.EjecutarComoRoot(assembleCmd);
+
+            Console.WriteLine($"[ADOPT] assemble EXIT={assembleResult.ExitCode}");
+            Console.WriteLine($"[ADOPT] assemble STDOUT:\n{assembleResult.Stdout}");
+            Console.WriteLine($"[ADOPT] assemble STDERR:\n{assembleResult.Stderr}");
+
+            Console.WriteLine("========== ADOPT ARRAY END ==========");
+
+            return assembleResult.ExitCode == 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("========== ADOPT ARRAY EXCEPTION ==========");
+            Console.WriteLine(ex.ToString());
+            return false;
+        }
+    });
+}
 
 
 
