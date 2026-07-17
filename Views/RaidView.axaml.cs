@@ -2154,6 +2154,7 @@ public partial class RaidView : UserControl
                         {
                             array.PersistMount = true;
                             NotificadorLinux.Enviar("Mount persisted.", 6000, "info");
+                            await RefreshArraysAsync();
                         }
                     }
                 }
@@ -2171,6 +2172,7 @@ public partial class RaidView : UserControl
                         {
                             array.PersistMount = false;
                             NotificadorLinux.Enviar("Persistent mount removed.", 6000, "info");
+                            await RefreshArraysAsync();
                         }
                     }
                 }
@@ -2178,9 +2180,7 @@ public partial class RaidView : UserControl
                 break;
             }
 
-            // ============================================================
-            // 🔥 RESTO DE TU CÓDIGO ORIGINAL (SIN CAMBIOS)
-            // ============================================================
+           // ============================================================
 
             case "resync":
                 if (!array.SupportsRepair)
