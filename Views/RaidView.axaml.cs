@@ -52,7 +52,9 @@ public partial class RaidView : UserControl
             new MenuItem { Header = "Stop array", Tag = "stop" },
             new MenuItem { Header = "Details", Tag = "details" },
             new MenuItem { Header = "Add disk to array", Tag = "add_disk" },
-            new MenuItem { Header = "Reshape Array (Expand)", Tag = "reshape" }
+            new MenuItem { Header = "Reshape Array (Expand)", Tag = "reshape" },
+            new MenuItem { Header = "Mount persistence", Tag = "toggle_persist" }
+
         }
     };
 
@@ -398,9 +400,22 @@ public partial class RaidView : UserControl
     btnMore.Click += (_, _) =>
     {
         _selectedArray = array;
+
+        //Actualizar texto dinámico
+        foreach (var item in ArrayMenu.Items.OfType<MenuItem>())
+        {
+            if (item.Tag?.ToString() == "toggle_persist")
+            {
+                item.Header = array.PersistMount
+                    ? "Remove persistent mount"
+                    : "Persist mount";
+            }
+        }
+
         ArrayMenu.PlacementTarget = btnMore;
         ArrayMenu.Open(btnMore);
     };
+
 
     // ============================================================
     //  BOTÓN ADOPT RAID ARRAY (solo md127 sin persistencia)
@@ -1729,6 +1744,7 @@ public partial class RaidView : UserControl
         BuildUI();
     }
 
+    
     private async void OnCreateArrayClicked(object? sender, RoutedEventArgs e)
 {
     var parent = GetWindow();
@@ -1748,8 +1764,8 @@ public partial class RaidView : UserControl
 
     if (freeDisks.Count == 0)
     {
-        var dlg = new InfoDialog("No disks", "No free disks available to create a RAID array.");
-        await dlg.ShowDialog(parent);
+        await new InfoDialog("No disks", "No free disks available to create a RAID array.")
+            .ShowDialog(parent);
         return;
     }
 
@@ -1759,37 +1775,34 @@ public partial class RaidView : UserControl
     if (result == null)
         return;
 
+    // ============================
+    // ⭐ Diálogo modal + Task.Run
+    // ============================
     var loading = new LoadingDialog("Creating RAID array...");
-    loading.Show(parent);
+    var loadingTask = loading.ShowDialog(parent);
 
-    await Task.Delay(50);
-
-    bool ok;
+    bool ok = false;
 
     try
     {
-        if (IsFakeMode)
+        ok = await Task.Run(async () =>
         {
-            ok = await Task.Run(() =>
+            if (IsFakeMode)
             {
                 CreateFakeArray(result);
                 return true;
-            });
-        }
-        else
-        {
-            ok = await CreateRealArray(result);
-        }
+            }
+            else
+            {
+                return await CreateRealArray(result);
+            }
+        });
     }
     catch (Exception ex)
     {
         loading.Close();
 
         NotificadorLinux.Enviar($"Error creating array:\n{ex.Message}", 6000, "critical");
-
-       // var dlg = new InfoDialog("Error", $"Failed to create RAID array:\n{ex.Message}");
-       // await dlg.ShowDialog(parent);
-
         return;
     }
 
@@ -1799,17 +1812,21 @@ public partial class RaidView : UserControl
     {
         NotificadorLinux.Enviar("Error creating RAID array.", 6000, "critical");
 
-        var dlg = new InfoDialog("Error", "Failed to create RAID array.");
-        await dlg.ShowDialog(parent);
+        await new InfoDialog("Error", "Failed to create RAID array.")
+            .ShowDialog(parent);
 
         return;
     }
 
-    var successDlg = new InfoDialog("Success", "RAID array created successfully.");
-    await successDlg.ShowDialog(parent);
+    await new InfoDialog("Success", "RAID array created successfully.")
+        .ShowDialog(parent);
 
     await LoadRaidAsync(true);
 }
+
+    
+    
+    
 
     
     
@@ -1978,65 +1995,77 @@ public partial class RaidView : UserControl
     }
 
     private async Task LoadRaidAsync(bool afterCreate = false)
+{
+    try
     {
-        try
+        if (IsFakeMode)
         {
-            if (IsFakeMode)
-            {
-                LoadFakeData();
+            LoadFakeData();
 
-                if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktopFake)
-                    (desktopFake.MainWindow as MainWindow)?.UpdateStatus("Fake RAID data loaded.");
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktopFake)
+                (desktopFake.MainWindow as MainWindow)?.UpdateStatus("Fake RAID data loaded.");
 
-                return;
-            }
-
-            using (LoadingService.Show("Loading RAID arrays..."))
-            {
-                var (arrays, disks) = await Task.Run(async () =>
-                {
-                    var service = RaidService.Instance;
-
-                    if (afterCreate)
-                        await Task.Delay(150);
-
-                    var arraysTask = service.GetArraysAsync();
-                    var disksTask = service.GetAllDisksAsync();
-
-                    await Task.WhenAll(arraysTask, disksTask);
-
-                    return (arraysTask.Result ?? new List<RaidArrayInfo>(),
-                        disksTask.Result ?? new List<RaidDiskInfo>());
-                });
-
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    SetArrays(arrays);
-                    BuildUI();
-
-                    if (afterCreate && arrays.Count > 0)
-                    {
-                        var last = arrays.Last();
-                        last.IsExpanded = true;
-                    }
-
-                    if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-                        (desktop.MainWindow as MainWindow)?.UpdateStatus("RAID information refreshed.");
-                });
-            }
+            return;
         }
-        catch (Exception ex)
+
+        using (LoadingService.Show("Loading RAID arrays..."))
         {
-            LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
-            LogService.Error(ex.ToString());
+            var (arrays, disks) = await Task.Run(async () =>
+            {
+                var service = RaidService.Instance;
 
-            NotificadorLinux.Enviar($"Error loading RAID information:\n{ex.Message}", 6000, "critical");
-            await ShowInfo("Error", $"Error loading RAID information:\n{ex.Message}");
+                if (afterCreate)
+                    await Task.Delay(150);
 
-            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-                (desktop.MainWindow as MainWindow)?.UpdateStatus("Error loading RAID information.");
+                var arraysTask = service.GetArraysAsync();
+                var disksTask = service.GetAllDisksAsync();
+
+                await Task.WhenAll(arraysTask, disksTask);
+
+                return (arraysTask.Result ?? new List<RaidArrayInfo>(),
+                    disksTask.Result ?? new List<RaidDiskInfo>());
+            });
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                // ============================================================
+                //  ACTUALIZAR PERSISTENCIA DESPUÉS DE CARGAR LOS ARRAYS
+                // ============================================================
+                foreach (var arr in arrays)
+                    arr.PersistMount = RaidService.Instance.IsPersisted(arr);
+
+                // ============================================================
+                //  RESTO DE TU LÓGICA ORIGINAL (SIN CAMBIOS)
+                // ============================================================
+                SetArrays(arrays);
+                BuildUI();
+
+                if (afterCreate && arrays.Count > 0)
+                {
+                    var last = arrays.Last();
+                    last.IsExpanded = true;
+                }
+
+                if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                    (desktop.MainWindow as MainWindow)?.UpdateStatus("RAID information refreshed.");
+            });
         }
     }
+    catch (Exception ex)
+    {
+        LogService.Error("[RAIDVIEW] LoadRaidAsync() EXCEPTION:");
+        LogService.Error(ex.ToString());
+
+        NotificadorLinux.Enviar($"Error loading RAID information:\n{ex.Message}", 6000, "critical");
+        await ShowInfo("Error", $"Error loading RAID information:\n{ex.Message}");
+
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            (desktop.MainWindow as MainWindow)?.UpdateStatus("Error loading RAID information.");
+    }
+}
+
+    
+    
 
     private string GetStateIcon(RaidArrayState state)
     {
@@ -2058,259 +2087,305 @@ public partial class RaidView : UserControl
                 "avares://RAID-Util/Assets/Icons/array-caution.png"
         };
     }
+ 
     private async void OnMoreMenuClick(RaidArrayInfo array, string? action)
+{
+    var service = RaidService.Instance;
+
+    if (array == null)
     {
-        var service = RaidService.Instance;
+        await ShowConfirm("Error", "Array not found.");
+        return;
+    }
 
-        if (array == null)
+    var act = action?.Trim().ToLowerInvariant() ?? "";
+
+    bool isRaid0 = array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
+    bool isLinear = array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase);
+
+    if ((isRaid0 || isLinear) && act is not ("stop" or "details" or "toggle_persist"))
+    {
+        await ShowConfirm("Error", "This RAID level does not support this action.");
+        return;
+    }
+
+    if (array.State == RaidArrayState.Failed && act != "details")
+    {
+        await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
+        return;
+    }
+
+    bool isMountedRO = false;
+
+    if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
+    {
+        var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
+
+        if (mountInfo.ExitCode == 0)
         {
-            await ShowConfirm("Error", "Array not found.");
-            return;
-        }
-
-        var act = action?.Trim().ToLowerInvariant() ?? "";
-
-        bool isRaid0 = array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase);
-        bool isLinear = array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase);
-
-        if ((isRaid0 || isLinear) && act is not ("stop" or "details"))
-        {
-            await ShowConfirm("Error", "This RAID level does not support this action.");
-            return;
-        }
-
-        if (array.State == RaidArrayState.Failed && act != "details")
-        {
-            await ShowConfirm("Error", "This array is in FAILED state. Only details are available.");
-            return;
-        }
-
-        bool isMountedRO = false;
-
-        if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
-        {
-            var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
-
-            if (mountInfo.ExitCode == 0)
-            {
-                var line = mountInfo.Stdout.ToLowerInvariant();
-                if (line.Contains("(ro,") || line.Contains(" ro,"))
-                    isMountedRO = true;
-            }
-        }
-
-        try
-        {
-            switch (act)
-            {
-                case "resync":
-                    if (!array.SupportsRepair)
-                    {
-                        await ShowConfirm("Error", "This RAID level does not support resync.");
-                        return;
-                    }
-
-                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
-                    {
-                        await ShowConfirm("Info", "This array is already rebuilding.");
-                        return;
-                    }
-
-                    if (isMountedRO)
-                    {
-                        await ShowConfirm("Error", "Array is mounted read-only. Cannot start resync.");
-                        return;
-                    }
-
-                    // Estado inmediato en UI
-                    array.State = RaidArrayState.Resync;
-                    array.RebuildProgress = 0;
-                    array.RebuildETA = "N/A";
-                    UpdateArrayCardProgress(array);
-
-                    await service.StartArrayResyncAsync(array.Name);
-
-                    var ownerrs = this.GetVisualRoot() as Window;
-                    var dlgrb = new RebuildDialog(array.Name);
-
-                    if (ownerrs != null)
-                        await dlgrb.ShowDialog(ownerrs);
-                    else
-                        await dlgrb.ShowDialog(new Window());
-
-                    break;
-
-                case "check":
-                    if (!array.SupportsCheck)
-                    {
-                        await ShowConfirm("Error", "This RAID level does not support consistency checks.");
-                        return;
-                    }
-
-                    if (!array.IsMounted)
-                    {
-                        await ShowConfirm("Error", "Array must be mounted to perform a check.");
-                        return;
-                    }
-
-                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
-                    {
-                        await ShowConfirm("Error", "Cannot check while rebuilding.");
-                        return;
-                    }
-
-                    // Estado inmediato en UI
-                    array.State = RaidArrayState.Resync; // mdadm usa resync para check
-                    array.RebuildProgress = 0;
-                    array.RebuildETA = "N/A";
-                    UpdateArrayCardProgress(array);
-
-                    await service.ForceArrayCheckAsync(array.Name);
-                    await ShowConfirm("Success", "Check started.");
-                    break;
-
-                case "repair":
-                    if (!array.SupportsRepair)
-                    {
-                        await ShowConfirm("Error", "This RAID level does not support repair.");
-                        return;
-                    }
-
-                    if (!array.IsDegraded)
-                    {
-                        await ShowConfirm("Error", "Repair is only available for degraded arrays.");
-                        return;
-                    }
-
-                    if (!array.Disks.Any(d => d.RaidMembership == RaidMembership.Spare))
-                    {
-                        await ShowConfirm("Error", "No spare disk available for repair.");
-                        return;
-                    }
-
-                    if (array.State == RaidArrayState.Resync || array.IsRecovering)
-                    {
-                        await ShowConfirm("Error", "Cannot repair while rebuilding.");
-                        return;
-                    }
-
-                    // Estado inmediato en UI
-                    array.State = RaidArrayState.Rebuilding;
-                    array.RebuildProgress = 0;
-                    array.RebuildETA = "N/A";
-                    UpdateArrayCardProgress(array);
-
-                    await service.ForceArrayRepairAsync(array.Name);
-                    await ShowConfirm("Success", "Repair started.");
-                    break;
-
-                case "stop":
-                {
-                    var (ok, msg) = await service.StopArraySafeAsync(array.Name);
-
-                    if (!ok)
-                    {
-                        NotificadorLinux.Enviar($"Error stopping array:\n{msg}", 6000, "critical");
-                        await ShowConfirm("Error", msg);
-                        return;
-                    }
-
-                    await ShowConfirm("Success", msg);
-                    await LoadRaidAsync();
-                    break;
-                }
-
-                case "add_disk":
-                    await AddDiskToArrayUI(array);
-                    break;
-
-                case "details":
-                {
-                    var detail = await service.GetArrayDetailsAsync(array.Name);
-
-                    var dlg = new ConsoleDialog($"Array Details — {array.Name}", detail);
-                    var owner1 = this.GetVisualRoot() as Window;
-
-                    if (owner1 != null)
-                        await dlg.ShowDialog(owner1);
-                    else
-                        await dlg.ShowDialog(new Window());
-
-                    break;
-                }
-
-                case "reshape":
-                    if (!ArrayAllowsExpansion(array))
-                    {
-                        await ShowConfirm("Not allowed", "This array cannot be expanded.");
-                        return;
-                    }
-
-                    int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
-                    int spares = array.Disks.Count(d => d.RaidMembership == RaidMembership.Spare);
-                    int newCount = active + spares;
-
-                    bool confirm = await ShowConfirm(
-                        "Expand RAID Array",
-                        $"Expand array {array.Name} from {active} to {newCount} devices?\n" +
-                        "This will start a RAID reshape."
-                    );
-
-                    if (!confirm)
-                        return;
-
-                    // Estado inmediato en UI
-                    array.State = RaidArrayState.Rebuilding;
-                    array.RebuildProgress = 0;
-                    array.RebuildETA = "N/A";
-                    UpdateArrayCardProgress(array);
-
-                    var owner = this.GetVisualRoot() as Window;
-
-                    using (LoadingService.Show("Expanding RAID array...", owner))
-                    {
-                        await Task.Run(() =>
-                        {
-                            string cmd =
-                                $"mdadm --grow {array.Path} --raid-devices={newCount}";
-                            ShellHelper.EjecutarComoRoot(cmd);
-                        });
-                    }
-
-                    await ShowConfirm("Reshape started",
-                        $"The array {array.Name} is now reshaping.");
-
-                    await Task.Run(() =>
-                    {
-                        while (true)
-                        {
-                            var stat = File.ReadAllText("/proc/mdstat");
-                            if (!stat.Contains("reshape"))
-                                break;
-
-                            Thread.Sleep(2000);
-                        }
-                    });
-
-                    string fs = DetectArrayFileSystem(array.Name);
-
-                    if (!string.IsNullOrWhiteSpace(fs))
-                        ResizeArrayFileSystem(array.Name, fs);
-
-                    await LoadRaidAsync();
-                    break;
-
-                default:
-                    await ShowConfirm("Error", $"Unknown action '{action}'.");
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            NotificadorLinux.Enviar($"Array action error:\n{ex.Message}", 6000, "critical");
-            await ShowInfo("Error", $"Array action failed:\n{ex.Message}");
+            var line = mountInfo.Stdout.ToLowerInvariant();
+            if (line.Contains("(ro,") || line.Contains(" ro,"))
+                isMountedRO = true;
         }
     }
+
+    try
+    {
+        switch (act)
+        {
+            // ============================================================
+            // NUEVA OPCIÓN: Persistencia de montaje (NO monta/desmonta)
+            // ============================================================
+            case "toggle_persist":
+            {
+                var parent = this.GetVisualRoot() as Window;
+
+                if (!array.PersistMount)
+                {
+                    using (LoadingService.Show("Persisting mount...", parent))
+                    {
+                        var ok = await service.PersistMountAsync(array);
+
+                        if (!ok)
+                        {
+                            NotificadorLinux.Enviar("Error persisting mount.", 6000, "critical");
+                        }
+                        else
+                        {
+                            array.PersistMount = true;
+                            NotificadorLinux.Enviar("Mount persisted.", 6000, "info");
+                        }
+                    }
+                }
+                else
+                {
+                    using (LoadingService.Show("Removing persistent mount...", parent))
+                    {
+                        var ok = await service.RemovePersistMountAsync(array);
+
+                        if (!ok)
+                        {
+                            NotificadorLinux.Enviar("Error removing persistent mount.", 6000, "critical");
+                        }
+                        else
+                        {
+                            array.PersistMount = false;
+                            NotificadorLinux.Enviar("Persistent mount removed.", 6000, "info");
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            // ============================================================
+            // 🔥 RESTO DE TU CÓDIGO ORIGINAL (SIN CAMBIOS)
+            // ============================================================
+
+            case "resync":
+                if (!array.SupportsRepair)
+                {
+                    await ShowConfirm("Error", "This RAID level does not support resync.");
+                    return;
+                }
+
+                if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                {
+                    await ShowConfirm("Info", "This array is already rebuilding.");
+                    return;
+                }
+
+                if (isMountedRO)
+                {
+                    await ShowConfirm("Error", "Array is mounted read-only. Cannot start resync.");
+                    return;
+                }
+
+                array.State = RaidArrayState.Resync;
+                array.RebuildProgress = 0;
+                array.RebuildETA = "N/A";
+                UpdateArrayCardProgress(array);
+
+                await service.StartArrayResyncAsync(array.Name);
+
+                var ownerrs = this.GetVisualRoot() as Window;
+                var dlgrb = new RebuildDialog(array.Name);
+
+                if (ownerrs != null)
+                    await dlgrb.ShowDialog(ownerrs);
+                else
+                    await dlgrb.ShowDialog(new Window());
+
+                break;
+
+            case "check":
+                if (!array.SupportsCheck)
+                {
+                    await ShowConfirm("Error", "This RAID level does not support consistency checks.");
+                    return;
+                }
+
+                if (!array.IsMounted)
+                {
+                    await ShowConfirm("Error", "Array must be mounted to perform a check.");
+                    return;
+                }
+
+                if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                {
+                    await ShowConfirm("Error", "Cannot check while rebuilding.");
+                    return;
+                }
+
+                array.State = RaidArrayState.Resync;
+                array.RebuildProgress = 0;
+                array.RebuildETA = "N/A";
+                UpdateArrayCardProgress(array);
+
+                await service.ForceArrayCheckAsync(array.Name);
+                await ShowConfirm("Success", "Check started.");
+                break;
+
+            case "repair":
+                if (!array.SupportsRepair)
+                {
+                    await ShowConfirm("Error", "This RAID level does not support repair.");
+                    return;
+                }
+
+                if (!array.IsDegraded)
+                {
+                    await ShowConfirm("Error", "Repair is only available for degraded arrays.");
+                    return;
+                }
+
+                if (!array.Disks.Any(d => d.RaidMembership == RaidMembership.Spare))
+                {
+                    await ShowConfirm("Error", "No spare disk available for repair.");
+                    return;
+                }
+
+                if (array.State == RaidArrayState.Resync || array.IsRecovering)
+                {
+                    await ShowConfirm("Error", "Cannot repair while rebuilding.");
+                    return;
+                }
+
+                array.State = RaidArrayState.Rebuilding;
+                array.RebuildProgress = 0;
+                array.RebuildETA = "N/A";
+                UpdateArrayCardProgress(array);
+
+                await service.ForceArrayRepairAsync(array.Name);
+                await ShowConfirm("Success", "Repair started.");
+                break;
+
+            case "stop":
+            {
+                var (ok, msg) = await service.StopArraySafeAsync(array.Name);
+
+                if (!ok)
+                {
+                    NotificadorLinux.Enviar($"Error stopping array:\n{msg}", 6000, "critical");
+                    await ShowConfirm("Error", msg);
+                    return;
+                }
+
+                await ShowConfirm("Success", msg);
+                await LoadRaidAsync();
+                break;
+            }
+
+            case "add_disk":
+                await AddDiskToArrayUI(array);
+                break;
+
+            case "details":
+            {
+                var detail = await service.GetArrayDetailsAsync(array.Name);
+
+                var dlg = new ConsoleDialog($"Array Details — {array.Name}", detail);
+                var owner1 = this.GetVisualRoot() as Window;
+
+                if (owner1 != null)
+                    await dlg.ShowDialog(owner1);
+                else
+                    await dlg.ShowDialog(new Window());
+
+                break;
+            }
+
+            case "reshape":
+                if (!ArrayAllowsExpansion(array))
+                {
+                    await ShowConfirm("Not allowed", "This array cannot be expanded.");
+                    return;
+                }
+
+                int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
+                int spares = array.Disks.Count(d => d.RaidMembership == RaidMembership.Spare);
+                int newCount = active + spares;
+
+                bool confirm = await ShowConfirm(
+                    "Expand RAID Array",
+                    $"Expand array {array.Name} from {active} to {newCount} devices?\n" +
+                    "This will start a RAID reshape."
+                );
+
+                if (!confirm)
+                    return;
+
+                array.State = RaidArrayState.Rebuilding;
+                array.RebuildProgress = 0;
+                array.RebuildETA = "N/A";
+                UpdateArrayCardProgress(array);
+
+                var owner = this.GetVisualRoot() as Window;
+
+                using (LoadingService.Show("Expanding RAID array...", owner))
+                {
+                    await Task.Run(() =>
+                    {
+                        string cmd =
+                            $"mdadm --grow {array.Path} --raid-devices={newCount}";
+                        ShellHelper.EjecutarComoRoot(cmd);
+                    });
+                }
+
+                await ShowConfirm("Reshape started",
+                    $"The array {array.Name} is now reshaping.");
+
+                await Task.Run(() =>
+                {
+                    while (true)
+                    {
+                        var stat = File.ReadAllText("/proc/mdstat");
+                        if (!stat.Contains("reshape"))
+                            break;
+
+                        Thread.Sleep(2000);
+                    }
+                });
+
+                string fs = DetectArrayFileSystem(array.Name);
+
+                if (!string.IsNullOrWhiteSpace(fs))
+                    ResizeArrayFileSystem(array.Name, fs);
+
+                await LoadRaidAsync();
+                break;
+
+            default:
+                await ShowConfirm("Error", $"Unknown action '{action}'.");
+                break;
+        }
+    }
+    catch (Exception ex)
+    {
+        NotificadorLinux.Enviar($"Array action error:\n{ex.Message}", 6000, "critical");
+        await ShowInfo("Error", $"Array action failed:\n{ex.Message}");
+    }
+}
 
    
 

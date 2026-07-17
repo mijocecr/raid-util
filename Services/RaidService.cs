@@ -2549,6 +2549,249 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 }
 
 
+    public async Task<bool> PersistMountAsync(RaidArrayInfo array)
+{
+    try
+    {
+        Console.WriteLine("=== PersistMountAsync ===");
+        Console.WriteLine($"Array.Path = {array.Path}");
+        Console.WriteLine($"Array.Name = {array.Name}");
+
+        // Obtener UUID del filesystem
+        var uuidCmd = ShellHelper.EjecutarComoRoot($"blkid -s UUID -o value {array.Path}");
+        Console.WriteLine($"blkid exit = {uuidCmd.ExitCode}");
+        Console.WriteLine($"blkid stdout = {uuidCmd.Stdout}");
+        Console.WriteLine($"blkid stderr = {uuidCmd.Stderr}");
+
+        if (uuidCmd.ExitCode != 0 || string.IsNullOrWhiteSpace(uuidCmd.Stdout))
+        {
+            Console.WriteLine("ERROR: blkid no devolvió UUID válido.");
+            return false;
+        }
+
+        var uuid = uuidCmd.Stdout.Trim().ToLowerInvariant();
+        Console.WriteLine($"Detected UUID = {uuid}");
+
+        // Obtener filesystem TYPE
+        var fsCmd = ShellHelper.EjecutarComoRoot($"blkid -s TYPE -o value {array.Path}");
+        Console.WriteLine($"blkid TYPE exit = {fsCmd.ExitCode}");
+        Console.WriteLine($"blkid TYPE stdout = {fsCmd.Stdout}");
+        Console.WriteLine($"blkid TYPE stderr = {fsCmd.Stderr}");
+
+        if (fsCmd.ExitCode != 0 || string.IsNullOrWhiteSpace(fsCmd.Stdout))
+        {
+            Console.WriteLine("ERROR: blkid no devolvió TYPE válido.");
+            return false;
+        }
+
+        var fsType = fsCmd.Stdout.Trim();
+        Console.WriteLine($"Detected fsType = {fsType}");
+
+        // Crear punto de montaje
+        var mountPoint = $"/mnt/{array.Name}";
+        Console.WriteLine($"Creating mount point: {mountPoint}");
+        ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
+
+        // Línea fstab
+        var line = $"UUID={uuid}  {mountPoint}  {fsType}  defaults,noatime  0  2";
+        Console.WriteLine($"Generated fstab line: {line}");
+
+        // Leer fstab actual
+        Console.WriteLine("Reading /etc/fstab...");
+        var lines = File.ReadAllLines("/etc/fstab").ToList();
+
+        // Evitar duplicados
+        if (lines.Any(l => l.Contains(uuid, StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine("WARNING: UUID ya existe en /etc/fstab. No se añadirá duplicado.");
+            NotificadorLinux.Enviar("Persistent mount entry already exists.", 6000, "info");
+            return true;
+        }
+
+        // Añadir línea
+        lines.Add(line);
+
+        // Guardar como root usando fichero temporal
+        var tempPath = "/tmp/fstab.raidutil.tmp";
+        Console.WriteLine($"Writing temp fstab to {tempPath}...");
+        File.WriteAllLines(tempPath, lines);
+
+        Console.WriteLine("Replacing /etc/fstab as root...");
+        var replaceResult = ShellHelper.EjecutarComoRoot($"cp \"{tempPath}\" /etc/fstab");
+
+        Console.WriteLine($"cp exit = {replaceResult.ExitCode}");
+        Console.WriteLine($"cp stderr = {replaceResult.Stderr}");
+
+        if (replaceResult.ExitCode != 0)
+        {
+            Console.WriteLine("ERROR: No se pudo reemplazar /etc/fstab como root.");
+            return false;
+        }
+
+        // ⭐⭐⭐ NOTIFICACIÓN EN INGLÉS ⭐⭐⭐
+        NotificadorLinux.Enviar("Persistent mount entry added successfully.", 6000, "info");
+
+        Console.WriteLine("=== PersistMountAsync DONE ===");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("EXCEPTION in PersistMountAsync:");
+        Console.WriteLine(ex.ToString());
+        return false;
+    }
+}
+
+    
+    
+    
+public async Task<bool> RemovePersistMountAsync(RaidArrayInfo array)
+{
+    try
+    {
+        Console.WriteLine("=== RemovePersistMountAsync ===");
+        Console.WriteLine($"Array.Path = {array.Path}");
+        Console.WriteLine($"Array.Name = {array.Name}");
+
+        var fsDetect = ShellHelper.EjecutarComoRoot($"blkid {array.Path}");
+        Console.WriteLine($"blkid exit = {fsDetect.ExitCode}");
+        Console.WriteLine($"blkid stdout = {fsDetect.Stdout}");
+        Console.WriteLine($"blkid stderr = {fsDetect.Stderr}");
+
+        if (fsDetect.ExitCode != 0 || string.IsNullOrWhiteSpace(fsDetect.Stdout))
+        {
+            Console.WriteLine("ERROR: blkid no devolvió información válida.");
+            return false;
+        }
+
+        string fsUuid = null;
+        var parts = fsDetect.Stdout.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var part in parts)
+        {
+            if (part.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase))
+            {
+                fsUuid = part.Replace("UUID=", "")
+                             .Replace("\"", "")
+                             .Trim()
+                             .ToLowerInvariant();
+                break;
+            }
+        }
+
+        Console.WriteLine($"Detected fsUuid = {fsUuid}");
+
+        if (string.IsNullOrWhiteSpace(fsUuid))
+        {
+            Console.WriteLine("ERROR: No se pudo extraer UUID del filesystem.");
+            return false;
+        }
+
+        Console.WriteLine("Reading /etc/fstab...");
+        var lines = File.ReadAllLines("/etc/fstab");
+        Console.WriteLine($"Total lines in fstab: {lines.Length}");
+
+        var newLines = new List<string>();
+        int removedCount = 0;
+
+        foreach (var line in lines)
+        {
+            var original = line;
+            var trimmed = line.Trim().ToLowerInvariant();
+
+            if (trimmed.StartsWith("#"))
+            {
+                newLines.Add(original);
+                continue;
+            }
+
+            if (trimmed.Contains("uuid="))
+            {
+                var lineParts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var uuidPart = lineParts.FirstOrDefault(p => p.StartsWith("uuid="));
+
+                if (uuidPart != null)
+                {
+                    var lineUuid = uuidPart.Replace("uuid=", "").Trim();
+                    Console.WriteLine($"Checking line UUID: {lineUuid} vs fsUuid: {fsUuid}");
+
+                    if (lineUuid == fsUuid)
+                    {
+                        Console.WriteLine($"REMOVING line: {original}");
+                        removedCount++;
+                        continue;
+                    }
+                }
+            }
+
+            newLines.Add(original);
+        }
+
+        Console.WriteLine($"Removed lines count = {removedCount}");
+
+        if (removedCount == 0)
+        {
+            Console.WriteLine("WARNING: No se eliminó ninguna línea de /etc/fstab. Puede que el UUID no coincida.");
+            return false;
+        }
+
+        //  Escribir como root usando fichero temporal
+        var tempPath = "/tmp/fstab.raidutil.tmp";
+        Console.WriteLine($"Writing temp fstab to {tempPath}...");
+        File.WriteAllLines(tempPath, newLines);
+
+        Console.WriteLine("Replacing /etc/fstab as root...");
+        var replaceResult = ShellHelper.EjecutarComoRoot($"cp \"{tempPath}\" /etc/fstab");
+
+        Console.WriteLine($"cp exit = {replaceResult.ExitCode}");
+        Console.WriteLine($"cp stderr = {replaceResult.Stderr}");
+
+        if (replaceResult.ExitCode != 0)
+        {
+            Console.WriteLine("ERROR: No se pudo reemplazar /etc/fstab como root.");
+            return false;
+        }
+
+        
+        NotificadorLinux.Enviar("Persistent mount entry removed successfully.", 6000, "info");
+
+        Console.WriteLine("=== RemovePersistMountAsync DONE ===");
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("EXCEPTION in RemovePersistMountAsync:");
+        Console.WriteLine(ex.ToString());
+        return false;
+    }
+}
+
+
+
+
+
+    
+    
+    public bool IsPersisted(RaidArrayInfo array)
+    {
+        try
+        {
+            var uuidCmd = ShellHelper.EjecutarComoRoot($"blkid -s UUID -o value {array.Path}");
+            if (uuidCmd.ExitCode != 0 || string.IsNullOrWhiteSpace(uuidCmd.Stdout))
+                return false;
+
+            var uuid = uuidCmd.Stdout.Trim();
+
+            var fstab = File.ReadAllText("/etc/fstab");
+            return fstab.Contains(uuid, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    
 
 
     public async Task<List<string>> GetDisksInArrayAsync(string arrayName, string detail)

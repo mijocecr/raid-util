@@ -1,24 +1,38 @@
+using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
+using Avalonia.Layout;
+using Avalonia.Media;
 
 namespace RAID_Util.Views;
 
 public partial class LoadingDialog : Window
 {
+    private TextBlock _messageBlock;
+
     public LoadingDialog(string message)
     {
         InitializeComponent();
-    }
 
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
+        Width = 320;
+        Height = 140;
+        CanResize = false;
+
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        SystemDecorations = SystemDecorations.None;
+        ShowInTaskbar = false;
+        Topmost = true;
+
+        Background = this.FindResource("BMWSurfaceBrush") as IBrush;
+
+        _messageBlock = this.FindControl<TextBlock>("MessageText");
+        _messageBlock.Text = message;
+
+        // Evitar cierre accidental
+        this.KeyDown += (_, e) => e.Handled = true;
     }
 
     public void SetMessage(string msg)
     {
-        var tb = this.FindControl<TextBlock>("MessageText");
-        if (tb != null)
-            tb.Text = msg;
+        _messageBlock.Text = msg;
     }
 }
