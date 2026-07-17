@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using Newtonsoft.Json;
 using RAID_Util.Helpers;
 using RAID_Util.Models;
@@ -2604,7 +2605,8 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         if (lines.Any(l => l.Contains(uuid, StringComparison.OrdinalIgnoreCase)))
         {
             Console.WriteLine("WARNING: UUID ya existe en /etc/fstab. No se añadirá duplicado.");
-            NotificadorLinux.Enviar("Persistent mount entry already exists.", 6000, "info");
+           // NotificadorLinux.Enviar("Persistent mount entry already exists.", 6000, "info");
+            
             return true;
         }
 
@@ -2628,8 +2630,12 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             return false;
         }
 
-        // ⭐⭐⭐ NOTIFICACIÓN EN INGLÉS ⭐⭐⭐
-        NotificadorLinux.Enviar("Persistent mount entry added successfully.", 6000, "info");
+        Dispatcher.UIThread.Post(() =>
+        {
+            NotificadorLinux.Enviar("Persistent mount entry added successfully.", 6000, "info");
+        });
+
+        
 
         Console.WriteLine("=== PersistMountAsync DONE ===");
         return true;
@@ -2753,7 +2759,12 @@ public async Task<bool> RemovePersistMountAsync(RaidArrayInfo array)
         }
 
         
-        NotificadorLinux.Enviar("Persistent mount entry removed successfully.", 6000, "info");
+        Dispatcher.UIThread.Post(() =>
+        {
+            NotificadorLinux.Enviar("Persistent mount entry removed successfully.", 6000, "info");
+        });
+
+        
 
         Console.WriteLine("=== RemovePersistMountAsync DONE ===");
         return true;
