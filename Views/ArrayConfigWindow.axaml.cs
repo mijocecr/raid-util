@@ -161,7 +161,7 @@ public partial class ArrayConfigWindow : Window
 
             var forbidden = new[]
             {
-                "/", "/home", "/usr", "/root", "/etc", "/dev", "/proc", "/sys", "/run", "/tmp"
+                "/", "/home", "/usr", "/root", "/etc", "/dev", "/proc", "/sys", "/tmp"
             };
 
             if (Array.Exists(forbidden, x => x == mp))
