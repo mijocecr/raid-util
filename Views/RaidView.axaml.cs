@@ -303,7 +303,7 @@ public partial class RaidView : UserControl
     info.Children.Add(new TextBlock { Text = $"Persist Mount: {(array.PersistMount ? "YES" : "NO")}  Parity: {safeParity}", FontSize = 14, Foreground = dimBrush });
 
     // ============================================================
-    // 🔥 PROGRESS BAR
+    //  PROGRESS BAR
     // ============================================================
     var opLabel = GetOperationLabel(array);
 
@@ -360,7 +360,7 @@ public partial class RaidView : UserControl
     }
 
     // ============================================================
-    // 🔥 CONTROLES SUPERIORES (CheckBox + More)
+    //  CONTROLES SUPERIORES (CheckBox + More)
     // ============================================================
 
     var chkSelect = new CheckBox
@@ -441,10 +441,7 @@ public partial class RaidView : UserControl
         info.Children.Add(adoptButton);
     }
 
-    // ============================================================
-    // RESTO DE TU CÓDIGO (SIN CAMBIOS)
-    // ============================================================
-
+  
     var topRightPanel = new StackPanel
     {
         Orientation = Orientation.Horizontal,
@@ -853,103 +850,111 @@ public partial class RaidView : UserControl
         };
     }
 
+    
     private Control BuildMountOptions(RaidArrayInfo array)
+{
+    var cfg = ArrayConfigService.Load(array.Name);
+
+    var user = Environment.UserName;
+
+    var mountPoint = string.IsNullOrWhiteSpace(cfg.MountPoint)
+        ? $"/run/media/{user}/{array.Name}"
+        : cfg.MountPoint;
+
+    var isMounted = MountService.IsMounted(mountPoint);
+
+    var panel = new StackPanel
     {
-        var cfg = ArrayConfigService.Load(array.Name);
+        Spacing = 12,
+        Margin = new Thickness(0, 0, 0, 10)
+    };
 
-        var mountPoint = string.IsNullOrWhiteSpace(cfg.MountPoint)
-            ? $"/mnt/{array.Name}"
-            : cfg.MountPoint;
+    var buttonsRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 10,
+        HorizontalAlignment = HorizontalAlignment.Right
+    };
 
-        var isMounted = MountService.IsMounted(mountPoint);
+    var btnMount = new Button
+    {
+        Content = isMounted ? "Unmount" : "Mount",
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "PrimaryButton" },
+        Width = 100
+    };
 
-        var panel = new StackPanel
-        {
-            Spacing = 12,
-            Margin = new Thickness(0, 0, 0, 10)
-        };
-
-        var buttonsRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-
-        var btnMount = new Button
-        {
-            Content = isMounted ? "Unmount" : "Mount",
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Classes = { "PrimaryButton" },
-            Width = 100
-        };
-
-        btnMount.Click += async (_, _) =>
-        {
-            try
-            {
-                if (MountService.IsMounted(mountPoint))
-                {
-                    MountService.Unmount(mountPoint);
-                }
-                else
-                {
-                    var opts = new List<string>();
-
-                    if (cfg.Mount_NoAtime) opts.Add("noatime");
-                    if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
-                    if (cfg.Mount_Discard) opts.Add("discard");
-                    if (cfg.Mount_Sync) opts.Add("sync");
-                    if (cfg.Mount_ReadOnly) opts.Add("ro");
-
-                    var mountOpts = opts.Count == 0 ? "defaults" : string.Join(",", opts);
-
-                    MountService.Mount(array.Path, mountPoint, mountOpts);
-                    ShellHelper.EjecutarComoRoot(
-                        $"chmod {cfg.MountPermissions} \"{mountPoint}\"");
-                }
-
-                BuildUI();
-            }
-            catch (Exception ex)
-            {
-                NotificadorLinux.Enviar($"Mount error:\n{ex.Message}", 6000, "critical");
-                await ShowInfo("Error", $"Mount operation failed:\n{ex.Message}");
-            }
-        };
-
-        var btnOpen = new Button
-        {
-            Content = "Open",
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Classes = { "SecondaryButton" },
-            Width = 90,
-            IsEnabled = isMounted
-        };
-
-        btnOpen.Click += (_, _) =>
+    btnMount.Click += async (_, _) =>
+    {
+        try
         {
             if (MountService.IsMounted(mountPoint))
-                DesktopHelper.OpenPath(mountPoint);
-        };
+            {
+                MountService.Unmount(mountPoint);
+            }
+            else
+            {
+                var opts = new List<string>();
 
-        buttonsRow.Children.Add(btnMount);
-        buttonsRow.Children.Add(btnOpen);
+                if (cfg.Mount_NoAtime) opts.Add("noatime");
+                if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
+                if (cfg.Mount_Discard) opts.Add("discard");
+                if (cfg.Mount_Sync) opts.Add("sync");
+                if (cfg.Mount_ReadOnly) opts.Add("ro");
 
-        panel.Children.Add(buttonsRow);
+                var mountOpts = opts.Count == 0 ? "defaults" : string.Join(",", opts);
 
-        panel.Children.Add(new TextBlock
+                MountService.Mount(array.Path, mountPoint, mountOpts);
+
+                ShellHelper.EjecutarComoRoot(
+                    $"chmod {cfg.MountPermissions} \"{mountPoint}\"");
+            }
+
+            BuildUI();
+        }
+        catch (Exception ex)
         {
-            Text = $"Mount Path: {mountPoint}",
-            FontSize = 14,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
-        });
+            NotificadorLinux.Enviar($"Mount error:\n{ex.Message}", 6000, "critical");
+            await ShowInfo("Error", $"Mount operation failed:\n{ex.Message}");
+        }
+    };
 
-        return panel;
-    }
+    var btnOpen = new Button
+    {
+        Content = "Open",
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Classes = { "SecondaryButton" },
+        Width = 90,
+        IsEnabled = isMounted
+    };
+
+    btnOpen.Click += (_, _) =>
+    {
+        if (MountService.IsMounted(mountPoint))
+            DesktopHelper.OpenPath(mountPoint);
+    };
+
+    buttonsRow.Children.Add(btnMount);
+    buttonsRow.Children.Add(btnOpen);
+
+    panel.Children.Add(buttonsRow);
+
+    panel.Children.Add(new TextBlock
+    {
+        Text = $"Mount Path: {mountPoint}",
+        FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Foreground = (IBrush)Application.Current!.FindResource("BMWTextDimBrush")!
+    });
+
+    return panel;
+}
+
+    
+    
+    
     private Border BuildDiskCard(RaidArrayInfo array, RaidDiskInfo disk)
     {
         var icon = LoadImage(disk.Icon, 72);

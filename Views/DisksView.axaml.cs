@@ -704,7 +704,9 @@ public partial class DisksView : UserControl
         var fs = result.FileSystem;
 
         var part = $"/dev/{disk.Name}1";
-        var mountPoint = $"/mnt/raid-util/{label}";
+        //var mountPoint = $"/mnt/raid-util/{label}";
+        var mountPoint = $"/run/media/{Environment.UserName}/{label}";
+
 
         using (LoadingService.Show($"Initializing /dev/{disk.Name}..."))
         {
