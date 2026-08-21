@@ -1,5 +1,6 @@
 ﻿using System;
 using Avalonia;
+using RAID_Util.Helpers;
 
 namespace RAID_Util;
 
@@ -11,6 +12,15 @@ internal class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        bool hasDisplay = Environment.GetEnvironmentVariable("DISPLAY") != null;
+        bool isTerminal = !Console.IsInputRedirected && !Console.IsOutputRedirected;
+
+        if (!hasDisplay && isTerminal)
+        {
+            CliApp.Run().Wait();
+            return;
+        }
+
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
     }
