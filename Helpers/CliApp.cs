@@ -138,7 +138,12 @@ namespace RAID_Util.Helpers
                 return;
             }
 
-            Console.WriteLine(stdout.Trim());
+            // Filtrar líneas duplicadas en la salida general por si mdadm.conf tiene entradas repetidas
+            var uniqueLines = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                     .Select(l => l.Trim())
+                                     .Distinct();
+
+            Console.WriteLine(string.Join(Environment.NewLine, uniqueLines));
         }
 
         private static async Task ShowArrayDetails()
@@ -308,7 +313,7 @@ namespace RAID_Util.Helpers
             int count = driveList.Length;
 
             Console.WriteLine($"\nConfiguration Summary:");
-            Console.WriteLine($"  Device:     {devName}");
+            Console.WriteLine($"  Device:      {devName}");
             Console.WriteLine($"  RAID Level: {level}");
             Console.WriteLine($"  Devices:    {string.Join(", ", driveList)} ({count} total)");
 
@@ -402,7 +407,8 @@ namespace RAID_Util.Helpers
                 }
             }
 
-            return list;
+            // Aplicar Distinct para evitar elementos duplicados en la lista de opciones
+            return list.Distinct().ToList();
         }
     }
 }
