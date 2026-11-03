@@ -3,7 +3,6 @@
 <img width="630" height="738" alt="image" src="https://github.com/user-attachments/assets/a0f5a833-50f7-4513-809e-3d9479365e68" />
 
 https://wiki.archlinux.org/title/Raid-util-bin
-
 ---
 
 # RAID‑Util
