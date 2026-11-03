@@ -1,3 +1,9 @@
+
+---
+<img width="630" height="738" alt="image" src="https://github.com/user-attachments/assets/a0f5a833-50f7-4513-809e-3d9479365e68" />
+
+---
+
 # RAID‑Util
 
 RAID -> (Redundant Array of Independent Disks)
