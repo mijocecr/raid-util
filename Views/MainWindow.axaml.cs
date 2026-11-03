@@ -84,7 +84,7 @@ public partial class MainWindow : Window
         // 1) UNIVERSAL SUDO VALIDATION
         // ============================================================
 
-        const int maxAttempts = 2;
+        const int maxAttempts = 1;
         var attempts = 0;
 
         while (true)
@@ -117,15 +117,15 @@ public partial class MainWindow : Window
                 StatusBarText.Text = "Sudo is not accepting authentication.";
 
                 await new InfoDialog(
-                    "Sudo Blocked",
+                    "Sudo Authentication Failed",
                     "Sudo is not accepting authentication.\n\n" +
                     "Possible causes:\n" +
                     "• Too many failed attempts (faillock)\n" +
                     "• PAM lockout\n" +
                     "• sudoers restrictions\n" +
                     "• Incorrect password\n\n" +
-                    "To unlock sudo:\n" +
-                    "sudo faillock --reset"
+                    "To avoid triggering an account lockout, RAID-Util will not retry automatically. " +
+                    "Check the password or ask your system administrator before trying again."
                 ).ShowDialog(this);
 
                 if (attempts >= maxAttempts)

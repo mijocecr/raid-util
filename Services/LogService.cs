@@ -140,4 +140,13 @@ public static class LogService
 
     public static void Debug(string message)
         => WriteInternal("[DEBUG] ", message, level: 2);
+    
+    
+    public static void Warn(string message)
+        => WriteInternal("[WARNING] ", message, level: 2);
 }
+
+    
+
+
+

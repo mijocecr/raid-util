@@ -43,8 +43,6 @@ public partial class DisksView : UserControl
                 await RefreshDisksAsync();
             };
         }
-        
-        
     }
 
     private static void EnsureResources()
@@ -83,7 +81,6 @@ public partial class DisksView : UserControl
                 LoadFakeData();
             else
                 await LoadRealDataAsync();
-
         }
 
         RenderDisks();
@@ -95,13 +92,11 @@ public partial class DisksView : UserControl
 
         using (LoadingService.Show("Refreshing disks..."))
         {
-            await LoadRealDataAsync();   // ⬅️ async, sin Task.Run
+            await LoadRealDataAsync();   
         }
 
         RenderDisks();
     }
-
-
 
     private void LoadFakeData()
     {
@@ -184,7 +179,6 @@ public partial class DisksView : UserControl
         RenderDisks();
     }
 
-
     private void RenderDisks()
     {
         DiskList.Children.Clear();
@@ -194,185 +188,179 @@ public partial class DisksView : UserControl
     }
 
     private Border BuildDiskCard(RaidDiskInfo disk)
-{
-    EnsureResources();
-
-    disk.Model ??= "Unknown";
-    disk.Serial ??= "Unknown";
-    disk.Size ??= "Unknown";
-    disk.FsType ??= "";
-    disk.MountPath ??= "";
-    disk.State ??= "UNKNOWN";
-
-    string temperature = GetTemperature(disk);
-
-    string type =
-        disk.IsNvme ? "NVMe" :
-        !disk.IsRotational ? "SSD" :
-        "HDD";
-
-    // ⭐ Forzar tipo real sin cambiar firmas
-    string iconHint = disk.Icon;
-
-    if (disk.IsNvme)
-        iconHint = "nvme";
-    else if (disk.IsUsb)
-        iconHint = "usb";
-    else if (disk.IsIscsi)
-        iconHint = "iscsi";
-    else if (disk.IsVirtual)
-        iconHint = "virtual";
-
-    var fixedIcon = DiskIconService.GetIcon(iconHint, disk.Model, disk.IsRotational);
-    var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
-    icon.Stretch = Stretch.Uniform;
-
-    var iconContainer = new Border
     {
-        Width = 80,
-        Height = 80,
-        Margin = new Thickness(0, 0, 16, 0),
-        VerticalAlignment = VerticalAlignment.Top,
-        Child = icon
-    };
+        EnsureResources();
 
-    var details = new Grid();
-    for (var i = 0; i < 6; i++)
-        details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        disk.Model ??= "Unknown";
+        disk.Serial ??= "Unknown";
+        disk.Size ??= "Unknown";
+        disk.FsType ??= "";
+        disk.MountPath ??= "";
+        disk.State ??= "UNKNOWN";
 
-    var r = 0;
+        string temperature = GetTemperature(disk);
 
-    void AddRow(Control c)
-    {
-        details.Children.Add(c);
-        Grid.SetRow(c, r++);
-    }
+        string type =
+            disk.IsNvme ? "NVMe" :
+            !disk.IsRotational ? "SSD" :
+            "HDD";
 
-    AddRow(new TextBlock
-    {
-        Text = disk.Model,
-        TextWrapping = TextWrapping.Wrap,
-        FontSize = 16,
-        FontWeight = FontWeight.Bold,
-        Foreground = _bmwTextBrush
-    });
+        string iconHint = disk.Icon;
 
-    AddRow(new TextBlock
-    {
-        Text = $"/dev/{disk.Name}  •  {disk.Size}",
-        Foreground = _bmwTextDimBrush
-    });
+        if (disk.IsNvme)
+            iconHint = "nvme";
+        else if (disk.IsUsb)
+            iconHint = "usb";
+        else if (disk.IsIscsi)
+            iconHint = "iscsi";
+        else if (disk.IsVirtual)
+            iconHint = "virtual";
 
-    AddRow(new TextBlock
-    {
-        Text = $"Type: {type}",
-        Foreground = _bmwTextDimBrush
-    });
+        var fixedIcon = DiskIconService.GetIcon(iconHint, disk.Model, disk.IsRotational);
+        var icon = DiskIconHelper.LoadImage(fixedIcon, 80);
+        icon.Stretch = Stretch.Uniform;
 
-    AddRow(new TextBlock
-    {
-        Text = $"Serial: {disk.Serial}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    AddRow(new TextBlock
-    {
-        Text = $"Temperature: {temperature}",
-        Foreground = _bmwTextDimBrush
-    });
-
-    // ⭐ Nuevo: mostrar estado SMART real
-    AddRow(new TextBlock
-    {
-        Text = $"Status: {disk.SmartStatus}",
-        Foreground = _bmwAccentBrush
-    });
-
-    var btnMore = new Button
-    {
-        Content = "More",
-        HorizontalContentAlignment = HorizontalAlignment.Center,
-        Height = 32,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        VerticalAlignment = VerticalAlignment.Top
-    };
-    btnMore.Classes.Add("MoreButton");
-
-    if (!disk.IsSystemDisk)
-    {
-        var menu = BuildDiskContextMenu(disk);
-
-        foreach (var item in menu.Items.OfType<MenuItem>())
-            item.Click += (_, _) =>
-            {
-                var action = item.Tag?.ToString();
-                OnMenuClick(disk, action);
-            };
-
-        btnMore.ContextMenu = menu;
-
-        btnMore.Click += (_, _) =>
+        var iconContainer = new Border
         {
-            menu.PlacementTarget = btnMore;
-            menu.Open(btnMore);
+            Width = 80,
+            Height = 80,
+            Margin = new Thickness(0, 0, 16, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = icon
+        };
+
+        var details = new Grid();
+        for (var i = 0; i < 6; i++)
+            details.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+
+        var r = 0;
+
+        void AddRow(Control c)
+        {
+            details.Children.Add(c);
+            Grid.SetRow(c, r++);
+        }
+
+        AddRow(new TextBlock
+        {
+            Text = disk.Model,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 16,
+            FontWeight = FontWeight.Bold,
+            Foreground = _bmwTextBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"/dev/{disk.Name}  •  {disk.Size}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Type: {type}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Serial: {disk.Serial}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Temperature: {temperature}",
+            Foreground = _bmwTextDimBrush
+        });
+
+        AddRow(new TextBlock
+        {
+            Text = $"Status: {disk.SmartStatus}",
+            Foreground = _bmwAccentBrush
+        });
+
+        var btnMore = new Button
+        {
+            Content = "More",
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Height = 32,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        btnMore.Classes.Add("MoreButton");
+
+        if (!disk.IsSystemDisk)
+        {
+            var menu = BuildDiskContextMenu(disk);
+
+            foreach (var item in menu.Items.OfType<MenuItem>())
+                item.Click += (_, _) =>
+                {
+                    var action = item.Tag?.ToString();
+                    OnMenuClick(disk, action);
+                };
+
+            btnMore.ContextMenu = menu;
+
+            btnMore.Click += (_, _) =>
+            {
+                menu.PlacementTarget = btnMore;
+                menu.Open(btnMore);
+            };
+        }
+        else
+        {
+            btnMore.IsVisible = false;
+        }
+
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+
+        grid.Children.Add(iconContainer);
+        Grid.SetColumn(iconContainer, 0);
+        Grid.SetRowSpan(iconContainer, r);
+
+        grid.Children.Add(details);
+        Grid.SetColumn(details, 1);
+
+        grid.Children.Add(btnMore);
+        Grid.SetColumn(btnMore, 2);
+        Grid.SetRow(btnMore, 0);
+
+        return new Border
+        {
+            Background = _bmwSurfaceElevatedBrush,
+            BorderBrush = _bmwBorderBrush,
+            BorderThickness = _cardBorderThickness,
+            CornerRadius = _cardCornerRadius,
+            Padding = _cardPadding,
+            Margin = _cardMargin,
+            Child = grid
         };
     }
-    else
-    {
-        btnMore.IsVisible = false;
-    }
 
-    var grid = new Grid
-    {
-        ColumnDefinitions =
-        {
-            new ColumnDefinition(GridLength.Auto),
-            new ColumnDefinition(GridLength.Star),
-            new ColumnDefinition(GridLength.Auto)
-        }
-    };
-
-    grid.Children.Add(iconContainer);
-    Grid.SetColumn(iconContainer, 0);
-    Grid.SetRowSpan(iconContainer, r);
-
-    grid.Children.Add(details);
-    Grid.SetColumn(details, 1);
-
-    grid.Children.Add(btnMore);
-    Grid.SetColumn(btnMore, 2);
-    Grid.SetRow(btnMore, 0);
-
-    return new Border
-    {
-        Background = _bmwSurfaceElevatedBrush,
-        BorderBrush = _bmwBorderBrush,
-        BorderThickness = _cardBorderThickness,
-        CornerRadius = _cardCornerRadius,
-        Padding = _cardPadding,
-        Margin = _cardMargin,
-        Child = grid
-    };
-}
-
-    
     private ContextMenu BuildDiskContextMenu(RaidDiskInfo disk)
     {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
 
-        // Siempre disponibles
         items.Add(new MenuItem { Header = "View Info", Tag = "info" });
         items.Add(new MenuItem { Header = "SMART", Tag = "smart" });
 
-        // 1) Discos del sistema → solo info + smart
         if (disk.IsSystemDisk || SystemDiskDetector.IsSystemDisk(disk.Name))
         {
             menu.ItemsSource = items;
             return menu;
         }
 
-        // 2) Discos RAID activos → bloquear destructivas
         if (disk.IsUsedByRaid &&
             !disk.Role.Equals("removed", StringComparison.OrdinalIgnoreCase))
         {
@@ -380,7 +368,6 @@ public partial class DisksView : UserControl
             return menu;
         }
 
-        // 3) Si el propio disco está montado → solo unmount
         if (disk.IsMounted)
         {
             items.Add(new MenuItem { Header = "Unmount", Tag = "unmount" });
@@ -388,29 +375,19 @@ public partial class DisksView : UserControl
             return menu;
         }
 
-        // 4) Si alguna partición hija está montada → también bloquear destructivas
         if (HasMountedChildren(disk))
         {
-            // No hay unmount directo a nivel disco, así que solo info + smart
             menu.ItemsSource = items;
             return menu;
         }
 
-        // 5) A partir de aquí:
-        //    - No es sistema
-        //    - No está en RAID activo (solo removed o fuera de RAID)
-        //    - No está montado
-        //    - No tiene particiones montadas
-        //    → se permiten operaciones destructivas
-        items.Add(new MenuItem { Header = "Wipe Disk", Tag = "wipe" });
-        items.Add(new MenuItem { Header = "Zero Superblock", Tag = "zerosb" });
-        items.Add(new MenuItem { Header = "Create Partition Table", Tag = "ptable" });
+        // Acciones destructivas unificadas y optimizadas
+        items.Add(new MenuItem { Header = "Deep Clean Disk", Tag = "deepclean" });
         items.Add(new MenuItem { Header = "Initialize", Tag = "init" });
 
         menu.ItemsSource = items;
         return menu;
     }
-
 
     private static bool HasMountedChildren(RaidDiskInfo disk)
     {
@@ -432,7 +409,6 @@ public partial class DisksView : UserControl
 
                 var dev = parts[0];
 
-                // /dev/sdX1, /dev/nvme0n1p1, etc.
                 foreach (var child in disk.Children)
                 {
                     if (dev.Equals($"/dev/{child}", StringComparison.Ordinal))
@@ -442,15 +418,11 @@ public partial class DisksView : UserControl
         }
         catch
         {
-            // En caso de duda, mejor ser conservador
             return true;
         }
 
         return false;
     }
-
-
-    
 
     private async void OnMenuClick(RaidDiskInfo disk, string? action)
     {
@@ -459,8 +431,7 @@ public partial class DisksView : UserControl
 
         var act = action.Trim().ToLowerInvariant();
 
-        bool IsDestructive(string a) =>
-            a is "wipe" or "zerosb" or "ptable" or "init";
+        bool IsDestructive(string a) => a is "deepclean" or "init";
 
         if (IsDestructive(act))
         {
@@ -498,16 +469,8 @@ public partial class DisksView : UserControl
                 await UnmountDisk(disk);
                 break;
 
-            case "wipe":
-                await WipeDisk(disk);
-                break;
-
-            case "zerosb":
-                await ZeroSuperblock(disk);
-                break;
-
-            case "ptable":
-                await CreatePartitionTable(disk);
+            case "deepclean":
+                await DeepCleanDisk(disk);
                 break;
 
             case "init":
@@ -624,70 +587,57 @@ public partial class DisksView : UserControl
         }
 
         await ShowInfoDialog("Unmount", "Disk unmounted successfully.");
-
         await LoadRealDataAsync();
-
         RenderDisks();
     }
 
-    private async Task WipeDisk(RaidDiskInfo disk)
+    private async Task DeepCleanDisk(RaidDiskInfo disk)
     {
-        var confirm = await ShowConfirm("Wipe Disk", $"This will erase ALL signatures on /dev/{disk.Name}. Continue?");
+        var confirm = await ShowConfirm(
+            "Deep Clean Disk", 
+            $"WARNING: This will completely destroy all data, RAID superblocks, and partition tables on /dev/{disk.Name} (including tail superblocks). Continue?"
+        );
         if (!confirm) return;
 
-        var r = ShellHelper.EjecutarComoRoot($"wipefs -a /dev/{disk.Name}");
-
-        if (r.ExitCode != 0)
+        using (LoadingService.Show($"Deep cleaning /dev/{disk.Name}..."))
         {
-            await ShowInfoDialog("Error", "Could not wipe the disk.");
-            return;
+            await Task.Run(() =>
+            {
+                var devPath = $"/dev/{disk.Name}";
+
+                // 1. Aniquilar superbloques RAID persistentes
+                ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock --force {devPath}");
+                
+                // 2. Limpiar firmas de sistemas de ficheros y particiones
+                var r2 = ShellHelper.EjecutarComoRoot($"wipefs -a -f {devPath}");
+                if (r2.ExitCode != 0)
+                {
+                    LogService.Warn($"[DISKSVIEW] wipefs devolvió código no cero en {devPath}");
+                }
+
+                // 3. Destruir tablas GPT/MBR y cabeceras de respaldo finales
+                ShellHelper.EjecutarComoRoot($"sgdisk --zap-all {devPath}");
+
+                // 4. Asegurar ceros preventivos en bloques clave
+                try
+                {
+                    ShellHelper.EjecutarComoRoot($"dd if=/dev/zero of={devPath} bs=1M count=10 status=none conv=fdatasync");
+                    ShellHelper.EjecutarComoRoot($"blockdev --rereadpt {devPath}");
+                }
+                catch (Exception ex)
+                {
+                    LogService.Warn($"[DISKSVIEW] Falló la purga por bloques: {ex.Message}");
+                }
+
+                // 5. Notificar al kernel
+                ShellHelper.EjecutarComoRoot($"partprobe {devPath}");
+                ShellHelper.EjecutarComoRoot("udevadm settle");
+            });
         }
 
-        await ShowInfoDialog("Wipe Disk", "Disk wiped successfully.");
+        await ShowInfoDialog("Deep Clean", $"Disk /dev/{disk.Name} has been thoroughly wiped and cleaned.");
 
         await LoadRealDataAsync();
-
-        RenderDisks();
-    }
-
-    private async Task ZeroSuperblock(RaidDiskInfo disk)
-    {
-        var confirm = await ShowConfirm("Zero Superblock", $"Remove RAID metadata from /dev/{disk.Name}?");
-        if (!confirm) return;
-
-        var r = ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock /dev/{disk.Name}");
-
-        if (r.ExitCode != 0)
-        {
-            await ShowInfoDialog("Error", "Could not zero the superblock.");
-            return;
-        }
-
-        await ShowInfoDialog("Zero Superblock", "Superblock removed.");
-
-        await LoadRealDataAsync();
-
-        RenderDisks();
-    }
-
-    private async Task CreatePartitionTable(RaidDiskInfo disk)
-    {
-        var confirm = await ShowConfirm("Create Partition Table",
-            $"Create a new GPT table on /dev/{disk.Name}? This erases ALL partitions.");
-        if (!confirm) return;
-
-        var r = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
-
-        if (r.ExitCode != 0)
-        {
-            await ShowInfoDialog("Error", "Could not create partition table.");
-            return;
-        }
-
-        await ShowInfoDialog("Partition Table", "GPT partition table created.");
-
-        await LoadRealDataAsync();
-
         RenderDisks();
     }
 
@@ -704,30 +654,23 @@ public partial class DisksView : UserControl
         var fs = result.FileSystem;
 
         var part = $"/dev/{disk.Name}1";
-        //var mountPoint = $"/mnt/raid-util/{label}";
         var mountPoint = $"/run/media/{Environment.UserName}/{label}";
-
 
         using (LoadingService.Show($"Initializing /dev/{disk.Name}..."))
         {
             await Task.Run(() =>
             {
-               
-                ///////////////
-                                var r1 = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
+                var r1 = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
                 if (r1.ExitCode != 0)
                     throw new Exception("Failed to create partition table.");
 
-                // Crear partición
                 var r2 = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mkpart primary 0% 100%");
                 if (r2.ExitCode != 0)
                     throw new Exception("Failed to create partition.");
 
-                // Notificar al kernel
                 ShellHelper.EjecutarComoRoot("partprobe");
                 ShellHelper.EjecutarComoRoot("udevadm settle");
 
-                // Esperar a que /dev/sdX1 exista
                 for (int i = 0; i < 20; i++)
                 {
                     if (File.Exists(part))
@@ -738,7 +681,6 @@ public partial class DisksView : UserControl
                 if (!File.Exists(part))
                     throw new Exception($"Partition {part} not detected.");
 
-                // Crear filesystem
                 var cmd = fs switch
                 {
                     "ext4" => $"mkfs.ext4 -F -L \"{label}\" {part}",
@@ -755,14 +697,11 @@ public partial class DisksView : UserControl
                 if (r3.ExitCode != 0)
                     throw new Exception("Filesystem creation failed.");
 
-                // Crear directorio de montaje
                 ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
 
-                // Montar
                 MountService.Unmount(mountPoint);
                 MountService.Mount(part, mountPoint);
 
-                // Permisos
                 ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
             });
         }
@@ -773,7 +712,6 @@ public partial class DisksView : UserControl
         );
 
         await LoadRealDataAsync();
-
         RenderDisks();
     }
 }
