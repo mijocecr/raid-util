@@ -27,8 +27,6 @@ namespace RAID_Util.Views;
 
 public partial class RaidView : UserControl
 {
-    private const bool FORCE_FAKE_DATA = false;
-
     private static readonly Thickness DiskCardPadding = new(12);
     private static readonly Thickness DiskCardMargin = new(0, 0, 0, 10);
     private static readonly CornerRadius DiskCardRadius = new(8);
@@ -101,11 +99,9 @@ public partial class RaidView : UserControl
             };
         }
 
-        if (FORCE_FAKE_DATA)
-            LoadFakeData();
     }
 
-    public bool IsFakeMode => FORCE_FAKE_DATA;
+    public bool IsFakeMode => false;
 
     // ----------------- ESTADO DE ARRAYS -----------------
 
@@ -370,23 +366,25 @@ public partial class RaidView : UserControl
         IsChecked = _selectedArray == array
     };
 
-    chkSelect.Checked += (_, _) =>
+    chkSelect.IsCheckedChanged += (_, _) =>
     {
-        _selectedArray = array;
-        ClearOtherSelections(array);
-        BtnDeleteArray.IsEnabled = true;
-        BtnConfigArrays.IsEnabled = true;
-        BtnInitialize.IsEnabled = true;
-    };
+        if (chkSelect.IsChecked == true)
+        {
+            _selectedArray = array;
+            ClearOtherSelections(array);
+            BtnDeleteArray.IsEnabled = true;
+            BtnConfigArrays.IsEnabled = true;
+            BtnInitialize.IsEnabled = true;
+        }
+        else
+        {
+            if (_selectedArray == array)
+                _selectedArray = null;
 
-    chkSelect.Unchecked += (_, _) =>
-    {
-        if (_selectedArray == array)
-            _selectedArray = null;
-
-        BtnDeleteArray.IsEnabled = false;
-        BtnConfigArrays.IsEnabled = false;
-        BtnInitialize.IsEnabled = false;
+            BtnDeleteArray.IsEnabled = false;
+            BtnConfigArrays.IsEnabled = false;
+            BtnInitialize.IsEnabled = false;
+        }
     };
 
     var btnMore = new Button
@@ -681,18 +679,18 @@ public partial class RaidView : UserControl
             if (nameBlock == null)
                 continue;
 
-            if (!nameBlock.Text.StartsWith(array.Name))
+            if (nameBlock.Text is null || !nameBlock.Text.StartsWith(array.Name, StringComparison.Ordinal))
                 continue;
 
             var progressText = infoPanel.Children
                 .OfType<TextBlock>()
                 .FirstOrDefault(t =>
-                    t.Text.Contains("%") ||
-                    t.Text.Contains("Resyncing") ||
-                    t.Text.Contains("Rebuilding") ||
-                    t.Text.Contains("Checking") ||
-                    t.Text.Contains("Repairing") ||
-                    t.Text.Contains("Recovering"));
+                    t.Text?.Contains("%", StringComparison.Ordinal) == true ||
+                    t.Text?.Contains("Resyncing", StringComparison.Ordinal) == true ||
+                    t.Text?.Contains("Rebuilding", StringComparison.Ordinal) == true ||
+                    t.Text?.Contains("Checking", StringComparison.Ordinal) == true ||
+                    t.Text?.Contains("Repairing", StringComparison.Ordinal) == true ||
+                    t.Text?.Contains("Recovering", StringComparison.Ordinal) == true);
 
             var barContainer = infoPanel.Children
                 .OfType<Border>()
@@ -853,13 +851,8 @@ public partial class RaidView : UserControl
     
     private Control BuildMountOptions(RaidArrayInfo array)
 {
-    var cfg = ArrayConfigService.Load(array.Name);
-
-    var user = Environment.UserName;
-
-    var mountPoint = string.IsNullOrWhiteSpace(cfg.MountPoint)
-        ? $"/run/media/{user}/{array.Name}"
-        : cfg.MountPoint;
+    var cfg = ArrayConfigService.Load(array.BaseName);
+    var mountPoint = MountOptionsService.EffectiveArrayMountPoint(array.Name, cfg.MountPoint);
 
     var isMounted = MountService.IsMounted(mountPoint);
 
@@ -895,20 +888,8 @@ public partial class RaidView : UserControl
             }
             else
             {
-                var opts = new List<string>();
-
-                if (cfg.Mount_NoAtime) opts.Add("noatime");
-                if (cfg.Mount_NoDirAtime) opts.Add("nodiratime");
-                if (cfg.Mount_Discard) opts.Add("discard");
-                if (cfg.Mount_Sync) opts.Add("sync");
-                if (cfg.Mount_ReadOnly) opts.Add("ro");
-
-                var mountOpts = opts.Count == 0 ? "defaults" : string.Join(",", opts);
-
-                MountService.Mount(array.Path, mountPoint, mountOpts);
-
-                ShellHelper.EjecutarComoRoot(
-                    $"chmod {cfg.MountPermissions} \"{mountPoint}\"");
+                if (!MountService.Mount(array.Path, mountPoint, cfg))
+                    await ShowInfo("Error", $"No se pudo montar {array.Path} en {mountPoint}.");
             }
 
             BuildUI();
@@ -1207,8 +1188,11 @@ public partial class RaidView : UserControl
             {
                 case "smart":
                 {
-                    var result = ShellHelper.EjecutarComoRoot(
-                        $"smartctl -a /dev/{disk.Name}");
+                    var device = InputValidation.NormalizeDevicePath(disk.Name);
+                    var result = await ShellHelper.RunRootAsync(
+                        ToolLocator.ResolveOrThrow("smartctl"),
+                        new[] { "-a", device },
+                        timeout: TimeSpan.FromSeconds(30));
 
                     var info = result.Stdout + "\n" + result.Stderr;
 
@@ -1221,26 +1205,16 @@ public partial class RaidView : UserControl
 
                 case "faulty":
                 {
-                    if (array.Level.Equals("linear", StringComparison.OrdinalIgnoreCase) ||
-                        array.Level.Equals("raid0", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ShellHelper.EjecutarComoRoot(
-                            $"mdadm {array.Path} --remove /dev/{disk.Name}");
-                    }
-                    else
-                    {
-                        ShellHelper.EjecutarComoRoot(
-                            $"mdadm {array.Path} --fail /dev/{disk.Name}");
-                    }
-
+                    var op = await ArrayOperationsService.MarkFaultyAsync(array, disk.Name);
+                    await ShowInfo(op.Success ? "Disk marked faulty" : "Disk action failed", op.Message);
                     await LoadRaidAsync();
                     break;
                 }
 
                 case "spare":
                 {
-                    ShellHelper.EjecutarComoRoot(
-                        $"mdadm {array.Path} --set-spare /dev/{disk.Name}");
+                    var op = await ArrayOperationsService.SetSpareAsync(array, disk.Name);
+                    await ShowInfo(op.Success ? "Disk set as spare" : "Disk action failed", op.Message);
                     await LoadRaidAsync();
                     break;
                 }
@@ -1264,32 +1238,22 @@ public partial class RaidView : UserControl
                     if (!confirm)
                         return;
 
+                    OperationResult op;
                     using (LoadingService.Show("Converting spare to active...", this.GetVisualRoot() as Window))
                     {
-                        await Task.Run(() =>
-                        {
-                            string cmd =
-                                $"mdadm --grow {array.Path} --raid-devices={newCount}";
-                            ShellHelper.EjecutarComoRoot(cmd);
-                        });
+                        op = await ArrayOperationsService.ActivateSpareAsync(array, newCount);
                     }
 
-                    await ShowConfirm("Done", $"{disk.Name} is now active.");
+                    await ShowInfo(op.Success ? "Done" : "Disk action failed", op.Message);
                     await LoadRaidAsync();
                     break;
                 }
 
                 case "recover_faulty":
                 {
-                    ShellHelper.EjecutarComoRoot(
-                        $"mdadm {array.Path} --remove /dev/{disk.Name}");
-                    ShellHelper.EjecutarComoRoot(
-                        $"mdadm {array.Path} --add /dev/{disk.Name}");
-
+                    var op = await ArrayOperationsService.RecoverFaultyAsync(array, disk.Name);
+                    await ShowInfo(op.Success ? "Disk recovered" : "Disk recovery failed", op.Message);
                     await LoadRaidAsync();
-
-                    NotificadorLinux.Enviar(
-                        $"Disk recovered:\n/dev/{disk.Name} re-added to {array.Name}\nRebuild started.");
                     break;
                 }
             }
@@ -1308,7 +1272,7 @@ public partial class RaidView : UserControl
         _monitoringArrayName = array.Name;
         _monitoringBorder = cardBorder;
 
-        var cfg = ArrayConfigService.Load(array.Name);
+        var cfg = ArrayConfigService.Load(array.BaseName);
 
         RaidAlertService.StartMonitoring(array.Name, cfg, msg =>
         {
@@ -1577,13 +1541,13 @@ public partial class RaidView : UserControl
 
         var dlg = new FormatArrayDialog(array.Name);
         var owner = this.GetVisualRoot() as Window;
-        var result = await dlg.ShowDialog<FormatArrayResult?>(owner);
+        var result = await dlg.ShowDialog<FormatArrayResult?>(owner ?? new Window());
 
         if (result == null)
             return;
 
         var loading = new LoadingDialog($"Initializing {array.Name}...");
-        loading.Show(owner);
+        loading.Show(owner ?? new Window());
 
         var ok = false;
 
@@ -2027,8 +1991,8 @@ public partial class RaidView : UserControl
 
                 await Task.WhenAll(arraysTask, disksTask);
 
-                return (arraysTask.Result ?? new List<RaidArrayInfo>(),
-                    disksTask.Result ?? new List<RaidDiskInfo>());
+                return (await arraysTask ?? new List<RaidArrayInfo>(),
+                    await disksTask ?? new List<RaidDiskInfo>());
             });
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -2123,16 +2087,7 @@ public partial class RaidView : UserControl
     bool isMountedRO = false;
 
     if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
-    {
-        var mountInfo = ShellHelper.EjecutarComoRoot($"mount | grep ' {array.MountPath} '");
-
-        if (mountInfo.ExitCode == 0)
-        {
-            var line = mountInfo.Stdout.ToLowerInvariant();
-            if (line.Contains("(ro,") || line.Contains(" ro,"))
-                isMountedRO = true;
-        }
-    }
+        isMountedRO = MountService.IsMountedReadOnly(array.MountPath);
 
     try
     {
@@ -2321,7 +2276,7 @@ public partial class RaidView : UserControl
             }
 
             case "reshape":
-                if (!ArrayAllowsExpansion(array))
+                if (!ArrayOperationsService.CanExpand(array))
                 {
                     await ShowConfirm("Not allowed", "This array cannot be expanded.");
                     return;
@@ -2330,6 +2285,12 @@ public partial class RaidView : UserControl
                 int active = array.Disks.Count(d => d.RaidMembership == RaidMembership.Active);
                 int spares = array.Disks.Count(d => d.RaidMembership == RaidMembership.Spare);
                 int newCount = active + spares;
+
+                if (newCount <= active)
+                {
+                    await ShowConfirm("Not allowed", "No spare disks are available to expand this array.");
+                    return;
+                }
 
                 bool confirm = await ShowConfirm(
                     "Expand RAID Array",
@@ -2346,37 +2307,14 @@ public partial class RaidView : UserControl
                 UpdateArrayCardProgress(array);
 
                 var owner = this.GetVisualRoot() as Window;
+                OperationResult op;
 
                 using (LoadingService.Show("Expanding RAID array...", owner))
                 {
-                    await Task.Run(() =>
-                    {
-                        string cmd =
-                            $"mdadm --grow {array.Path} --raid-devices={newCount}";
-                        ShellHelper.EjecutarComoRoot(cmd);
-                    });
+                    op = await Task.Run(() => ArrayOperationsService.GrowAsync(array, newCount));
                 }
 
-                await ShowConfirm("Reshape started",
-                    $"The array {array.Name} is now reshaping.");
-
-                await Task.Run(() =>
-                {
-                    while (true)
-                    {
-                        var stat = File.ReadAllText("/proc/mdstat");
-                        if (!stat.Contains("reshape"))
-                            break;
-
-                        Thread.Sleep(2000);
-                    }
-                });
-
-                string fs = DetectArrayFileSystem(array.Name);
-
-                if (!string.IsNullOrWhiteSpace(fs))
-                    ResizeArrayFileSystem(array.Name, fs);
-
+                await ShowInfo(op.Success ? "Reshape started" : "Reshape failed", op.Message);
                 await LoadRaidAsync();
                 break;
 
@@ -2393,71 +2331,6 @@ public partial class RaidView : UserControl
 }
 
    
-
-    private string DetectArrayFileSystem(string arrayName)
-    {
-        if (!arrayName.StartsWith("/dev/"))
-            arrayName = "/dev/" + arrayName;
-
-        var blkid = ShellHelper.EjecutarComoRoot($"blkid {arrayName}");
-        if (blkid.ExitCode != 0)
-            return null;
-
-        foreach (var part in blkid.Stdout.Split(' '))
-        {
-            if (part.StartsWith("TYPE="))
-            {
-                return part.Replace("TYPE=", "")
-                    .Replace("\"", "")
-                    .Trim();
-            }
-        }
-
-        return null;
-    }
-
-    private void ResizeArrayFileSystem(string arrayName, string fsType)
-    {
-        if (!arrayName.StartsWith("/dev/"))
-            arrayName = "/dev/" + arrayName;
-
-        switch (fsType.ToLowerInvariant())
-        {
-            case "ext4":
-            case "ext3":
-            case "ext2":
-                ShellHelper.EjecutarComoRoot($"resize2fs {arrayName}");
-                break;
-
-            case "xfs":
-                var mount = ShellHelper.EjecutarSinRoot(
-                    $"findmnt -n -o TARGET {arrayName}");
-
-                if (mount.ExitCode == 0 && !string.IsNullOrWhiteSpace(mount.Stdout))
-                {
-                    string mp = mount.Stdout.Trim();
-                    ShellHelper.EjecutarComoRoot($"xfs_growfs {mp}");
-                }
-
-                break;
-
-            case "btrfs":
-                var m2 = ShellHelper.EjecutarSinRoot(
-                    $"findmnt -n -o TARGET {arrayName}");
-
-                if (m2.ExitCode == 0 && !string.IsNullOrWhiteSpace(m2.Stdout))
-                {
-                    string mp = m2.Stdout.Trim();
-                    ShellHelper.EjecutarComoRoot($"btrfs filesystem resize max {mp}");
-                }
-
-                break;
-
-            default:
-                LogService.Info($"[RESHAPE] Filesystem '{fsType}' not supported for auto-resize.");
-                break;
-        }
-    }
 
     private async Task RemoveDiskFromArrayUI(RaidArrayInfo array, string diskName)
     {
@@ -2485,7 +2358,7 @@ public partial class RaidView : UserControl
                 return;
 
             var loading = new LoadingDialog($"Removing {normalized}...");
-            loading.Show(owner);
+            loading.Show(owner ?? new Window());
 
             try
             {
@@ -2596,29 +2469,5 @@ public partial class RaidView : UserControl
         await LoadRaidAsync();
     }
 
-    private bool ArrayAllowsExpansion(RaidArrayInfo array)
-    {
-        if (array == null)
-            return false;
-
-        var level = array.Level?
-            .Replace(" ", "")
-            .Replace("-", "")
-            .ToUpperInvariant() ?? "";
-
-        if (level is not ("RAID5" or "RAID6" or "RAID10"))
-            return false;
-
-        if (array.IsResyncing || array.IsRecovering || array.IsChecking || array.IsRepairing)
-            return false;
-
-        if (!array.IsActive && !array.IsClean)
-            return false;
-
-        if (array.RebuildProgress > 0)
-            return false;
-
-        return true;
-    }
 }
 //Este esta bien asi

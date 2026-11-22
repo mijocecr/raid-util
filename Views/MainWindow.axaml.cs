@@ -84,79 +84,58 @@ public partial class MainWindow : Window
         // 1) UNIVERSAL SUDO VALIDATION
         // ============================================================
 
-        const int maxAttempts = 1;
-        var attempts = 0;
+        // La contraseña se entrega al proceso de sudo y se descarta; nunca se
+        // guarda en Credentials.AdminPassword. El prompt se marshalla al hilo UI.
+        PrivilegeSession.SetPasswordPrompt(
+            () => Dispatcher.UIThread.InvokeAsync(() => SolicitarPassword()));
 
-        while (true)
+        try
         {
-            attempts++;
+            // sudo -n se prueba primero: si ya hay timestamp no se muestra diálogo
+            // y ningún sudo queda esperando input en segundo plano.
+            var probe = await Task.Run(() => PrivilegeSession.RunRootAsync(
+                new[] { "true" }, timeout: TimeSpan.FromSeconds(20)));
 
-            LogService.Debug($"[MAIN] Requesting admin password... attempt {attempts}");
-            await SolicitarPassword();
+            if (!probe.Success)
+                throw new InvalidOperationException(probe.Stderr.Trim());
 
-            if (string.IsNullOrWhiteSpace(Credentials.AdminPassword))
-            {
-                StatusBarText.Text = "Initialization aborted.";
-                LogService.Error("[MAIN] No password provided.");
-                return;
-            }
-
-            StatusBarText.Text = "Validating password...";
-            LogService.Debug("[MAIN] Validating admin password...");
-
-            var sudoResult = await Task.Run(() => ShellHelper.EjecutarComoRoot("true"));
-            var (exit, stdout, stderr) = sudoResult;
-
-            LogService.Debug($"[MAIN] sudo test exit={exit}");
-            LogService.Debug($"[MAIN] sudo test stdout='{stdout.Trim()}'");
-            LogService.Debug($"[MAIN] sudo test stderr='{stderr.Trim()}'");
-
-            if (exit != 0)
-            {
-                LogService.Error("[MAIN] SUDO BLOCKED or FAILED → exit != 0");
-                StatusBarText.Text = "Sudo is not accepting authentication.";
-
-                await new InfoDialog(
-                    "Sudo Authentication Failed",
-                    "Sudo is not accepting authentication.\n\n" +
-                    "Possible causes:\n" +
-                    "• Too many failed attempts (faillock)\n" +
-                    "• PAM lockout\n" +
-                    "• sudoers restrictions\n" +
-                    "• Incorrect password\n\n" +
-                    "To avoid triggering an account lockout, RAID-Util will not retry automatically. " +
-                    "Check the password or ask your system administrator before trying again."
-                ).ShowDialog(this);
-
-                if (attempts >= maxAttempts)
-                {
-                    Close();
-                    return;
-                }
-
-                continue;
-            }
-
-            // ⭐ Password correct
-            LogService.Info("[MAIN] Password validated successfully.");
             _sudoReady = true;
             Credentials.AllowRaidCalls = true;
-
-            // ⭐ Ahora sí: la UI está cargada → StatusViewControl existe
-            Dispatcher.UIThread.Post(async () =>
-            {
-                await Task.Delay(50);
-
-                if (StatusViewControl != null)
-                {
-                    LogService.Debug("[MAIN] StatusViewControl READY → refreshing...");
-                    await StatusViewControl.RefreshStatusAsync();
-                }
-
-            }, DispatcherPriority.Background);
-
-            break;
+            LogService.Info("[MAIN] Privilegios confirmados.");
         }
+        catch (Exception ex)
+        {
+            LogService.Error($"[MAIN] No se pudieron obtener privilegios: {ex.Message}");
+            StatusBarText.Text = "Sudo is not accepting authentication.";
+
+            await new InfoDialog(
+                "Sudo Authentication Failed",
+                "Sudo is not accepting authentication.\n\n" +
+                "Possible causes:\n" +
+                "• Too many failed attempts (faillock)\n" +
+                "• PAM lockout\n" +
+                "• sudoers restrictions\n" +
+                "• Incorrect password\n" +
+                "• doas sin NOPASSWD\n\n" +
+                "To avoid triggering an account lockout, RAID-Util will not retry automatically."
+            ).ShowDialog(this);
+
+            Close();
+            return;
+        }
+
+        // ⭐ Ahora sí: la UI está cargada → StatusViewControl existe
+        Dispatcher.UIThread.Post(async () =>
+        {
+            await Task.Delay(50);
+
+            if (StatusViewControl != null)
+            {
+                LogService.Debug("[MAIN] StatusViewControl READY → refreshing...");
+                await StatusViewControl.RefreshStatusAsync();
+            }
+
+        }, DispatcherPriority.Background);
 
         // ============================================================
         // 2) CHECK mdadm
@@ -164,12 +143,11 @@ public partial class MainWindow : Window
 
         StatusBarText.Text = "Checking RAID subsystem...";
 
-        var mdResult = await Task.Run(() => ShellHelper.EjecutarSinRoot("which mdadm"));
-        var (mdExit, mdOut, mdErr) = mdResult;
+        var mdadmPath = await Task.Run(() => ToolLocator.Resolve("mdadm"));
 
-        LogService.Debug($"[MAIN] which mdadm exit={mdExit}, out='{mdOut.Trim()}', err='{mdErr.Trim()}'");
+        LogService.Debug($"[MAIN] mdadm resuelto en '{mdadmPath}'");
 
-        if (mdExit != 0 || string.IsNullOrWhiteSpace(mdOut))
+        if (mdadmPath is null)
         {
             StatusBarText.Text = "RAID subsystem unavailable.";
             LogService.Error("[MAIN] mdadm not found.");
@@ -191,13 +169,20 @@ public partial class MainWindow : Window
     //  PASSWORD DIALOG
     // ============================================================
 
-    private async Task SolicitarPassword()
+    private async Task<string?> SolicitarPassword()
     {
         LogService.Debug("[MAIN] SolicitarPassword ENTER");
         var dialog = new PasswordDialog();
         var pass = await dialog.ShowDialog<string?>(this);
-        Credentials.AdminPassword = pass ?? string.Empty;
         LogService.Debug("[MAIN] SolicitarPassword EXIT");
+        return pass;
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        Credentials.AllowRaidCalls = false;
+        PrivilegeSession.ForgetPassword();
+        base.OnClosing(e);
     }
 
     // ============================================================
@@ -246,6 +231,7 @@ public partial class MainWindow : Window
             if (RaidViewControl != null)
                 await RaidViewControl.RefreshArraysAsync();
 
+            _raidLoaded = true;
             _raidLoading = false;
         }
     }

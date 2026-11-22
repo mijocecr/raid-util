@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using Avalonia;
 using RAID_Util.Helpers;
 
@@ -12,17 +13,36 @@ internal class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        bool hasDisplay = Environment.GetEnvironmentVariable("DISPLAY") != null;
-        bool isTerminal = !Console.IsInputRedirected && !Console.IsOutputRedirected;
-
-        if (!hasDisplay && isTerminal)
+        if (args.Any(a => a is "--help" or "-h"))
         {
-            CliApp.Run().Wait();
+            Console.WriteLine("RAID-Util — gestor de RAID para Linux");
+            Console.WriteLine("  --cli   Fuerza la interfaz de terminal (útil en servidores headless)");
+            Console.WriteLine("  --gui   Fuerza la interfaz gráfica");
+            Console.WriteLine("  --help  Muestra esta ayuda");
+            return;
+        }
+
+        var forceCli = args.Any(a => a.Equals("--cli", StringComparison.OrdinalIgnoreCase));
+        var forceGui = args.Any(a => a.Equals("--gui", StringComparison.OrdinalIgnoreCase));
+
+        if (forceCli || (!forceGui && ShouldUseCli()))
+        {
+            CliApp.Run().GetAwaiter().GetResult();
             return;
         }
 
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
+    }
+
+    private static bool ShouldUseCli()
+    {
+        var display = Environment.GetEnvironmentVariable("DISPLAY");
+        var wayland = Environment.GetEnvironmentVariable("WAYLAND_DISPLAY");
+        var hasDisplay = !string.IsNullOrWhiteSpace(display) || !string.IsNullOrWhiteSpace(wayland);
+        var interactive = !Console.IsInputRedirected && !Console.IsOutputRedirected;
+
+        return !hasDisplay && interactive;
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.

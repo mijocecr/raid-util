@@ -17,66 +17,102 @@ namespace RAID_Util.Helpers
 
             EnsureCredentials();
 
-            while (true)
+            try
             {
-                Console.Clear();
-                Console.WriteLine("===== RAID-Util CLI =====\n");
-                Console.WriteLine("1) System overview");
-                Console.WriteLine("2) Manage RAID arrays");
-                Console.WriteLine("3) Manage physical disks");
-                Console.WriteLine("4) View application logs");
-                Console.WriteLine("5) Application settings");
-                Console.WriteLine("0) Exit");
-                Console.WriteLine("==========================\n");
-
-                switch (ReadMenuChoice(5))
+                while (true)
                 {
-                    case 1: await ShowDashboard(); break;
-                    case 2: await ManageArrays(); break;
-                    case 3: await ManageDisks(); break;
-                    case 4: await ViewLogs(); break;
-                    case 5: ManageSettings(); break;
-                    case 0: return;
-                }
+                    Console.Clear();
+                    Console.WriteLine("===== RAID-Util CLI =====\n");
+                    Console.WriteLine("1) System overview");
+                    Console.WriteLine("2) Manage RAID arrays");
+                    Console.WriteLine("3) Manage physical disks");
+                    Console.WriteLine("4) View application logs");
+                    Console.WriteLine("5) Application settings");
+                    Console.WriteLine("0) Exit");
+                    Console.WriteLine("==========================\n");
 
-                Pause();
+                    switch (ReadMenuChoice(5))
+                    {
+                        case 1: await ShowDashboard(); break;
+                        case 2: await ManageArrays(); break;
+                        case 3: await ManageDisks(); break;
+                        case 4: await ViewLogs(); break;
+                        case 5: ManageSettings(); break;
+                        case 0: return;
+                    }
+
+                    Pause();
+                }
+            }
+            finally
+            {
+                Credentials.AllowRaidCalls = false;
+                PrivilegeSession.ForgetPassword();
             }
         }
 
         private static int ReadMenuChoice(int maxOption)
         {
-            Console.Write($"Select an option (0-{maxOption}): ");
-            return int.TryParse(Console.ReadLine(), out var choice) &&
-                   choice >= 0 && choice <= maxOption
-                ? choice
-                : -1;
+            while (true)
+            {
+                Console.Write($"Select an option (0-{maxOption}): ");
+                var input = Console.ReadLine();
+
+                // EOF (entrada redirigida o tty cerrado): salir en vez de girar infinitamente.
+                if (input is null)
+                    return 0;
+
+                if (int.TryParse(input, out var choice) && choice >= 0 && choice <= maxOption)
+                    return choice;
+
+                Console.WriteLine($"Please enter a number between 0 and {maxOption}.");
+            }
         }
 
         private static int? SelectIndex<T>(IReadOnlyList<T> items, Func<T, string> describe, string prompt)
         {
-            for (var i = 0; i < items.Count; i++)
-                Console.WriteLine($"{i + 1}) {describe(items[i])}");
-
-            Console.WriteLine("0) Back");
-            Console.Write($"{prompt}: ");
-
-            if (!int.TryParse(Console.ReadLine(), out var selected) ||
-                selected < 0 || selected > items.Count)
+            while (true)
             {
-                Console.WriteLine("Invalid selection.");
-                return null;
-            }
+                for (var i = 0; i < items.Count; i++)
+                    Console.WriteLine($"{i + 1}) {describe(items[i])}");
 
-            return selected == 0 ? null : selected - 1;
+                Console.WriteLine("0) Back");
+                Console.Write($"{prompt}: ");
+                var input = Console.ReadLine();
+
+                if (input is null)
+                    return null;
+
+                if (int.TryParse(input, out var selected) &&
+                    selected >= 0 && selected <= items.Count)
+                {
+                    return selected == 0 ? null : selected - 1;
+                }
+
+                Console.WriteLine($"Please enter a number between 0 and {items.Count}.");
+            }
         }
 
         private static bool Confirm(string prompt)
         {
             Console.WriteLine($"\n{prompt}");
-            Console.WriteLine("1) Yes");
-            Console.WriteLine("2) No");
-            Console.Write("Select an option: ");
-            return Console.ReadLine()?.Trim() == "1";
+            while (true)
+            {
+                Console.WriteLine("1) Yes");
+                Console.WriteLine("2) No");
+                Console.Write("Select an option: ");
+                var input = Console.ReadLine();
+
+                if (input is null)
+                    return false;
+
+                switch (input.Trim())
+                {
+                    case "1": return true;
+                    case "2": return false;
+                    default: Console.WriteLine("Please enter 1 or 2."); break;
+                }
+            }
         }
 
         private static void Pause()
@@ -224,7 +260,7 @@ namespace RAID_Util.Helpers
                     case 6: await RepairArray(array); break;
                     case 7: await AddDiskToArray(array); break;
                     case 8: await ManageArrayDisks(array); break;
-                    case 9: ExpandArray(array); break;
+                    case 9: await ExpandArray(array); break;
                     case 10: await TogglePersistentMount(array); break;
                     case 11:
                         await StopSelectedArray(array);
@@ -345,20 +381,16 @@ namespace RAID_Util.Helpers
 
             var array = arrays[index.Value];
             var config = ArrayConfigService.Load(array.BaseName);
-            var defaultPath = string.IsNullOrWhiteSpace(config.MountPoint)
-                ? $"/mnt/{array.Name}"
-                : config.MountPoint;
+            var defaultPath = MountOptionsService.EffectiveArrayMountPoint(array.Name, config.MountPoint);
             var mountPath = ReadValue("Mount point", defaultPath);
-            if (!Path.IsPathRooted(mountPath) || mountPath.Any(c =>
-                    !char.IsAsciiLetterOrDigit(c) && c is not '/' and not '.' and not '_' and not '-'))
+            var mountError = MountOptionsService.ValidateMountPoint(mountPath);
+            if (mountError is not null)
             {
-                Console.WriteLine(
-                    "Mount point must be an absolute path using only letters, numbers, '/', '.', '_' and '-'.");
+                Console.WriteLine(mountError);
                 return;
             }
 
-            var mounted = await Task.Run(() =>
-                MountService.Mount(array.Path, mountPath, BuildMountOptions(config)));
+            var mounted = await Task.Run(() => MountService.Mount(array.Path, mountPath, config));
             Console.WriteLine(mounted
                 ? $"Mounted {array.Path} at {mountPath}."
                 : $"Could not mount {array.Path}. Check that it has a filesystem and review the logs.");
@@ -528,12 +560,12 @@ namespace RAID_Util.Helpers
                 case "faulty":
                     if (!Confirm($"Mark /dev/{disk.Name} as faulty in {array.Path}?"))
                         return;
-                    PrintCommandOutput($"mdadm {Quote(array.Path)} --fail {Quote($"/dev/{disk.Name}")}");
+                    Console.WriteLine((await ArrayOperationsService.MarkFaultyAsync(array, disk.Name)).Message);
                     break;
                 case "spare":
                     if (!Confirm($"Set /dev/{disk.Name} as a spare in {array.Path}?"))
                         return;
-                    PrintCommandOutput($"mdadm {Quote(array.Path)} --set-spare {Quote($"/dev/{disk.Name}")}");
+                    Console.WriteLine((await ArrayOperationsService.SetSpareAsync(array, disk.Name)).Message);
                     break;
                 case "convert":
                 {
@@ -542,17 +574,13 @@ namespace RAID_Util.Helpers
                             $"Convert /dev/{disk.Name} from spare to active? Device count becomes {activeCount + 1}."))
                         return;
 
-                    var result = ShellHelper.EjecutarComoRoot(
-                        $"mdadm --grow {Quote(array.Path)} --raid-devices={activeCount + 1}");
-                    PrintResult(result.ExitCode, result.Stdout, result.Stderr);
+                    Console.WriteLine((await ArrayOperationsService.ActivateSpareAsync(array, activeCount + 1)).Message);
                     break;
                 }
                 case "recover":
                     if (!Confirm($"Add /dev/{disk.Name} back to {array.Path}?"))
                         return;
-                    Console.WriteLine(await service.AddDiskToArrayAsync(array.Name, disk.Name)
-                        ? "Disk recovery started."
-                        : "Could not recover the disk.");
+                    Console.WriteLine((await ArrayOperationsService.RecoverFaultyAsync(array, disk.Name)).Message);
                     break;
                 case "remove":
                     if (!Confirm($"Remove /dev/{disk.Name} from {DescribeArray(array)}?"))
@@ -564,12 +592,9 @@ namespace RAID_Util.Helpers
             }
         }
 
-        private static void ExpandArray(RaidArrayInfo array)
+        private static async Task ExpandArray(RaidArrayInfo array)
         {
-            var level = array.Level.Replace(" ", "").Replace("-", "").ToUpperInvariant();
-            if (level is not ("RAID5" or "RAID6" or "RAID10") ||
-                array.IsResyncing || array.IsRecovering || array.IsChecking || array.IsRepairing ||
-                (!array.IsActive && !array.IsClean) || array.RebuildProgress > 0)
+            if (!ArrayOperationsService.CanExpand(array))
             {
                 Console.WriteLine("Only idle, active RAID5/6/10 arrays can be expanded.");
                 return;
@@ -587,11 +612,8 @@ namespace RAID_Util.Helpers
             if (!Confirm($"Reshape {array.Path} from {active} to {newCount} devices?"))
                 return;
 
-            var result = ShellHelper.EjecutarComoRoot(
-                $"mdadm --grow {Quote(array.Path)} --raid-devices={newCount}");
-            PrintResult(result.ExitCode, result.Stdout, result.Stderr);
-            if (result.ExitCode == 0)
-                Console.WriteLine("Reshape started. The array status will show its progress.");
+            var result = await ArrayOperationsService.GrowAsync(array, newCount);
+            Console.WriteLine(result.Message);
         }
 
         private static async Task TogglePersistentMount(RaidArrayInfo array)
@@ -643,7 +665,8 @@ namespace RAID_Util.Helpers
 
             config.Name = ReadValue("Friendly name", config.Name);
             config.FsLabel = ReadValue("Filesystem label", config.FsLabel);
-            config.MountPoint = ReadValue("Mount point", config.MountPoint);
+            config.MountPoint = ReadValue("Mount point",
+                MountOptionsService.EffectiveArrayMountPoint(array.Name, config.MountPoint));
             config.MountPermissions = ReadValue("Mount permissions (3-digit octal)", config.MountPermissions);
 
             config.Mount_NoAtime = ReadBoolean("Mount option noatime", config.Mount_NoAtime);
@@ -668,10 +691,10 @@ namespace RAID_Util.Helpers
 
             if (config.PersistMount)
             {
-                if (!Path.IsPathRooted(config.MountPoint) || config.MountPoint.Contains(' '))
+                var mountError = MountOptionsService.ValidateMountPoint(config.MountPoint);
+                if (mountError is not null)
                 {
-                    Console.WriteLine(
-                        "Persistent mount point must be an absolute path without spaces. Configuration not saved.");
+                    Console.WriteLine($"{mountError} Configuration not saved.");
                     return;
                 }
 
@@ -695,12 +718,13 @@ namespace RAID_Util.Helpers
                 return;
             }
 
-            if (config.MountPermissions.Length != 3 ||
-                config.MountPermissions.Any(c => c is < '0' or > '7'))
+            if (!MountOptionsService.IsValidPermissions(config.MountPermissions))
             {
                 Console.WriteLine("Permissions must be a 3-digit octal value. Configuration not saved.");
                 return;
             }
+
+            config.MountPermissions = MountOptionsService.NormalizePermissions(config.MountPermissions);
 
             if (!Confirm("Save and apply these array settings?"))
                 return;
@@ -713,7 +737,8 @@ namespace RAID_Util.Helpers
 
                 ArrayConfigService.Save(array.BaseName, config);
                 if (config.PersistMount)
-                    FstabService.WriteEntry(array.Path, config.MountPoint, fs, BuildMountOptions(config));
+                    FstabService.WriteEntry(array.Path, config.MountPoint, fs,
+                        MountOptionsService.BuildOptions(config));
                 else
                     FstabService.RemoveEntry(array.Path);
 
@@ -750,17 +775,6 @@ namespace RAID_Util.Helpers
                     return parsed;
                 Console.WriteLine($"Enter a number from {min} to {max}.");
             }
-        }
-
-        private static string BuildMountOptions(ArrayConfig config)
-        {
-            var options = new List<string>();
-            if (config.Mount_NoAtime) options.Add("noatime");
-            if (config.Mount_NoDirAtime) options.Add("nodiratime");
-            if (config.Mount_Discard) options.Add("discard");
-            if (config.Mount_Sync) options.Add("sync");
-            if (config.Mount_ReadOnly) options.Add("ro");
-            return options.Count == 0 ? "defaults" : string.Join(",", options);
         }
 
         private static async Task ManageDisks()
@@ -821,8 +835,12 @@ namespace RAID_Util.Helpers
                     Console.WriteLine($"{i + 3}) {actions[i]}");
                 Console.WriteLine("0) Back");
                 Console.Write("Select an option: ");
+                var input = Console.ReadLine();
 
-                if (!int.TryParse(Console.ReadLine(), out var choice) || choice < 0 || choice > actions.Count + 2)
+                if (input is null)
+                    return;
+
+                if (!int.TryParse(input, out var choice) || choice < 0 || choice > actions.Count + 2)
                 {
                     Console.WriteLine("Invalid selection.");
                     continue;
@@ -869,7 +887,13 @@ namespace RAID_Util.Helpers
 
         private static string GetDiskTemperature(string diskName)
         {
-            var result = ShellHelper.EjecutarComoRoot($"smartctl -A {Quote($"/dev/{diskName}")}");
+            if (InputValidation.ValidateDeviceName(diskName) is not null)
+                return "N/A";
+
+            var result = ShellHelper.RunRoot(
+                ToolLocator.ResolveOrThrow("smartctl"),
+                "-A",
+                InputValidation.NormalizeDevicePath(diskName));
             var output = result.Stdout + "\n" + result.Stderr;
 
             foreach (var line in output.Split('\n'))
@@ -928,98 +952,34 @@ namespace RAID_Util.Helpers
             if (!Confirm($"WARNING: this permanently destroys all data and metadata on /dev/{disk.Name}. Continue?"))
                 return;
 
-            var device = Quote($"/dev/{disk.Name}");
-            var zeroResult = await Task.Run(() =>
-                ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock --force {device}"));
-            if (zeroResult.ExitCode != 0)
-                Console.WriteLine($"No RAID superblock was cleared (continuing): {zeroResult.Stderr.Trim()}");
-
-            var commands = new[]
-            {
-                $"wipefs -a -f {device}",
-                $"sgdisk --zap-all {device}",
-                $"dd if=/dev/zero of={device} bs=1M count=10 status=none conv=fdatasync",
-                $"blockdev --rereadpt {device}",
-                $"partprobe {device}",
-                "udevadm settle"
-            };
-
-            foreach (var command in commands)
-            {
-                var result = await Task.Run(() => ShellHelper.EjecutarComoRoot(command));
-                if (result.ExitCode != 0)
-                {
-                    Console.WriteLine($"Command failed: {command}");
-                    PrintResult(result.ExitCode, result.Stdout, result.Stderr);
-                    return;
-                }
-            }
-
-            Console.WriteLine($"Disk /dev/{disk.Name} was cleaned.");
+            var result = await DiskOperationsService.DeepCleanAsync(disk.Name);
+            Console.WriteLine(result.Message);
         }
 
         private static async Task InitializeDisk(RaidDiskInfo disk)
         {
             Console.WriteLine($"Selected disk: {DescribeDisk(disk)}");
             var label = ReadValue("Volume label", "");
-            var filesystems = new[] { "ext4", "xfs", "btrfs", "f2fs", "ntfs", "exfat", "fat32" };
+            var labelError = InputValidation.ValidateLabel(label, allowEmpty: false);
+            if (labelError is not null)
+            {
+                Console.WriteLine(labelError);
+                return;
+            }
+
+            var filesystems = FormatCommandBuilder.AvailableFileSystems().ToList();
             var fsIndex = SelectIndex(filesystems, fs => fs, "Select filesystem");
             if (!fsIndex.HasValue)
                 return;
 
             var fs = filesystems[fsIndex.Value];
-            if (string.IsNullOrWhiteSpace(label) ||
-                label.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
-            {
-                Console.WriteLine("The label is required and may contain only letters, numbers, '-' and '_'.");
-                return;
-            }
 
             if (!Confirm(
                     $"Initialize /dev/{disk.Name} as {fs} labeled '{label}'? All existing data will be destroyed."))
                 return;
 
-            var device = $"/dev/{disk.Name}";
-            var partition = device + (disk.Name.StartsWith("nvme", StringComparison.Ordinal) ? "p1" : "1");
-            var mountPoint = $"/run/media/{Environment.UserName}/{label}";
-
-            try
-            {
-                await Task.Run(() =>
-                {
-                    RequireRootSuccess($"parted -s {Quote(device)} mklabel gpt");
-                    RequireRootSuccess($"parted -s {Quote(device)} mkpart primary 0% 100%");
-                    RequireRootSuccess($"partprobe {Quote(device)}");
-                    RequireRootSuccess("udevadm settle");
-
-                    for (var attempt = 0; attempt < 20 && !File.Exists(partition); attempt++)
-                        System.Threading.Thread.Sleep(200);
-                    if (!File.Exists(partition))
-                        throw new IOException($"Partition {partition} was not detected.");
-
-                    var formatCommand = fs switch
-                    {
-                        "ext4" => $"mkfs.ext4 -F -L {Quote(label)} {Quote(partition)}",
-                        "xfs" => $"mkfs.xfs -f -L {Quote(label)} {Quote(partition)}",
-                        "btrfs" => $"mkfs.btrfs -f -L {Quote(label)} {Quote(partition)}",
-                        "f2fs" => $"mkfs.f2fs -f -l {Quote(label)} {Quote(partition)}",
-                        "ntfs" => $"mkfs.ntfs -f -L {Quote(label)} {Quote(partition)}",
-                        "exfat" => $"mkfs.exfat -n {Quote(label)} {Quote(partition)}",
-                        "fat32" => $"mkfs.vfat -F 32 -n {Quote(label)} {Quote(partition)}",
-                        _ => throw new InvalidOperationException("Unsupported filesystem.")
-                    };
-                    RequireRootSuccess(formatCommand);
-                    RequireRootSuccess($"mkdir -p {Quote(mountPoint)}");
-                    RequireRootSuccess($"mount {Quote(partition)} {Quote(mountPoint)}");
-                    RequireRootSuccess($"chmod 775 {Quote(mountPoint)}");
-                });
-
-                Console.WriteLine($"Disk initialized and mounted at {mountPoint}.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Disk initialization failed: {ex.Message}");
-            }
+            var result = await DiskOperationsService.InitializeDiskAsync(disk.Name, fs, label);
+            Console.WriteLine(result.Message);
         }
 
         private static void RequireRootSuccess(string command)
@@ -1142,20 +1102,29 @@ namespace RAID_Util.Helpers
 
         private static void EnsureCredentials()
         {
-            if (!string.IsNullOrEmpty(Credentials.AdminPassword) || Environment.UserName == "root")
+            PrivilegeSession.SetPasswordPrompt(() => Task.FromResult<string?>(ReadPasswordHidden()));
+
+            if (PrivilegeSession.IsRoot)
+            {
+                Credentials.AllowRaidCalls = true;
                 return;
+            }
 
-            Console.Write("Enter sudo password: ");
-            Credentials.AdminPassword = ReadPasswordHidden();
-            Console.WriteLine();
+            // sudo -n primero: si ya hay timestamp no se pide contraseña y no se bloquea.
+            try
+            {
+                var result = PrivilegeSession.RunRootAsync(
+                    new[] { "true" }, timeout: TimeSpan.FromSeconds(20)).GetAwaiter().GetResult();
 
-            Credentials.AllowRaidCalls = true;
+                if (!result.Success)
+                    throw new InvalidOperationException(result.Stderr);
 
-            var (exit, _, _) = ShellHelper.EjecutarComoRoot("true");
-            if (exit != 0)
+                Credentials.AllowRaidCalls = true;
+            }
+            catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("\nError: Sudo authentication failed or invalid password.");
+                Console.WriteLine($"\nError: no se pudieron obtener privilegios: {ex.Message}");
                 Console.ResetColor();
                 Environment.Exit(1);
             }
@@ -1163,6 +1132,11 @@ namespace RAID_Util.Helpers
 
         private static string ReadPasswordHidden()
         {
+            // Con entrada redirigida (CI / --cli por pipes) ReadKey no existe.
+            if (Console.IsInputRedirected)
+                return Console.ReadLine() ?? string.Empty;
+
+            Console.Write("Enter sudo password: ");
             string pass = string.Empty;
             ConsoleKeyInfo keyInfo;
 
@@ -1180,6 +1154,7 @@ namespace RAID_Util.Helpers
                 }
             }
 
+            Console.WriteLine();
             return pass;
         }
 

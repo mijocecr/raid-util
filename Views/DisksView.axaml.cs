@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -29,6 +30,7 @@ public partial class DisksView : UserControl
     private static Thickness _cardMargin;
     private static CornerRadius _cardCornerRadius;
     private readonly List<RaidDiskInfo> _disks = new();
+    private readonly ConcurrentDictionary<string, string> _temperatures = new(StringComparer.Ordinal);
 
     public DisksView()
     {
@@ -101,6 +103,9 @@ public partial class DisksView : UserControl
     private void LoadFakeData()
     {
         _disks.Clear();
+        _temperatures.Clear();
+        _temperatures["sdb"] = "34°C";
+        _temperatures["sdc"] = "41°C";
 
         _disks.Add(new RaidDiskInfo
         {
@@ -176,7 +181,68 @@ public partial class DisksView : UserControl
             });
         }
 
+        await LoadTemperaturesAsync();
+
         RenderDisks();
+    }
+
+    /// <summary>
+    /// smartctl se ejecuta en segundo plano y en paralelo; RenderDisks sigue siendo
+    /// sincrónico pero ya no bloquea el hilo UI esperando un proceso por tarjeta.
+    /// </summary>
+    private async Task LoadTemperaturesAsync()
+    {
+        _temperatures.Clear();
+
+        if (!ToolLocator.IsAvailable("smartctl"))
+            return;
+
+        var tool = ToolLocator.ResolveOrThrow("smartctl");
+        var queries = _disks.Select(async disk =>
+        {
+            if (InputValidation.ValidateDeviceName(disk.Name) is not null)
+                return;
+
+            try
+            {
+                var result = await ShellHelper.RunRootAsync(
+                    tool,
+                    new[] { "-A", "/dev/" + disk.Name },
+                    timeout: TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+
+                var temperature = ParseTemperature(result.Stdout + "\n" + result.Stderr);
+                if (!string.IsNullOrWhiteSpace(temperature))
+                    _temperatures[disk.Name] = temperature;
+            }
+            catch (Exception ex)
+            {
+                LogService.Debug($"[DISKSVIEW] smartctl falló para {disk.Name}: {ex.Message}");
+            }
+        });
+
+        await Task.WhenAll(queries).ConfigureAwait(false);
+    }
+
+    private static string ParseTemperature(string text)
+    {
+        foreach (var line in text.Split('\n'))
+        {
+            var lower = line.ToLowerInvariant();
+
+            if (lower.Contains("temperature_celsius") ||
+                lower.Contains("temperature_internal") ||
+                lower.Contains("current drive temperature") ||
+                lower.Contains("temperature:"))
+            {
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var p in parts.Reverse())
+                    if (int.TryParse(p.Replace("°C", "").Replace("C", ""), out var temp))
+                        return $"{temp}°C";
+            }
+        }
+
+        return "N/A";
     }
 
     private void RenderDisks()
@@ -532,43 +598,25 @@ public partial class DisksView : UserControl
 
     private async Task RunSmart(RaidDiskInfo disk)
     {
-        var r = ShellHelper.EjecutarComoRoot($"smartctl -a /dev/{disk.Name}");
-        var output = (r.Stdout + "\n" + r.Stderr).Trim();
+        if (InputValidation.ValidateDeviceName(disk.Name) is { } error)
+        {
+            await ShowInfoDialog("SMART", error);
+            return;
+        }
+
+        var result = await ShellHelper.RunRootAsync(
+            ToolLocator.ResolveOrThrow("smartctl"),
+            new[] { "-a", "/dev/" + disk.Name },
+            timeout: TimeSpan.FromSeconds(30));
+
+        var output = (result.Stdout + "\n" + result.Stderr).Trim();
         await ShowConsoleDialog($"SMART — /dev/{disk.Name}", output);
     }
 
-    private string GetTemperature(RaidDiskInfo disk)
-    {
-        try
-        {
-            var r = ShellHelper.EjecutarComoRoot($"smartctl -A /dev/{disk.Name}");
-            var text = (r.Stdout + "\n" + r.Stderr).Trim();
-
-            foreach (var line in text.Split('\n'))
-            {
-                var lower = line.ToLowerInvariant();
-
-                if (lower.Contains("temperature_celsius") ||
-                    lower.Contains("temperature_internal") ||
-                    lower.Contains("current drive temperature") ||
-                    lower.Contains("temperature:"))
-                {
-                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-
-                    foreach (var p in parts.Reverse())
-                    {
-                        if (int.TryParse(p.Replace("°C", "").Replace("C", ""), out var temp))
-                            return $"{temp}°C";
-                    }
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        return "N/A";
-    }
+    private string GetTemperature(RaidDiskInfo disk) =>
+        _temperatures.TryGetValue(disk.Name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : "N/A";
 
     private async Task UnmountDisk(RaidDiskInfo disk)
     {
@@ -599,43 +647,13 @@ public partial class DisksView : UserControl
         );
         if (!confirm) return;
 
+        OperationResult result;
         using (LoadingService.Show($"Deep cleaning /dev/{disk.Name}..."))
         {
-            await Task.Run(() =>
-            {
-                var devPath = $"/dev/{disk.Name}";
-
-                // 1. Aniquilar superbloques RAID persistentes
-                ShellHelper.EjecutarComoRoot($"mdadm --zero-superblock --force {devPath}");
-                
-                // 2. Limpiar firmas de sistemas de ficheros y particiones
-                var r2 = ShellHelper.EjecutarComoRoot($"wipefs -a -f {devPath}");
-                if (r2.ExitCode != 0)
-                {
-                    LogService.Warn($"[DISKSVIEW] wipefs devolvió código no cero en {devPath}");
-                }
-
-                // 3. Destruir tablas GPT/MBR y cabeceras de respaldo finales
-                ShellHelper.EjecutarComoRoot($"sgdisk --zap-all {devPath}");
-
-                // 4. Asegurar ceros preventivos en bloques clave
-                try
-                {
-                    ShellHelper.EjecutarComoRoot($"dd if=/dev/zero of={devPath} bs=1M count=10 status=none conv=fdatasync");
-                    ShellHelper.EjecutarComoRoot($"blockdev --rereadpt {devPath}");
-                }
-                catch (Exception ex)
-                {
-                    LogService.Warn($"[DISKSVIEW] Falló la purga por bloques: {ex.Message}");
-                }
-
-                // 5. Notificar al kernel
-                ShellHelper.EjecutarComoRoot($"partprobe {devPath}");
-                ShellHelper.EjecutarComoRoot("udevadm settle");
-            });
+            result = await DiskOperationsService.DeepCleanAsync(disk.Name);
         }
 
-        await ShowInfoDialog("Deep Clean", $"Disk /dev/{disk.Name} has been thoroughly wiped and cleaned.");
+        await ShowInfoDialog(result.Success ? "Deep Clean" : "Deep Clean failed", result.Message);
 
         await LoadRealDataAsync();
         RenderDisks();
@@ -646,70 +664,20 @@ public partial class DisksView : UserControl
         var dlg = new InitializeDiskDialog();
         var owner = this.GetVisualRoot() as Window;
 
-        var result = await dlg.ShowDialog<InitializeDiskResult?>(owner);
+        var result = await dlg.ShowDialog<InitializeDiskResult?>(owner ?? new Window());
         if (result == null)
             return;
 
         var label = result.Label;
         var fs = result.FileSystem;
 
-        var part = $"/dev/{disk.Name}1";
-        var mountPoint = $"/run/media/{Environment.UserName}/{label}";
-
+        OperationResult opResult;
         using (LoadingService.Show($"Initializing /dev/{disk.Name}..."))
         {
-            await Task.Run(() =>
-            {
-                var r1 = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mklabel gpt");
-                if (r1.ExitCode != 0)
-                    throw new Exception("Failed to create partition table.");
-
-                var r2 = ShellHelper.EjecutarComoRoot($"parted -s /dev/{disk.Name} mkpart primary 0% 100%");
-                if (r2.ExitCode != 0)
-                    throw new Exception("Failed to create partition.");
-
-                ShellHelper.EjecutarComoRoot("partprobe");
-                ShellHelper.EjecutarComoRoot("udevadm settle");
-
-                for (int i = 0; i < 20; i++)
-                {
-                    if (File.Exists(part))
-                        break;
-                    Thread.Sleep(200);
-                }
-
-                if (!File.Exists(part))
-                    throw new Exception($"Partition {part} not detected.");
-
-                var cmd = fs switch
-                {
-                    "ext4" => $"mkfs.ext4 -F -L \"{label}\" {part}",
-                    "xfs" => $"mkfs.xfs -f -L \"{label}\" {part}",
-                    "btrfs" => $"mkfs.btrfs -f -L \"{label}\" {part}",
-                    "f2fs" => $"mkfs.f2fs -f -l \"{label}\" {part}",
-                    "ntfs" => $"mkfs.ntfs -f -L \"{label}\" {part}",
-                    "exfat" => $"mkfs.exfat -n \"{label}\" {part}",
-                    "fat32" => $"mkfs.vfat -F 32 -n \"{label}\" {part}",
-                    _ => throw new Exception("Unsupported filesystem")
-                };
-
-                var r3 = ShellHelper.EjecutarComoRoot(cmd);
-                if (r3.ExitCode != 0)
-                    throw new Exception("Filesystem creation failed.");
-
-                ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
-
-                MountService.Unmount(mountPoint);
-                MountService.Mount(part, mountPoint);
-
-                ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
-            });
+            opResult = await DiskOperationsService.InitializeDiskAsync(disk.Name, fs, label);
         }
 
-        await ShowInfoDialog(
-            "Disk Initialized",
-            $"Disk /dev/{disk.Name} initialized successfully.\n\nFS: {fs}\nLabel: {label}\nMount: {mountPoint}"
-        );
+        await ShowInfoDialog(opResult.Success ? "Disk Initialized" : "Disk initialization failed", opResult.Message);
 
         await LoadRealDataAsync();
         RenderDisks();

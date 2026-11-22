@@ -9,6 +9,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using RAID_Util.Models;
 using RAID_Util.Services;
 using RAID_Util.Core;
@@ -50,7 +51,8 @@ public partial class ArrayConfigWindow : Window
         TxtName.Text = _config.Name;
         TxtFsLabel.Text = _config.FsLabel;
 
-        TxtMountPoint.Text = _config.MountPoint;
+        TxtMountPoint.Text = MountOptionsService.EffectiveArrayMountPoint(
+            _array.Name, _config.MountPoint);
 
         TgNoAtime.IsChecked = _config.Mount_NoAtime;
         TgNoDirAtime.IsChecked = _config.Mount_NoDirAtime;
@@ -97,32 +99,20 @@ public partial class ArrayConfigWindow : Window
         await dlg.ShowDialog(this);
     }
 
-    private string BuildMountOptions()
-    {
-        Log("BuildMountOptions()");
-        LogThread("BuildMountOptions");
-
-        var opts = new List<string>();
-
-        if (TgNoAtime.IsChecked == true) opts.Add("noatime");
-        if (TgNoDirAtime.IsChecked == true) opts.Add("nodiratime");
-        if (TgDiscard.IsChecked == true) opts.Add("discard");
-        if (TgSync.IsChecked == true) opts.Add("sync");
-        if (TgReadOnly.IsChecked == true) opts.Add("ro");
-
-        return opts.Count == 0 ? "defaults" : string.Join(",", opts);
-    }
-
     private async void OnPickMountPointClicked(object? sender, RoutedEventArgs e)
     {
         Log("OnPickMountPointClicked()");
         LogThread("OnPickMountPointClicked");
 
-        var dialog = new OpenFolderDialog { Title = "Select mount point" };
-        var result = await dialog.ShowAsync(this);
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select mount point",
+            AllowMultiple = false
+        });
 
-        if (!string.IsNullOrWhiteSpace(result))
-            TxtMountPoint.Text = result;
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path &&
+            !string.IsNullOrWhiteSpace(path))
+            TxtMountPoint.Text = path;
     }
 
     private async void OnSaveClicked(object? sender, RoutedEventArgs e)
@@ -153,9 +143,10 @@ public partial class ArrayConfigWindow : Window
                 return;
             }
 
-            if (!mp.StartsWith("/"))
+            var mountError = MountOptionsService.ValidateMountPoint(mp);
+            if (mountError is not null)
             {
-                await ShowError("Mount point must be an absolute path.");
+                await ShowError(mountError);
                 return;
             }
 
@@ -197,8 +188,7 @@ public partial class ArrayConfigWindow : Window
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(TxtMountPermissions.Text) ||
-            !Regex.IsMatch(TxtMountPermissions.Text, @"^[0-7]{3}$"))
+        if (!MountOptionsService.IsValidPermissions(TxtMountPermissions.Text))
         {
             await ShowError("Permissions must be a 3‑digit octal value (e.g., 755).");
             return;
@@ -220,7 +210,7 @@ public partial class ArrayConfigWindow : Window
 
         _config.PersistMount = TgPersistMount.IsChecked ?? false;
 
-        _config.MountPermissions = TxtMountPermissions.Text.Trim();
+        _config.MountPermissions = (TxtMountPermissions.Text ?? "").Trim();
 
         _config.ResyncPriority = (int)NumResyncPriority.Value!;
         _config.ResyncMaxSpeed = (int)NumResyncMaxSpeed.Value!;
@@ -235,7 +225,7 @@ public partial class ArrayConfigWindow : Window
         // lo que dependa de la UI se calcula ANTES del Task.Run
         var device = _array.Path;
         var mountPoint = _config.MountPoint;
-        var options = BuildMountOptions(); // ← ahora en el hilo de UI
+        var options = MountOptionsService.BuildOptions(_config);
 
         Exception? backgroundError = null;
 
