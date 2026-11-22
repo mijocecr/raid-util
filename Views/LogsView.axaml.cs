@@ -73,7 +73,7 @@ public partial class LogsView : UserControl
         catch (Exception ex)
         {
             _ = new InfoDialog("Error", $"Could not open log file:\n{ex.Message}")
-                .ShowDialog(GetWindow());
+                .ShowDialog(GetWindow() ?? new Window());
         }
     }
 

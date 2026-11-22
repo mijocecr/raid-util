@@ -2,12 +2,13 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using RAID_Util.Services;
 
 namespace RAID_Util.Views;
 
 public partial class LoadingDialog : Window
 {
-    private TextBlock _messageBlock;
+    private TextBlock? _messageBlock;
 
     public LoadingDialog(string message)
     {
@@ -25,7 +26,10 @@ public partial class LoadingDialog : Window
         Background = this.FindResource("BMWSurfaceBrush") as IBrush;
 
         _messageBlock = this.FindControl<TextBlock>("MessageText");
-        _messageBlock.Text = message;
+        if (_messageBlock is not null)
+            _messageBlock.Text = message;
+        else
+            LogService.Warn("[LOADING] MessageText no encontrado en LoadingDialog.axaml");
 
         // Evitar cierre accidental
         this.KeyDown += (_, e) => e.Handled = true;
@@ -33,6 +37,7 @@ public partial class LoadingDialog : Window
 
     public void SetMessage(string msg)
     {
-        _messageBlock.Text = msg;
+        if (_messageBlock is not null)
+            _messageBlock.Text = msg;
     }
 }

@@ -31,15 +31,25 @@ public static class NotificadorLinux
                 return;
             }
 
-            var iconArg = icono != null ? $"-i \"{icono}\"" : "";
-            var args = $"-t {duracionMs} -u {urgencia} {iconArg} \"RAID Management\" \"{mensaje}\"";
-
-            Process.Start(new ProcessStartInfo
+            var start = new ProcessStartInfo(ToolLocator.ResolveOrThrow("notify-send"))
             {
-                FileName = "notify-send",
-                Arguments = args,
                 UseShellExecute = false
-            });
+            };
+
+            // ArgumentList evita que comillas o $ en el mensaje rompan el comando.
+            start.ArgumentList.Add("-t");
+            start.ArgumentList.Add(duracionMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            start.ArgumentList.Add("-u");
+            start.ArgumentList.Add(urgencia);
+            if (!string.IsNullOrWhiteSpace(icono))
+            {
+                start.ArgumentList.Add("-i");
+                start.ArgumentList.Add(icono);
+            }
+            start.ArgumentList.Add("RAID Management");
+            start.ArgumentList.Add(mensaje);
+
+            Process.Start(start);
         }
         catch
         {
@@ -50,24 +60,5 @@ public static class NotificadorLinux
     /// <summary>
     ///     Checks if notify-send is available in the system.
     /// </summary>
-    private static bool NotifySendDisponible()
-    {
-        try
-        {
-            var p = Process.Start(new ProcessStartInfo
-            {
-                FileName = "which",
-                Arguments = "notify-send",
-                RedirectStandardOutput = true,
-                UseShellExecute = false
-            });
-
-            p.WaitForExit();
-            return p.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool NotifySendDisponible() => ToolLocator.Resolve("notify-send") is not null;
 }

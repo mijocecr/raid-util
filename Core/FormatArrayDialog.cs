@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using RAID_Util.Helpers;
 using RAID_Util.Services;
 
 namespace RAID_Util.Core;
@@ -163,18 +164,7 @@ public class FormatArrayDialog : Window
     }
 
     // ⭐ Detectar si mkfs.f2fs está instalado
-    private bool HasF2FS()
-    {
-        string[] paths =
-        {
-            "/usr/bin/mkfs.f2fs",
-            "/usr/sbin/mkfs.f2fs",
-            "/sbin/mkfs.f2fs",
-            "/bin/mkfs.f2fs"
-        };
-
-        return paths.Any(File.Exists);
-    }
+    private bool HasF2FS() => ToolLocator.Resolve("mkfs.f2fs") is not null;
 
     private async void OnFormatClicked(object? sender, RoutedEventArgs e)
     {
@@ -197,6 +187,6 @@ public class FormatArrayDialog : Window
 
 public class FormatArrayResult
 {
-    public string Filesystem { get; set; }
-    public string Label { get; set; }
+    public string Filesystem { get; set; } = "";
+    public string Label { get; set; } = "";
 }

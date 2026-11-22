@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using RAID_Util.Core;
 using RAID_Util.Models;
@@ -217,17 +218,17 @@ public partial class ConfigWindow : Window
     {
         LogService.Debug("[CONFIG] OnBrowseLogs ENTER");
 
-        var dialog = new OpenFolderDialog
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select logs folder"
-        };
+            Title = "Select logs folder",
+            AllowMultiple = false
+        });
 
-        var result = await dialog.ShowAsync(this);
-
-        if (!string.IsNullOrWhiteSpace(result))
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path &&
+            !string.IsNullOrWhiteSpace(path))
         {
-            LogService.Debug($"[CONFIG] OnBrowseLogs → selected '{result}'");
-            LogsPathBox.Text = result;
+            LogService.Debug($"[CONFIG] OnBrowseLogs → selected '{path}'");
+            LogsPathBox.Text = path;
         }
 
         LogService.Debug("[CONFIG] OnBrowseLogs EXIT");

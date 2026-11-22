@@ -127,8 +127,7 @@ public class CreateArrayDialog : Window
                 Tag = d,
                 Foreground = this.FindResource("BMWTextBrush") as IBrush
             };
-            chk.Checked += (_, _) => UpdateSummary();
-            chk.Unchecked += (_, _) => UpdateSummary();
+            chk.IsCheckedChanged += (_, _) => UpdateSummary();
 
             _diskChecks.Add(chk);
             diskPanel.Children.Add(chk);
@@ -194,7 +193,8 @@ public class CreateArrayDialog : Window
     {
         var selected = _diskChecks
             .Where(c => c.IsChecked == true)
-            .Select(c => (RaidDiskInfo)c.Tag)
+            .Select(c => c.Tag)
+            .OfType<RaidDiskInfo>()
             .ToList();
 
         var level = _levelSelector.SelectedItem?.ToString() ?? "JBOD (Linear)";
@@ -326,7 +326,8 @@ public class CreateArrayDialog : Window
 
         var selected = _diskChecks
             .Where(c => c.IsChecked == true)
-            .Select(c => (RaidDiskInfo)c.Tag)
+            .Select(c => c.Tag)
+            .OfType<RaidDiskInfo>()
             .ToList();
 
         if (selected.Count == 0)
@@ -362,7 +363,7 @@ public class CreateArrayDialog : Window
 
 public class CreateArrayResult
 {
-    public string FriendlyName { get; set; }
-    public string Level { get; set; }
-    public List<RaidDiskInfo> Disks { get; set; }
+    public string FriendlyName { get; set; } = "";
+    public string Level { get; set; } = "";
+    public List<RaidDiskInfo> Disks { get; set; } = new();
 }

@@ -22,5 +22,7 @@ public class LambdaCommand : ICommand
         _action();
     }
 
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+
     public event EventHandler? CanExecuteChanged;
 }
