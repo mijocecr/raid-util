@@ -65,6 +65,9 @@ public static class ArrayOperationsService
         if (validation is not null)
             return OperationResult.Fail(validation);
 
+        if (!SafeDiskGuard.CanModifyDevice(diskName, SafeDiskOperation.RemoveMember))
+            return OperationResult.Fail($"Operación bloqueada por SafeDiskGuard para /dev/{diskName}.");
+
         var ok = await RaidService.Instance.AddDiskToArrayAsync(array.Name, diskName).ConfigureAwait(false);
         return ok
             ? OperationResult.Ok($"Disk recovery started: /dev/{diskName} re-added to {array.Name}.")
@@ -89,6 +92,9 @@ public static class ArrayOperationsService
         var validation = Validate(array, diskName);
         if (validation is not null)
             return OperationResult.Fail(validation);
+
+        if (!SafeDiskGuard.CanModifyDevice(diskName, SafeDiskOperation.RemoveMember))
+            return OperationResult.Fail($"Operación bloqueada por SafeDiskGuard para /dev/{diskName}.");
 
         var result = await ShellHelper.RunRootAsync(
             ToolLocator.ResolveOrThrow("mdadm"),

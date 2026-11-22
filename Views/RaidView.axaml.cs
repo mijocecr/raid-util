@@ -1452,31 +1452,6 @@ public partial class RaidView : UserControl
         }
     }
 
-    private async void ShowArrayDetails(RaidArrayInfo array)
-    {
-        var cmd = $"/usr/sbin/mdadm --detail {array.Path}";
-        var output = await ShellHelper.RunCleanAsync(cmd);
-
-        var dialog = new Window
-        {
-            Title = $"Array Details — {array.Name}",
-            Width = 600,
-            Height = 500,
-            Content = new ScrollViewer
-            {
-                Content = new TextBlock
-                {
-                    Text = output,
-                    FontFamily = "Consolas",
-                    FontSize = 13,
-                    Foreground = Brushes.White
-                }
-            }
-        };
-
-        dialog.Show();
-    }
-
     private void OpenArrayConfigWindow()
     {
         if (_selectedArray == null)

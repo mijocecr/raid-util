@@ -77,6 +77,7 @@ public static class CommandRunner
             var finished = await Task.WhenAny(completion, delay).ConfigureAwait(false);
             if (finished != completion)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 KillSafely(process);
                 try
                 {

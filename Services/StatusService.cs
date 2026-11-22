@@ -25,23 +25,22 @@ public class StatusService
     // ============================================================
     // ROOT EXECUTION WRAPPER (MEJORADO)
     // ============================================================
-    private async Task<string> RunRoot(string cmd)
+    private async Task<string> RunRoot(string tool, params string[] args)
     {
-        Console.WriteLine($"[STATUS-SERVICE] RunRoot(): {cmd}");
+        Console.WriteLine($"[STATUS-SERVICE] RunRoot(): {tool} {string.Join(' ', args)}");
 
-        var (exit, stdout, stderr) = await Task.Run(() =>
-            ShellHelper.EjecutarComoRoot(cmd)
-        );
+        var result = await ShellHelper.RunRootAsync(
+            ToolLocator.ResolveOrThrow(tool), args).ConfigureAwait(false);
 
-        Console.WriteLine($"[STATUS-SERVICE] RunRoot exit={exit}");
-        Console.WriteLine($"[STATUS-SERVICE] stdout:\n{stdout}");
-        Console.WriteLine($"[STATUS-SERVICE] stderr:\n{stderr}");
+        Console.WriteLine($"[STATUS-SERVICE] RunRoot exit={result.ExitCode}");
+        Console.WriteLine($"[STATUS-SERVICE] stdout:\n{result.Stdout}");
+        Console.WriteLine($"[STATUS-SERVICE] stderr:\n{result.Stderr}");
 
         // No devolver vacío si exit != 0
-        if (string.IsNullOrWhiteSpace(stdout) && !string.IsNullOrWhiteSpace(stderr))
-            return stderr;
+        if (string.IsNullOrWhiteSpace(result.Stdout) && !string.IsNullOrWhiteSpace(result.Stderr))
+            return result.Stderr;
 
-        return stdout ?? "";
+        return result.Stdout;
     }
 
     // ============================================================
@@ -66,7 +65,7 @@ public class StatusService
     private async Task<string> GetDetailAsync(string array)
     {
         Console.WriteLine($"[STATUS-SERVICE] mdadm --detail {array}");
-        return await RunRoot($"mdadm --detail {array}");
+        return await RunRoot("mdadm", "--detail", array).ConfigureAwait(false);
     }
 
     // ============================================================
@@ -298,9 +297,9 @@ public class StatusService
     {
         try
         {
-            var (exit, stdout, stderr) = ShellHelper.EjecutarSinRoot("uptime -p");
-            if (!string.IsNullOrWhiteSpace(stdout))
-                return stdout.Trim();
+            var result = ShellHelper.Run(ToolLocator.ResolveOrThrow("uptime"), "-p");
+            if (!string.IsNullOrWhiteSpace(result.Stdout))
+                return result.Stdout.Trim();
             return "Unknown";
         }
         catch { return "Unknown"; }

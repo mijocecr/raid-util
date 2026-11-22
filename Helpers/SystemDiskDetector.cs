@@ -83,8 +83,8 @@ public static class SystemDiskDetector
     {
         var result = new List<string>();
 
-        var exec = ShellHelper.EjecutarSinRoot("lsblk -J -o NAME,PKNAME");
-        var json = exec.Stdout;
+        var json = ShellHelper.Run(
+            ToolLocator.ResolveOrThrow("lsblk"), "-J", "-o", "NAME,PKNAME").Stdout;
         if (string.IsNullOrWhiteSpace(json))
             return result;
 
@@ -182,7 +182,8 @@ public static class SystemDiskDetector
 
         try
         {
-            var blkid = ShellHelper.EjecutarSinRoot("blkid -o export").Stdout;
+            var blkid = ShellHelper.Run(
+                ToolLocator.ResolveOrThrow("blkid"), "-o", "export").Stdout;
             if (string.IsNullOrWhiteSpace(blkid))
                 return false;
 
@@ -257,8 +258,8 @@ public static class SystemDiskDetector
 
         try
         {
-            var exec = ShellHelper.EjecutarSinRoot("lsblk -J -o NAME,PKNAME");
-            var json = exec.Stdout;
+            var json = ShellHelper.Run(
+                ToolLocator.ResolveOrThrow("lsblk"), "-J", "-o", "NAME,PKNAME").Stdout;
             if (string.IsNullOrWhiteSpace(json))
                 return false;
 

@@ -42,14 +42,20 @@ public static class ShellHelper
         CommandRunner.RunAsync(fileName, arguments, cancellationToken);
 
     public static CommandResult RunRoot(string fileName, params string[] arguments) =>
-        PrivilegeSession.RunRootAsync(arguments.Prepend(fileName)).GetAwaiter().GetResult();
+        RunRoot(fileName, arguments, standardInput: null);
+
+    public static CommandResult RunRoot(
+        string fileName, string[] arguments, string? standardInput) =>
+        PrivilegeSession.RunRootAsync(arguments.Prepend(fileName), standardInput: standardInput)
+            .GetAwaiter().GetResult();
 
     public static Task<CommandResult> RunRootAsync(
         string fileName,
         string[] arguments,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null) =>
-        PrivilegeSession.RunRootAsync(arguments.Prepend(fileName), cancellationToken, timeout);
+        TimeSpan? timeout = null,
+        string? standardInput = null) =>
+        PrivilegeSession.RunRootAsync(arguments.Prepend(fileName), cancellationToken, timeout, standardInput);
 
     public static void OpenFile(string path)
     {

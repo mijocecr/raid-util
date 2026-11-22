@@ -24,12 +24,21 @@ internal sealed record PrivilegeTool(PrivilegeToolKind Kind, string Path);
 public static class PrivilegeSession
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
-    private static readonly Lazy<PrivilegeTool> Tool = new(DetectTool);
+    private static Lazy<PrivilegeTool> Tool = new(DetectTool);
 
     private static bool _validated;
     private static Func<Task<string?>>? _passwordPrompt;
 
     public static bool IsRoot => Environment.UserName == "root";
+
+    /// <summary>Devuelve la sesión a su estado inicial para los tests.</summary>
+    internal static void ResetForTests()
+    {
+        Tool = new Lazy<PrivilegeTool>(DetectTool);
+        _validated = false;
+        _passwordPrompt = null;
+        Credentials.AdminPassword = string.Empty;
+    }
 
     /// <summary>
     /// Registra cómo pedir la contraseña (diálogo en GUI, lectura oculta en CLI).
@@ -55,7 +64,8 @@ public static class PrivilegeSession
     public static async Task<CommandResult> RunRootAsync(
         IEnumerable<string> arguments,
         CancellationToken cancellationToken = default,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        string? standardInput = null)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -68,19 +78,20 @@ public static class PrivilegeSession
                 return new CommandResult(1, "", "No se especificó ningún comando root.");
 
             if (tool.Kind == PrivilegeToolKind.None)
-                return await CommandRunner.RunAsync(argv[0], argv.Skip(1), cancellationToken, timeout)
+                return await CommandRunner.RunAsync(
+                        argv[0], argv.Skip(1), cancellationToken, timeout, standardInput)
                     .ConfigureAwait(false);
 
             // -n nunca bloquea: si el timestamp caducó falla al instante y se reintenta
             // tras una única solicitud de contraseña.
-            var result = await RunThroughToolAsync(tool, argv, cancellationToken, timeout)
+            var result = await RunThroughToolAsync(tool, argv, cancellationToken, timeout, standardInput)
                 .ConfigureAwait(false);
 
             if (!result.Success && LooksLikePasswordRequired(result.Stderr))
             {
                 Invalidate();
                 await EnsureAsync(cancellationToken, forcePrompt: true).ConfigureAwait(false);
-                result = await RunThroughToolAsync(tool, argv, cancellationToken, timeout)
+                result = await RunThroughToolAsync(tool, argv, cancellationToken, timeout, standardInput)
                     .ConfigureAwait(false);
             }
 
@@ -108,7 +119,8 @@ public static class PrivilegeSession
         PrivilegeTool tool,
         IReadOnlyList<string> argv,
         CancellationToken cancellationToken,
-        TimeSpan? timeout)
+        TimeSpan? timeout,
+        string? standardInput)
     {
         // sudo admite -n (nunca pide contraseña); doas no tiene ese flag.
         // Con doas solo se llega aquí después de verificar NOPASSWD en EnsureAsync.
@@ -116,7 +128,7 @@ public static class PrivilegeSession
             ? new[] { "-n" }.Concat(argv)
             : argv;
 
-        return CommandRunner.RunAsync(tool.Path, argvWithTool, cancellationToken, timeout);
+        return CommandRunner.RunAsync(tool.Path, argvWithTool, cancellationToken, timeout, standardInput);
     }
 
     private static async Task EnsureAsync(CancellationToken cancellationToken, bool forcePrompt = false)

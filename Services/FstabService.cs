@@ -40,7 +40,7 @@ public static class FstabService
     // ============================================================
     // NORMALIZAR DEVICE (ruta real)
     // ============================================================
-    private static string NormalizeDevice(string device)
+    internal static string NormalizeDevice(string device)
     {
         if (string.IsNullOrWhiteSpace(device))
             return device;
@@ -65,7 +65,7 @@ public static class FstabService
     // ============================================================
     // EXTRAER NOMBRE BASE (md0, host:md0, etc.)
     // ============================================================
-    private static string BaseName(string device)
+    internal static string BaseName(string device)
     {
         if (string.IsNullOrWhiteSpace(device))
             return "";

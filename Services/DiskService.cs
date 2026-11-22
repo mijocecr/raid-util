@@ -25,8 +25,9 @@ public static class DiskService
             return list;
         }
 
-        var json = ShellHelper.EjecutarSinRoot(
-            "lsblk -J -o NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,FSTYPE,MOUNTPOINT,PKNAME,PTTYPE,TRAN"
+        var json = ShellHelper.Run(
+            ToolLocator.ResolveOrThrow("lsblk"),
+            "-J", "-o", "NAME,TYPE,SIZE,MODEL,SERIAL,ROTA,FSTYPE,MOUNTPOINT,PKNAME,PTTYPE,TRAN"
         ).Stdout;
 
         if (string.IsNullOrWhiteSpace(json))

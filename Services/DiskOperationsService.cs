@@ -24,6 +24,9 @@ public static class DiskOperationsService
         if (!ToolLocator.IsAvailable("mdadm"))
             return OperationResult.Fail("mdadm no está disponible en este sistema.");
 
+        if (!SafeDiskGuard.CanModifyDevice(diskName, SafeDiskOperation.Wipe))
+            return OperationResult.Fail($"Operación bloqueada por SafeDiskGuard para /dev/{diskName}.");
+
         var device = $"/dev/{diskName}";
         var steps = new List<(string Tool, string[] Arguments, bool Required)>
         {
@@ -104,6 +107,9 @@ public static class DiskOperationsService
 
         if (!ToolLocator.IsAvailable("parted"))
             return OperationResult.Fail("parted no está disponible en este sistema.");
+
+        if (!SafeDiskGuard.CanModifyDevice(diskName, SafeDiskOperation.Wipe))
+            return OperationResult.Fail($"Operación bloqueada por SafeDiskGuard para /dev/{diskName}.");
 
         var device = $"/dev/{diskName}";
         var partition = InputValidation.PartitionPath(diskName, 1);

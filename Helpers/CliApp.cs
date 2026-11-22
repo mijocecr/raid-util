@@ -555,7 +555,7 @@ namespace RAID_Util.Helpers
             switch (action)
             {
                 case "smart":
-                    PrintCommandOutput($"smartctl -a /dev/{disk.Name}");
+                    PrintCommandOutput("smartctl", "-a", InputValidation.NormalizeDevicePath(disk.Name));
                     break;
                 case "faulty":
                     if (!Confirm($"Mark /dev/{disk.Name} as faulty in {array.Path}?"))
@@ -851,7 +851,7 @@ namespace RAID_Util.Helpers
                 if (choice == 1)
                     ShowDiskInfo(disk);
                 else if (choice == 2)
-                    PrintCommandOutput($"smartctl -a /dev/{disk.Name}");
+                    PrintCommandOutput("smartctl", "-a", InputValidation.NormalizeDevicePath(disk.Name));
                 else
                 {
                     switch (actions[choice - 3])
@@ -982,14 +982,6 @@ namespace RAID_Util.Helpers
             Console.WriteLine(result.Message);
         }
 
-        private static void RequireRootSuccess(string command)
-        {
-            var result = ShellHelper.EjecutarComoRoot(command);
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException(
-                    $"{command}\n{result.Stderr.Trim()}".Trim());
-        }
-
         private static async Task ViewLogs()
         {
             var logPath = Path.Combine(ConfigManager.Get().LogsPath, "raid-util.log");
@@ -1081,13 +1073,10 @@ namespace RAID_Util.Helpers
             }
         }
 
-        private static string Quote(string value) =>
-            "'" + value.Replace("'", "'\"'\"'") + "'";
-
-        private static void PrintCommandOutput(string command)
+        private static void PrintCommandOutput(string tool, params string[] arguments)
         {
-            var (exit, stdout, stderr) = ShellHelper.EjecutarComoRoot(command);
-            PrintResult(exit, stdout, stderr);
+            var result = ShellHelper.RunRoot(ToolLocator.ResolveOrThrow(tool), arguments);
+            PrintResult(result.ExitCode, result.Stdout, result.Stderr);
         }
 
         private static void PrintResult(int exit, string stdout, string stderr)
@@ -1163,22 +1152,23 @@ namespace RAID_Util.Helpers
             Console.Clear();
             Console.WriteLine("=== Active RAID arrays ===\n");
 
-            var (exit, stdout, stderr) = await Task.Run(() => ShellHelper.EjecutarComoRoot("mdadm --detail --scan"));
+            var result = await ShellHelper.RunRootAsync(
+                ToolLocator.ResolveOrThrow("mdadm"), new[] { "--detail", "--scan" });
 
-            if (exit != 0)
+            if (!result.Success)
             {
-                Console.WriteLine($"Error querying mdadm: {stderr.Trim()}");
+                Console.WriteLine($"Error querying mdadm: {result.Stderr.Trim()}");
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(stdout))
+            if (string.IsNullOrWhiteSpace(result.Stdout))
             {
                 Console.WriteLine("No active RAID arrays configured on this system.");
                 return;
             }
 
             // Filtrar líneas duplicadas en la salida general por si mdadm.conf tiene entradas repetidas
-            var uniqueLines = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            var uniqueLines = result.Stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(l => l.Trim())
                 .Distinct();
 
@@ -1190,16 +1180,17 @@ namespace RAID_Util.Helpers
             Console.Clear();
             Console.WriteLine("=== Physical disks and partitions ===\n");
 
-            var (exit, stdout, stderr) = await Task.Run(() =>
-                ShellHelper.EjecutarSinRoot("lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS"));
+            var result = await ShellHelper.RunAsync(
+                ToolLocator.ResolveOrThrow("lsblk"),
+                new[] { "-o", "NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS" });
 
-            if (exit == 0)
+            if (result.Success)
             {
-                Console.WriteLine(stdout.Trim());
+                Console.WriteLine(result.Stdout.Trim());
             }
             else
             {
-                Console.WriteLine($"Error executing lsblk: {stderr.Trim()}");
+                Console.WriteLine($"Error executing lsblk: {result.Stderr.Trim()}");
             }
         }
     }

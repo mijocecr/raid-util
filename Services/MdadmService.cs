@@ -37,9 +37,8 @@ public static class MdadmService
     {
         var path = ResolveArrayPath(arrayName);
 
-        var result = ShellHelper.EjecutarComoRoot(
-            $"/usr/sbin/mdadm --detail \"{path}\""
-        );
+        var result = ShellHelper.RunRoot(
+            ToolLocator.ResolveOrThrow("mdadm"), new[] { "--detail", path });
 
         return (result.Stdout + "\n" + result.Stderr).Trim();
     }
@@ -52,10 +51,11 @@ public static class MdadmService
         if (min < 0 || max < min)
             throw new ArgumentOutOfRangeException(nameof(min), "Velocidades de resincronización no válidas.");
 
-        // El intérprete lo elige CommandRunner (bash o sh). No hace falta anidar
-        // otro bash -c, que además no existe en distros minimalistas como Alpine.
-        ShellHelper.EjecutarComoRoot($"echo {min} > /proc/sys/dev/raid/speed_limit_min");
-        ShellHelper.EjecutarComoRoot($"echo {max} > /proc/sys/dev/raid/speed_limit_max");
+        // tee evita el intérprete y la redirección: el valor llega por stdin como
+        // un argumento más del proceso, sin ">" ni comandos compuestos.
+        var tee = ToolLocator.ResolveOrThrow("tee");
+        ShellHelper.RunRoot(tee, new[] { "/proc/sys/dev/raid/speed_limit_min" }, min + "\n");
+        ShellHelper.RunRoot(tee, new[] { "/proc/sys/dev/raid/speed_limit_max" }, max + "\n");
     }
 
     // ============================================================
@@ -137,10 +137,11 @@ public static class MdadmService
         SetResyncSpeed(cfg.ResyncPriority, cfg.ResyncMaxSpeed);
 
         // Read-only / Read-write
+        var mdadm = ToolLocator.ResolveOrThrow("mdadm");
         if (cfg.Mount_ReadOnly)
-            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readonly \"{device}\"");
+            ShellHelper.RunRoot(mdadm, new[] { "--readonly", device });
         else
-            ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --readwrite \"{device}\"");
+            ShellHelper.RunRoot(mdadm, new[] { "--readwrite", device });
 
         // Label solo para EXT*
         if (!string.IsNullOrWhiteSpace(cfg.FsLabel))

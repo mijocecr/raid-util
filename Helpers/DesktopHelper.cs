@@ -1,29 +1,43 @@
+using System;
 using RAID_Util.Helpers;
 
 public static class DesktopHelper
 {
     public static void OpenPath(string path)
     {
-        string[] cmds =
+        var tools = new[]
         {
-            $"xdg-open \"{path}\"",
-            $"gio open \"{path}\"",
-            $"kioclient5 exec \"{path}\"",
-            $"kioclient exec \"{path}\"",
-            $"gvfs-open \"{path}\"",
-            $"sensible-browser \"{path}\""
+            ("xdg-open", false),
+            ("gio", true),
+            ("kioclient5", false),
+            ("kioclient", false),
+            ("gvfs-open", false),
+            ("sensible-browser", false)
         };
 
-        foreach (var cmd in cmds)
+        foreach (var (tool, needsOpen) in tools)
         {
-            var r = ShellHelper.EjecutarSinRoot(cmd);
-            if (r.ExitCode == 0)
+            var binary = ToolLocator.Resolve(tool);
+            if (binary is null)
+                continue;
+
+            var arguments = needsOpen ? new[] { "open", path } : new[] { path };
+            if (ShellHelper.Run(binary, arguments).ExitCode == 0)
                 return;
         }
 
-        // Último recurso: abrir terminal
-        ShellHelper.EjecutarSinRoot(
-            $"x-terminal-emulator -e 'bash -c \"cd \\\"{path}\\\"; exec bash\"'"
-        );
+        // Último recurso: el terminal necesita un intérprete para "cd ...; exec bash".
+        // La ruta se entrecomilla aquí; el resto de herramientas usa ArgumentList.
+        var terminal = ToolLocator.Resolve("x-terminal-emulator");
+        var bash = ToolLocator.Resolve("bash");
+        if (terminal is null || bash is null)
+            return;
+
+        ShellHelper.Run(
+            terminal,
+            new[] { "-e", bash, "-c", $"cd {Quote(path)}; exec bash" });
     }
+
+    private static string Quote(string value) =>
+        "'" + value.Replace("'", @"'\''", StringComparison.Ordinal) + "'";
 }

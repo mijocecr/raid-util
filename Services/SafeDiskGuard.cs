@@ -1,8 +1,27 @@
+using System;
+using System.Linq;
 using RAID_Util.Core;
 using RAID_Util.Models;
 using RAID_Util.Helpers;
 
 namespace RAID_Util.Services;
+
+/// <summary>
+/// Tipo de operación destructiva. Determina qué comprobaciones del guard son
+/// aplicables: limpiar un disco implica borrar filesystem/particiones, y quitar
+/// un miembro implica sacarlo de un array, así que esos estados no se bloquean.
+/// </summary>
+public enum SafeDiskOperation
+{
+    /// <summary>El disco debe estar vacío (crear array). Comprobación completa.</summary>
+    Modify,
+
+    /// <summary>Limpiar/inicializar un disco: se permite filesystem y particiones.</summary>
+    Wipe,
+
+    /// <summary>Quitar un miembro de un array: se permite que esté en RAID.</summary>
+    RemoveMember
+}
 
 public static class SafeDiskGuard
 {
@@ -13,75 +32,87 @@ public static class SafeDiskGuard
     // ============================================================
     // MÉTODO PRINCIPAL
     // ============================================================
-    public static bool CanModify(RaidDiskInfo disk)
+    public static bool CanModify(RaidDiskInfo disk) =>
+        CanModify(disk, SafeDiskOperation.Modify);
+
+    /// <summary>
+    /// Variante para operaciones que solo reciben el nombre del dispositivo.
+    /// Si no se puede inspeccionar el disco, falla cerrado.
+    /// </summary>
+    public static bool CanModifyDevice(string diskName, SafeDiskOperation operation)
     {
-        // -------------------------------
-        // 1. DISCO DEL SISTEMA
-        // -------------------------------
-        if (disk.IsSystemDisk)
+        var name = diskName.StartsWith("/dev/", StringComparison.Ordinal) ? diskName[5..] : diskName;
+        RaidDiskInfo? disk = null;
+
+        try
         {
-            NotificadorLinux.Enviar(
-                "This disk contains system partitions (/, /boot or EFI). Destructive operations are blocked for safety.",
-                ERROR_TIMEOUT,
-                "critical",
-                "raid-util"
-            );
+            disk = DiskService.GetAllDisks().FirstOrDefault(d => d.Name == name);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn($"[GUARD] No se pudo inspeccionar /dev/{name}: {ex.Message}");
+        }
+
+        if (disk is null)
+        {
+            Deny($"No se pudo inspeccionar /dev/{name}; operación bloqueada por seguridad.", true);
+            return false;
+        }
+
+        return CanModify(disk, operation);
+    }
+
+    public static bool CanModify(RaidDiskInfo disk, SafeDiskOperation operation)
+    {
+        if (disk is null)
+            return false;
+
+        // -------------------------------
+        // 1. DISCO DEL SISTEMA (siempre)
+        // El detector es la fuente única: evita depender de que el modelo haya
+        // sido rellenado por DiskService o por el parser de mdadm.
+        // -------------------------------
+        if (disk.IsSystemDisk || SystemDiskDetector.IsSystemDisk(disk.Name))
+        {
+            Deny("This disk contains system partitions (/, /boot or EFI). Destructive operations are blocked for safety.", true);
             return false;
         }
 
         // -------------------------------
-        // 2. DISCO MONTADO
+        // 2. DISCO MONTADO (siempre)
         // -------------------------------
-        if (!string.IsNullOrWhiteSpace(disk.MountPath))
+        if (disk.IsMounted)
         {
-            NotificadorLinux.Enviar(
-                "This disk or one of its partitions is currently mounted. Unmount all partitions before performing this operation.",
-                ERROR_TIMEOUT,
-                "critical",
-                "raid-util"
-            );
+            Deny("This disk or one of its partitions is currently mounted. Unmount all partitions before performing this operation.", true);
             return false;
         }
 
         // -------------------------------
-        // 3. DISCO CON FILESYSTEM
+        // 3. DISCO CON FILESYSTEM (solo para Modify)
         // -------------------------------
-        if (!string.IsNullOrWhiteSpace(disk.FsType))
+        if (operation == SafeDiskOperation.Modify && !string.IsNullOrWhiteSpace(disk.FsType))
         {
-            NotificadorLinux.Enviar(
-                "This disk contains a valid filesystem. Wipe the disk before using it for RAID or JBOD.",
-                WARNING_TIMEOUT,
-                "normal",
-                "raid-util"
-            );
+            Deny("This disk contains a valid filesystem. Wipe the disk before using it for RAID or JBOD.", false);
             return false;
         }
 
         // -------------------------------
-        // 4. DISCO CON PARTICIONES
+        // 4. DISCO CON PARTICIONES (solo para Modify)
         // -------------------------------
-        if (disk.Children.Count > 0)
+        if (operation == SafeDiskOperation.Modify && disk.Children.Count > 0)
         {
-            NotificadorLinux.Enviar(
-                "This disk contains one or more partitions. Wipe the disk before using it for RAID or JBOD.",
-                WARNING_TIMEOUT,
-                "normal",
-                "raid-util"
-            );
+            Deny("This disk contains one or more partitions. Wipe the disk before using it for RAID or JBOD.", false);
             return false;
         }
 
         // -------------------------------
-        // 5. DISCO USADO POR RAID
+        // 5. DISCO USADO POR RAID (Modify y Wipe)
+        // Al quitar un miembro o borrar un array, el disco está en RAID por
+        // definición: esa operación se gestiona desde la sección de arrays.
         // -------------------------------
-        if (disk.IsUsedByRaid)
+        if (operation != SafeDiskOperation.RemoveMember && disk.IsUsedByRaid)
         {
-            NotificadorLinux.Enviar(
-                "This disk is part of an active RAID array and cannot be modified. Use the RAID Arrays section to manage this device.",
-                ERROR_TIMEOUT,
-                "critical",
-                "raid-util"
-            );
+            Deny("This disk is part of an active RAID array and cannot be modified. Use the RAID Arrays section to manage this device.", true);
             return false;
         }
 
@@ -90,12 +121,7 @@ public static class SafeDiskGuard
         // -------------------------------
         if (disk.IsIscsi)
         {
-            NotificadorLinux.Enviar(
-                "This is an iSCSI disk. Only non-destructive operations are allowed unless the disk is empty.",
-                WARNING_TIMEOUT,
-                "normal",
-                "raid-util"
-            );
+            Deny("This is an iSCSI disk. Only non-destructive operations are allowed unless the disk is empty.", false);
 
             if (disk.Children.Count == 0 &&
                 string.IsNullOrWhiteSpace(disk.FsType) &&
@@ -111,27 +137,13 @@ public static class SafeDiskGuard
         // 7. DISCO USB (advertencia)
         // -------------------------------
         if (disk.IsUsb)
-        {
-            NotificadorLinux.Enviar(
-                "This is a USB disk. Using USB devices for RAID is not recommended.",
-                WARNING_TIMEOUT,
-                "normal",
-                "raid-util"
-            );
-        }
+            Deny("This is a USB disk. Using USB devices for RAID is not recommended.", false, WARNING_TIMEOUT);
 
         // -------------------------------
         // 8. DISCO VIRTUAL (advertencia)
         // -------------------------------
         if (disk.IsVirtual)
-        {
-            NotificadorLinux.Enviar(
-                "This is a virtual disk. Some operations may behave differently depending on the environment.",
-                WARNING_TIMEOUT,
-                "normal",
-                "raid-util"
-            );
-        }
+            Deny("This is a virtual disk. Some operations may behave differently depending on the environment.", false, WARNING_TIMEOUT);
 
         // -------------------------------
         // 9. DISCO LISTO PARA USAR
@@ -145,4 +157,12 @@ public static class SafeDiskGuard
 
         return true;
     }
+
+    private static void Deny(string message, bool critical, int? timeout = null) =>
+        NotificadorLinux.Enviar(
+            message,
+            timeout ?? (critical ? ERROR_TIMEOUT : WARNING_TIMEOUT),
+            critical ? "critical" : "normal",
+            "raid-util"
+        );
 }

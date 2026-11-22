@@ -23,7 +23,9 @@ public static class CommandRewriter
         "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/"
     };
 
-    private static readonly Lazy<bool> HasGnuDd = new(DetectGnuDd);
+    private static Lazy<bool> HasGnuDd = new(DetectGnuDd);
+
+    internal static void ResetForTests() => HasGnuDd = new Lazy<bool>(DetectGnuDd);
 
     public static string Rewrite(string command)
     {
