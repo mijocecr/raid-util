@@ -29,17 +29,14 @@
                 CornerRadius="6"
                 Padding="5">
 
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <TextBox
-                    x:Name="LogTextBox"
-                    FontFamily="Consolas, monospace"
-                    FontSize="12"
-                    AcceptsReturn="True"
-                    IsReadOnly="True"
-                    Background="{StaticResource ControlBackgroundBrush}"
-                    Foreground="{StaticResource ForegroundBrush}"
-                    BorderThickness="0"
-                    TextWrapping="NoWrap" />
+            <ScrollViewer x:Name="Scroll"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <TextBlock x:Name="TxtLogs"
+                           FontFamily="Consolas, monospace"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource ForegroundBrush}" />
             </ScrollViewer>
 
         </Border>

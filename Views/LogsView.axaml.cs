@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using RAID_Util.Core;
 using RAID_Util.Helpers;
 using RAID_Util.Services;
@@ -45,18 +46,23 @@ public partial class LogsView : UserControl
             var lines = await File.ReadAllLinesAsync(LogPath);
             var tail = lines.Reverse().Take(2000).Reverse();
 
-            LogTextBox.Text = string.Join('\n', tail);
+            // Con TextBlock no hay CaretIndex: se conserva la intención midiendo
+            // el scroll antes de sustituir el texto.
+            var wasAtBottom =
+                Scroll.Offset.Y + Scroll.Viewport.Height >= Scroll.Extent.Height - 20;
 
-            // Auto-scroll solo si el usuario ya estaba abajo
-            if (LogTextBox.CaretIndex >= LogTextBox.Text.Length - 5)
+            TxtLogs.Text = string.Join('\n', tail);
+
+            if (wasAtBottom)
             {
-                await Task.Yield();
-                LogTextBox.CaretIndex = LogTextBox.Text.Length;
+                Dispatcher.UIThread.Post(
+                    () => Scroll.ScrollToEnd(),
+                    DispatcherPriority.Background);
             }
         }
         catch (Exception ex)
         {
-            LogTextBox.Text = $"[Error reading log]\n{ex.Message}";
+            TxtLogs.Text = $"[Error reading log]\n{ex.Message}";
         }
     }
 
