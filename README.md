@@ -92,6 +92,36 @@ cd raid-util
 dotnet run
 ```
 
+### Command-line interface
+
+When no graphical session is detected, RAID‑Util starts a **numbered menu** in the
+terminal. The same menu can be forced at any time:
+
+```bash
+dotnet run -- --cli    # force the CLI
+dotnet run -- --gui    # force the GUI
+dotnet run -- --help   # show the available arguments
+```
+
+Every option is selected by number, including confirmations (`1) Yes`, `2) No`),
+so no `mdadm` syntax has to be memorized. The CLI and the GUI call the same
+services, which means identical mount points, permissions and exit codes.
+
+Privileges are obtained without blocking: `sudo -n` is tried first, the password
+is requested only once when needed, and all later calls stay non-interactive.
+`doas` is supported with `NOPASSWD` rules; an interactive `doas` password prompt
+is deliberately avoided because it would hang the interface.
+
+### Smoke test (no real disks)
+
+```bash
+./scripts/smoke-cli.sh
+```
+
+It builds the project and exercises the menus and the deep-clean flow against
+fake tools in a temporary `PATH`. No device is touched and no sudo password is
+required.
+
 ---
 
 ## Requirements

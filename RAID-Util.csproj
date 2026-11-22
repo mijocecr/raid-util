@@ -6,6 +6,9 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <RootNamespace>RAID-Util</RootNamespace>
+        <!-- Estos diálogos se construyen siempre desde código con parámetros;
+             Avalonia no los instancia por nombre desde XAML. -->
+        <NoWarn>$(NoWarn);AVLN3001</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
@@ -18,6 +21,9 @@
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
         <PackageReference Include="Newtonsoft.Json" Version="13.0.4"/>
+        <!-- Transitiva de Avalonia; 0.21.2 tiene CVE-2026-39959. 0.21.3 es el backport
+             compatible con la API que usa Avalonia 11.3.x. -->
+        <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3"/>
     </ItemGroup>
 
 
