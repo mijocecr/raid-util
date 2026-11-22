@@ -28,6 +28,13 @@
 
 
     <ItemGroup>
+        <InternalsVisibleTo Include="RAID-Util.Tests" />
+        <!-- El proyecto de tests vive dentro del árbol del proyecto principal. -->
+        <Compile Remove="tests/**/*.cs" />
+        <None Remove="tests/**/*" />
+    </ItemGroup>
+
+    <ItemGroup>
         <AvaloniaResource Include="Assets\**\*"/>
         <AvaloniaResource Include="Styles\**\*.axaml"/>
         <AvaloniaXaml Remove="Styles\BMWColors.axaml"/>
