@@ -123,9 +123,9 @@ public class RaidService
         ShellHelper.EjecutarComoRoot("udevadm settle");
         await WaitForMdadmIdleAsync();
 
-        // ⭐ NUEVO: persistir configuración y actualizar initramfs
+        // ⭐ Persistir configuración y regenerar initramfs con la herramienta de esta distro
         PersistArrayToMdadmConf();
-        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+        await SystemIntegrationService.RefreshInitramfsAsync();
 
         NotificadorLinux.Enviar("Esperando a que el array esté healthy…");
 
@@ -632,7 +632,7 @@ private RaidArrayState ParseArrayStateEnum(string detail)
     // ============================================================
     // 1) Detectar nombre del array automáticamente
     // ============================================================
-    string mdName = null;
+    string? mdName = null;
 
     // Ejemplos de líneas:
     // "md0 : active raid1 ..."
@@ -709,10 +709,38 @@ public async Task<bool> AutoAssemble()
 
     try
     {
-        // 1) Examinar todos los discos y particiones
-        var candidates = Directory.GetFiles("/dev")
-            .Where(f => Regex.IsMatch(f, @"^/dev/sd[a-z]\d*$"))
-            .ToList();
+        // 1) Examinar todos los discos y particiones desde sysfs (portable:
+        // incluye nvme, mmcblk, virtio-blk, etc., a diferencia de /dev/sd*).
+        var candidates = new List<string>();
+        if (Directory.Exists("/sys/block"))
+        {
+            foreach (var block in Directory.GetDirectories("/sys/block"))
+            {
+                var name = Path.GetFileName(block);
+                if (name.StartsWith("loop", StringComparison.Ordinal) ||
+                    name.StartsWith("dm-", StringComparison.Ordinal) ||
+                    name.StartsWith("md", StringComparison.Ordinal) ||
+                    name.StartsWith("sr", StringComparison.Ordinal))
+                    continue;
+
+                var devicePath = $"/dev/{name}";
+                if (File.Exists(devicePath))
+                    candidates.Add(devicePath);
+
+                foreach (var partition in Directory.GetDirectories(block))
+                {
+                    var partName = Path.GetFileName(partition);
+                    if (!partName.StartsWith(name, StringComparison.Ordinal))
+                        continue;
+
+                    var partPath = $"/dev/{partName}";
+                    if (File.Exists(partPath))
+                        candidates.Add(partPath);
+                }
+            }
+        }
+
+        candidates = candidates.Distinct(StringComparer.Ordinal).ToList();
 
         Console.WriteLine("[AA] Discos/particiones detectados:");
         foreach (var c in candidates)
@@ -723,7 +751,7 @@ public async Task<bool> AutoAssemble()
 
         foreach (var dev in candidates)
         {
-            var ex = ShellHelper.EjecutarComoRoot($"/usr/sbin/mdadm --examine {dev}");
+            var ex = ShellHelper.RunRoot(ToolLocator.ResolveOrThrow("mdadm"), "--examine", dev);
             if (ex.ExitCode != 0)
                 continue;
 
@@ -756,17 +784,19 @@ public async Task<bool> AutoAssemble()
 
             Console.WriteLine($"[AA] Nombre asignado por GetNextFreeMdName(): {mdName}");
 
-            var cmd = $"/usr/sbin/mdadm --assemble {mdPath} {string.Join(" ", devs)}";
-            Console.WriteLine("[AA] CMD: " + cmd);
-
-            var result = ShellHelper.EjecutarComoRoot(cmd);
+            var assembleArgs = new List<string> { "--assemble", mdPath };
+            assembleArgs.AddRange(devs);
+            var result = ShellHelper.RunRoot(ToolLocator.ResolveOrThrow("mdadm"), assembleArgs.ToArray());
 
             Console.WriteLine("[AA] EXIT=" + result.ExitCode);
             Console.WriteLine("[AA] STDOUT:\n" + result.Stdout);
             Console.WriteLine("[AA] STDERR:\n" + result.Stderr);
+
+            if (!result.Success)
+                return false;
         }
 
-        ShellHelper.EjecutarComoRoot("udevadm settle || true");
+        await SystemIntegrationService.SettleDevicesAsync();
 
         Console.WriteLine("========== AUTOASSEMBLE END ==========");
         return true;
@@ -827,9 +857,7 @@ public async Task<bool> AutoAssemble()
 
         var cfg = ArrayConfigService.Load(arrayName);
 
-        var mountPath = string.IsNullOrWhiteSpace(cfg.MountPoint)
-            ? $"/mnt/{arrayName}"
-            : cfg.MountPoint;
+        var mountPath = MountOptionsService.EffectiveArrayMountPoint(arrayName, cfg.MountPoint);
 
         Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
 
@@ -845,8 +873,8 @@ public async Task<bool> AutoAssemble()
                 return false;
             }
 
-            // ⭐ limpiar posibles entradas antiguas por devPath
-            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
+            // ⭐ limpiar posibles entradas antiguas por devPath (sin sed GNU)
+            FstabService.RemoveEntry(devPath);
         }
 
         var ls = ShellHelper.EjecutarComoRoot($"ls {devPath}");
@@ -856,36 +884,9 @@ public async Task<bool> AutoAssemble()
             return false;
         }
 
-        var mkfsCmd = fsType switch
-        {
-            "ext4" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.ext4 -F {devPath}"
-                : $"mkfs.ext4 -F -L \"{label}\" {devPath}",
-            "xfs" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.xfs -f {devPath}"
-                : $"mkfs.xfs -f -L \"{label}\" {devPath}",
-            "btrfs" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.btrfs -f {devPath}"
-                : $"mkfs.btrfs -f -L \"{label}\" {devPath}",
-            "f2fs" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.f2fs -f {devPath}"
-                : $"mkfs.f2fs -f -l \"{label}\" {devPath}",
-            "vfat (FAT32)" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.vfat -F 32 {devPath}"
-                : $"mkfs.vfat -F 32 -n \"{label}\" {devPath}",
-            "exfat" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.exfat {devPath}"
-                : $"mkfs.exfat -n \"{label}\" {devPath}",
-            "ntfs" => string.IsNullOrWhiteSpace(label)
-                ? $"mkfs.ntfs -f {devPath}"
-                : $"mkfs.ntfs -f -L \"{label}\" {devPath}",
-            "swap" => string.IsNullOrWhiteSpace(label)
-                ? $"mkswap {devPath}"
-                : $"mkswap -L \"{label}\" {devPath}",
-            _ => throw new Exception("Filesystem no soportado")
-        };
-
-        var mkfs = ShellHelper.EjecutarComoRoot(mkfsCmd);
+        var fsName = fsType == "vfat (FAT32)" ? "vfat" : fsType;
+        var (mkfsTool, mkfsArgs) = FormatCommandBuilder.Build(fsName, devPath, label);
+        var mkfs = ShellHelper.RunRoot(mkfsTool, mkfsArgs);
         if (mkfs.ExitCode != 0)
         {
             Console.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
@@ -894,7 +895,7 @@ public async Task<bool> AutoAssemble()
 
         // ⭐ tras mkfs en array, persistir mdadm y actualizar initramfs
         PersistArrayToMdadmConf();
-        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+        await SystemIntegrationService.RefreshInitramfsAsync();
 
         if (fsType == "swap")
         {
@@ -944,15 +945,16 @@ public async Task<bool> AutoAssemble()
                 ? $"UUID={uuid}"
                 : devPath;
 
-            var entry = $"{firstField} {mountPath} {fs} {mountOpts} 0 0";
+            // limpiar entradas previas por devPath o UUID y escribir de forma segura
+            var mountError = InputValidation.ValidateMountPoint(mountPath);
+            if (mountError is not null)
+                throw new ArgumentException(mountError, nameof(mountPath));
 
-            // limpiar entradas previas por devPath o UUID
             if (!string.IsNullOrWhiteSpace(uuid))
-                ShellHelper.EjecutarComoRoot($"sed -i '\\#UUID={uuid}#d' /etc/fstab");
-            ShellHelper.EjecutarComoRoot($"sed -i '\\#{devPath}#d' /etc/fstab");
-
-            ShellHelper.EjecutarComoRoot($"bash -c \"echo '{entry}' >> /etc/fstab\"");
-            ShellHelper.EjecutarComoRoot("systemctl daemon-reload");
+                FstabService.RemoveEntry(firstField);
+            FstabService.RemoveEntry(devPath);
+            FstabService.WriteEntry(firstField, mountPath, fs, mountOpts);
+            SystemIntegrationService.ReloadSystemdAsync().GetAwaiter().GetResult();
         }
 
         return true;
@@ -1429,9 +1431,8 @@ public async Task<bool> AutoAssemble()
         PersistArrayToMdadmConf();
         ShellHelper.EjecutarComoRoot("sync");
 
-        // 8) update-initramfs solo si existe (universal)
-        if (File.Exists("/usr/sbin/update-initramfs") || File.Exists("/sbin/update-initramfs"))
-            ShellHelper.EjecutarComoRoot("update-initramfs -u || true");
+        // 8) Regenerar initramfs con la herramienta disponible en esta distro
+        await SystemIntegrationService.RefreshInitramfsAsync();
 
         // 9) Final
         var success = $"Array {name} has been successfully deleted.";
@@ -1621,10 +1622,9 @@ public bool CreateArray(string level, List<RaidDiskInfo> disks, string? friendly
         LogService.Info("[CREATE] Persistiendo configuración en mdadm.conf...");
         PersistArrayToMdadmConf();
 
-        // 14) update-initramfs
-        LogService.Info("[CREATE] Ejecutando update-initramfs si existe...");
-        if (File.Exists("/usr/sbin/update-initramfs") || File.Exists("/sbin/update-initramfs"))
-            ShellHelper.EjecutarComoRoot("update-initramfs -u || true");
+        // 14) Regenerar initramfs con la herramienta disponible en esta distro
+        LogService.Info("[CREATE] Regenerando initramfs según la distro...");
+        SystemIntegrationService.RefreshInitramfsAsync().GetAwaiter().GetResult();
 
         LogService.Info($"[CREATE] Array creado correctamente → {arrayPath}");
         return true;
@@ -2150,18 +2150,6 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         // ⭐ limpiar fstab antes de parar
         RemoveArrayFromFstab(arrayPath);
 
-        if (array.IsMounted && !string.IsNullOrWhiteSpace(array.MountPath))
-        {
-            LogService.Info($"[STOP] Unmounting {array.MountPath}...");
-            var um = ShellHelper.EjecutarComoRoot($"umount -f \"{array.MountPath}\"");
-
-            if (um.ExitCode != 0)
-            {
-                LogService.Error($"[STOP] Unmount failed: {um.Stderr}");
-                return (false, $"Failed to unmount {array.MountPath}:\n{um.Stderr}");
-            }
-        }
-
         if (!await WaitForMdadmIdleAsync())
             return (false, "mdadm is busy, cannot stop array.");
 
@@ -2175,7 +2163,7 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 
         // ⭐ actualizar mdadm.conf e initramfs tras parar
         PersistArrayToMdadmConf();
-        ShellHelper.EjecutarComoRoot("update-initramfs -u");
+        await SystemIntegrationService.RefreshInitramfsAsync();
 
         LogService.Info("[STOP] StopArraySafeAsync OK");
         return (true, "Array stopped.");
@@ -2269,7 +2257,7 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         if (copy.ExitCode != 0)
         {
             LogService.Error("[MDADM] Error al escribir en mdadm.conf:");
-            LogService.Error(copy.Stderr);
+            LogService.Error(copy.Stderr ?? "stderr vacío");
             return false;
         }
 
@@ -2292,75 +2280,17 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 {
     try
     {
-        var fstab = "/etc/fstab";
-
-        if (!File.Exists(fstab))
-        {
-            LogService.Info("[FSTAB] No existe /etc/fstab, nada que limpiar.");
-            return true;
-        }
-
-        var lines = File.ReadAllLines(fstab);
-
         var dev = arrayPath.Trim();
+        FstabService.RemoveEntry(dev);
 
-        // ⭐ obtener UUID real del dispositivo, si existe
-        var uuidResult = ShellHelper.EjecutarComoRoot($"blkid -s UUID -o value {dev}");
-        var uuid = uuidResult.ExitCode == 0 ? uuidResult.Stdout.Trim() : "";
-
-        var newLines = new List<string>();
-
-        foreach (var line in lines)
+        // La entrada persistida puede usar UUID en vez de la ruta del dispositivo.
+        var uuidResult = ShellHelper.RunRoot("blkid", "-s", "UUID", "-o", "value", dev);
+        if (uuidResult.Success)
         {
-            var trimmed = line.Trim();
-
-            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
-            {
-                newLines.Add(line);
-                continue;
-            }
-
-            var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
-            {
-                newLines.Add(line);
-                continue;
-            }
-
-            var firstField = parts[0];
-
-            bool match = false;
-
-            if (string.Equals(firstField, dev, StringComparison.Ordinal))
-                match = true;
-
-            if (!match && !string.IsNullOrWhiteSpace(uuid) &&
-                string.Equals(firstField, $"UUID={uuid}", StringComparison.OrdinalIgnoreCase))
-                match = true;
-
-            if (!match)
-                newLines.Add(line);
+            var uuid = uuidResult.Stdout.Trim();
+            if (!string.IsNullOrWhiteSpace(uuid))
+                FstabService.RemoveEntry($"UUID={uuid}");
         }
-
-        if (newLines.Count == lines.Length)
-        {
-            LogService.Info("[FSTAB] No había entrada para este array.");
-            return true;
-        }
-
-        var tempFile = "/tmp/fstab.cleaned";
-        File.WriteAllLines(tempFile, newLines);
-
-        var result = ShellHelper.EjecutarComoRoot($"cp {tempFile} {fstab}");
-
-        if (result.ExitCode != 0)
-        {
-            LogService.Error("[FSTAB] Error al actualizar /etc/fstab:");
-            LogService.Error(result.Stderr);
-            return false;
-        }
-
-        ShellHelper.EjecutarComoRoot("systemctl daemon-reload");
 
         LogService.Info("[FSTAB] Entrada eliminada correctamente.");
         return true;
@@ -2588,52 +2518,18 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
         var fsType = fsCmd.Stdout.Trim();
         Console.WriteLine($"Detected fsType = {fsType}");
 
-        // Crear punto de montaje
-        var mountPoint = $"/mnt/{array.Name}";
+        // Punto de montaje canónico y configuración compartida con GUI/CLI.
+        var cfg = ArrayConfigService.Load(array.BaseName);
+        var mountPoint = MountOptionsService.EffectiveArrayMountPoint(array.Name, cfg.MountPoint);
         Console.WriteLine($"Creating mount point: {mountPoint}");
-        ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
+        ShellHelper.RunRoot("mkdir", "-p", mountPoint);
 
-        // Línea fstab
-        var line = $"UUID={uuid}  {mountPoint}  {fsType}  defaults,noatime  0  2";
-        Console.WriteLine($"Generated fstab line: {line}");
+        // Una sola implementación de /etc/fstab para GUI, CLI y persistencia,
+        // con bloqueo para evitar carreras entre procesos.
+        FstabService.WriteEntry($"UUID={uuid}", mountPoint, fsType,
+            MountOptionsService.BuildOptions(cfg));
 
-        // Leer fstab actual
-        Console.WriteLine("Reading /etc/fstab...");
-        var lines = File.ReadAllLines("/etc/fstab").ToList();
-
-        // Evitar duplicados
-        if (lines.Any(l => l.Contains(uuid, StringComparison.OrdinalIgnoreCase)))
-        {
-            Console.WriteLine("WARNING: UUID ya existe en /etc/fstab. No se añadirá duplicado.");
-           // NotificadorLinux.Enviar("Persistent mount entry already exists.", 6000, "info");
-            
-            return true;
-        }
-
-        // Añadir línea
-        lines.Add(line);
-
-        // Guardar como root usando fichero temporal
-        var tempPath = "/tmp/fstab.raidutil.tmp";
-        Console.WriteLine($"Writing temp fstab to {tempPath}...");
-        File.WriteAllLines(tempPath, lines);
-
-        Console.WriteLine("Replacing /etc/fstab as root...");
-        var replaceResult = ShellHelper.EjecutarComoRoot($"cp \"{tempPath}\" /etc/fstab");
-
-        Console.WriteLine($"cp exit = {replaceResult.ExitCode}");
-        Console.WriteLine($"cp stderr = {replaceResult.Stderr}");
-
-        if (replaceResult.ExitCode != 0)
-        {
-            Console.WriteLine("ERROR: No se pudo reemplazar /etc/fstab como root.");
-            return false;
-        }
-
-        Dispatcher.UIThread.Post(() =>
-        {
-            NotificadorLinux.Enviar("Persistent mount entry added successfully.", 6000, "info");
-        });
+        NotificadorLinux.Enviar("Persistent mount entry added successfully.", 6000, "info");
 
         
 
@@ -2651,131 +2547,8 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     
     
     
-public async Task<bool> RemovePersistMountAsync(RaidArrayInfo array)
-{
-    try
-    {
-        Console.WriteLine("=== RemovePersistMountAsync ===");
-        Console.WriteLine($"Array.Path = {array.Path}");
-        Console.WriteLine($"Array.Name = {array.Name}");
-
-        var fsDetect = ShellHelper.EjecutarComoRoot($"blkid {array.Path}");
-        Console.WriteLine($"blkid exit = {fsDetect.ExitCode}");
-        Console.WriteLine($"blkid stdout = {fsDetect.Stdout}");
-        Console.WriteLine($"blkid stderr = {fsDetect.Stderr}");
-
-        if (fsDetect.ExitCode != 0 || string.IsNullOrWhiteSpace(fsDetect.Stdout))
-        {
-            Console.WriteLine("ERROR: blkid no devolvió información válida.");
-            return false;
-        }
-
-        string fsUuid = null;
-        var parts = fsDetect.Stdout.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (var part in parts)
-        {
-            if (part.StartsWith("UUID=", StringComparison.OrdinalIgnoreCase))
-            {
-                fsUuid = part.Replace("UUID=", "")
-                             .Replace("\"", "")
-                             .Trim()
-                             .ToLowerInvariant();
-                break;
-            }
-        }
-
-        Console.WriteLine($"Detected fsUuid = {fsUuid}");
-
-        if (string.IsNullOrWhiteSpace(fsUuid))
-        {
-            Console.WriteLine("ERROR: No se pudo extraer UUID del filesystem.");
-            return false;
-        }
-
-        Console.WriteLine("Reading /etc/fstab...");
-        var lines = File.ReadAllLines("/etc/fstab");
-        Console.WriteLine($"Total lines in fstab: {lines.Length}");
-
-        var newLines = new List<string>();
-        int removedCount = 0;
-
-        foreach (var line in lines)
-        {
-            var original = line;
-            var trimmed = line.Trim().ToLowerInvariant();
-
-            if (trimmed.StartsWith("#"))
-            {
-                newLines.Add(original);
-                continue;
-            }
-
-            if (trimmed.Contains("uuid="))
-            {
-                var lineParts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var uuidPart = lineParts.FirstOrDefault(p => p.StartsWith("uuid="));
-
-                if (uuidPart != null)
-                {
-                    var lineUuid = uuidPart.Replace("uuid=", "").Trim();
-                    Console.WriteLine($"Checking line UUID: {lineUuid} vs fsUuid: {fsUuid}");
-
-                    if (lineUuid == fsUuid)
-                    {
-                        Console.WriteLine($"REMOVING line: {original}");
-                        removedCount++;
-                        continue;
-                    }
-                }
-            }
-
-            newLines.Add(original);
-        }
-
-        Console.WriteLine($"Removed lines count = {removedCount}");
-
-        if (removedCount == 0)
-        {
-            Console.WriteLine("WARNING: No se eliminó ninguna línea de /etc/fstab. Puede que el UUID no coincida.");
-            return false;
-        }
-
-        //  Escribir como root usando fichero temporal
-        var tempPath = "/tmp/fstab.raidutil.tmp";
-        Console.WriteLine($"Writing temp fstab to {tempPath}...");
-        File.WriteAllLines(tempPath, newLines);
-
-        Console.WriteLine("Replacing /etc/fstab as root...");
-        var replaceResult = ShellHelper.EjecutarComoRoot($"cp \"{tempPath}\" /etc/fstab");
-
-        Console.WriteLine($"cp exit = {replaceResult.ExitCode}");
-        Console.WriteLine($"cp stderr = {replaceResult.Stderr}");
-
-        if (replaceResult.ExitCode != 0)
-        {
-            Console.WriteLine("ERROR: No se pudo reemplazar /etc/fstab como root.");
-            return false;
-        }
-
-        
-        Dispatcher.UIThread.Post(() =>
-        {
-            NotificadorLinux.Enviar("Persistent mount entry removed successfully.", 6000, "info");
-        });
-
-        
-
-        Console.WriteLine("=== RemovePersistMountAsync DONE ===");
-        return true;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine("EXCEPTION in RemovePersistMountAsync:");
-        Console.WriteLine(ex.ToString());
-        return false;
-    }
-}
+public Task<bool> RemovePersistMountAsync(RaidArrayInfo array) =>
+    Task.FromResult(RemoveArrayFromFstab(array.Path));
 
 
 

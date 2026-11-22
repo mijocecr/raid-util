@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using RAID_Util.Helpers;
+using RAID_Util.Models;
 
 namespace RAID_Util.Services;
 
@@ -33,37 +34,70 @@ public static class MountService
         if (!File.Exists("/proc/mounts"))
             return false;
 
-        foreach (var line in File.ReadAllLines("/proc/mounts"))
+        return File.ReadLines("/proc/mounts").Any(line =>
         {
-            var parts = line.Split(' ');
-            if (parts.Length >= 2 && parts[1] == mountPoint)
-                return true;
-        }
-
-        return false;
+            var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length >= 2 && PathEquals(Decode(fields[1]), mountPoint);
+        });
     }
 
-    // ============================================================
-    // ⭐ MONTAR (versión estable y segura)
-    // ============================================================
-    public static bool Mount(string device, string mountPoint, string options = "defaults")
+    public static bool IsMountedReadOnly(string mountPoint)
     {
-        // ⭐ Resolver PATH REAL (seguro, no bloquea UI)
-        device = ResolveRealDeviceAsync(device).Result;
+        if (!File.Exists("/proc/mounts"))
+            return false;
 
-        ShellHelper.EjecutarComoRoot($"mkdir -p \"{mountPoint}\"");
+        return File.ReadLines("/proc/mounts").Any(line =>
+        {
+            var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (fields.Length < 4 || !PathEquals(Decode(fields[1]), mountPoint))
+                return false;
+
+            return fields[3].Split(',').Contains("ro", StringComparer.Ordinal);
+        });
+    }
+
+    private static bool PathEquals(string a, string b) =>
+        string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.Ordinal);
+
+    private static string Decode(string value) => value
+        .Replace("\\040", " ", StringComparison.Ordinal)
+        .Replace("\\011", "\t", StringComparison.Ordinal)
+        .Replace("\\012", "\n", StringComparison.Ordinal)
+        .Replace("\\134", "\\", StringComparison.Ordinal);
+
+    public static bool Mount(string device, string mountPoint, string options = "defaults") =>
+        Mount(device, mountPoint, options, MountOptionsService.DefaultPermissions);
+
+    /// <summary>Overload canónico: opciones y permisos salen de la configuración compartida.</summary>
+    public static bool Mount(string device, string mountPoint, ArrayConfig config) =>
+        Mount(device, mountPoint, MountOptionsService.BuildOptions(config),
+            MountOptionsService.NormalizePermissions(config.MountPermissions));
+
+    public static bool Mount(string device, string mountPoint, string options, string permissions)
+    {
+        var error = InputValidation.ValidateMountPoint(mountPoint);
+        if (error is not null)
+        {
+            LogService.Error($"[MOUNT] {error}");
+            return false;
+        }
+
+        // ⭐ Resolver PATH REAL (seguro, no bloquea UI)
+        device = ResolveRealDeviceAsync(device).GetAwaiter().GetResult();
+
+        ShellHelper.RunRoot("mkdir", "-p", mountPoint);
 
         if (IsMounted(mountPoint))
-            ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
+            ShellHelper.RunRoot("umount", "-f", mountPoint);
 
-        ShellHelper.EjecutarComoRoot("udevadm settle");
+        SystemIntegrationService.SettleDevicesAsync().GetAwaiter().GetResult();
 
-        var fsResult = ShellHelper.EjecutarComoRoot($"lsblk -no FSTYPE \"{device}\"");
+        var fsResult = ShellHelper.RunRoot("lsblk", "-no", "FSTYPE", device);
 
         var fsType = fsResult.Stdout
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]
             .Trim()
-            .ToLower();
+            .ToLowerInvariant();
 
         if (string.IsNullOrWhiteSpace(fsType))
         {
@@ -71,25 +105,20 @@ public static class MountService
             return false;
         }
 
-        var finalOpts = options;
+        var finalOpts = string.IsNullOrWhiteSpace(options) ? "defaults" : options.TrimStart(',');
 
         if (fsType is "exfat" or "vfat" or "ntfs")
         {
-            if (!finalOpts.Contains("uid="))
-                finalOpts += ",uid=1000";
-
-            if (!finalOpts.Contains("gid="))
-                finalOpts += ",gid=1000";
-
-            if (!finalOpts.Contains("umask="))
-                finalOpts += ",umask=0002";
+            var (uid, gid) = CurrentIds();
+            if (!finalOpts.Contains("uid=", StringComparison.Ordinal)) finalOpts += $",uid={uid}";
+            if (!finalOpts.Contains("gid=", StringComparison.Ordinal)) finalOpts += $",gid={gid}";
+            if (!finalOpts.Contains("umask=", StringComparison.Ordinal)) finalOpts += ",umask=0002";
         }
 
-        finalOpts = finalOpts.TrimStart(',');
-
-        var r = ShellHelper.EjecutarComoRoot(
-            $"mount -o {finalOpts} \"{device}\" \"{mountPoint}\""
-        );
+        var mountTool = ToolLocator.IsAvailable("mount")
+            ? ToolLocator.ResolveOrThrow("mount")
+            : "mount";
+        var r = ShellHelper.RunRoot(mountTool, "-o", finalOpts, device, mountPoint);
 
         if (r.ExitCode != 0)
         {
@@ -97,13 +126,32 @@ public static class MountService
             return false;
         }
 
-        if (fsType is "ext4" or "xfs" or "btrfs" or "f2fs")
+        // Permisos idénticos en GUI y CLI. En FAT/NTFS los fija el montaje;
+        // en filesystems Unix se aplican aquí con el uid/gid real del usuario.
+        var perms = MountOptionsService.NormalizePermissions(permissions);
+        if (fsType is not ("exfat" or "vfat" or "ntfs"))
         {
-            ShellHelper.EjecutarComoRoot($"chown 1000:1000 \"{mountPoint}\"");
-            ShellHelper.EjecutarComoRoot($"chmod 775 \"{mountPoint}\"");
+            var (uid, gid) = CurrentIds();
+            ShellHelper.RunRoot("chown", $"{uid}:{gid}", mountPoint);
         }
+        ShellHelper.RunRoot("chmod", perms, mountPoint);
 
         return true;
+    }
+
+    private static (string Uid, string Gid) CurrentIds()
+    {
+        string Read(string option)
+        {
+            if (!ToolLocator.IsAvailable("id"))
+                return "1000";
+
+            var result = ShellHelper.Run("id", option);
+            var value = result.Stdout.Trim();
+            return result.Success && int.TryParse(value, out _) ? value : "1000";
+        }
+
+        return (Read("-u"), Read("-g"));
     }
 
     // ============================================================
@@ -114,7 +162,7 @@ public static class MountService
         if (!IsMounted(mountPoint))
             return true;
 
-        var r = ShellHelper.EjecutarComoRoot($"umount -f \"{mountPoint}\"");
+        var r = ShellHelper.RunRoot("umount", "-f", mountPoint);
         return r.ExitCode == 0;
     }
 }

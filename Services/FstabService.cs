@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using RAID_Util.Helpers;
 
 namespace RAID_Util.Services;
@@ -10,6 +11,31 @@ public static class FstabService
 {
     private const string FstabPath = "/etc/fstab";
     private const string BackupPath = "/etc/fstab.raidutil.bak";
+
+    private static readonly object SyncRoot = new();
+
+    /// <summary>
+    /// Serializa también entre procesos: el semaphore de PrivilegeSession solo
+    /// cubre los comandos root de este proceso, no la lectura/escritura de fstab.
+    /// </summary>
+    private static FileStream AcquireLock()
+    {
+        var lockPath = Path.Combine(Path.GetTempPath(), "raid-util-fstab.lock");
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < 99)
+            {
+                Thread.Sleep(50);
+            }
+        }
+
+        throw new IOException("No se pudo adquirir el bloqueo de /etc/fstab.");
+    }
 
     // ============================================================
     // NORMALIZAR DEVICE (ruta real)
@@ -60,7 +86,7 @@ public static class FstabService
         try
         {
             if (File.Exists(FstabPath))
-                ShellHelper.EjecutarComoRoot($"cp \"{FstabPath}\" \"{BackupPath}\"");
+                ShellHelper.RunRoot("cp", FstabPath, BackupPath);
         }
         catch { }
     }
@@ -74,8 +100,8 @@ public static class FstabService
         {
             device = NormalizeDevice(device);
 
-            var result = ShellHelper.EjecutarComoRoot($"blkid \"{device}\"");
-            var output = (result.Stdout + result.Stderr).ToLower();
+            var result = ShellHelper.RunRoot("blkid", device);
+            var output = (result.Stdout + result.Stderr).ToLowerInvariant();
 
             if (output.Contains("type=\"ext4\"")) return "ext4";
             if (output.Contains("type=\"xfs\"")) return "xfs";
@@ -96,16 +122,26 @@ public static class FstabService
     // ============================================================
     public static void WriteEntry(string device, string mountPoint, string fs, string options)
     {
+        lock (SyncRoot)
+        using (AcquireLock())
+        {
+            WriteEntryCore(device, mountPoint, fs, options);
+        }
+    }
+
+    private static void WriteEntryCore(string device, string mountPoint, string fs, string options)
+    {
         Backup();
 
         device = NormalizeDevice(device);
         var baseDev = BaseName(device);
 
         if (!File.Exists(FstabPath))
-            ShellHelper.EjecutarComoRoot($"touch \"{FstabPath}\"");
+            ShellHelper.RunRoot("touch", FstabPath);
 
-        if (mountPoint.Contains(" "))
-            throw new Exception("Mount point cannot contain spaces in /etc/fstab.");
+        var error = InputValidation.ValidateMountPoint(mountPoint);
+        if (error is not null)
+            throw new ArgumentException(error, nameof(mountPoint));
 
         var lines = File.ReadAllLines(FstabPath).ToList();
         List<string> cleaned = new();
@@ -143,15 +179,25 @@ public static class FstabService
         var temp = Path.GetTempFileName();
         File.WriteAllLines(temp, cleaned);
 
-        ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
-        ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
-        ShellHelper.EjecutarComoRoot($"chown root:root \"{FstabPath}\"");
+        ShellHelper.RunRoot("cp", temp, FstabPath);
+        ShellHelper.RunRoot("chmod", "644", FstabPath);
+        ShellHelper.RunRoot("chown", "root:root", FstabPath);
+        SystemIntegrationService.ReloadSystemdAsync().GetAwaiter().GetResult();
     }
 
     // ============================================================
     // ELIMINAR ENTRADA
     // ============================================================
     public static void RemoveEntry(string device)
+    {
+        lock (SyncRoot)
+        using (AcquireLock())
+        {
+            RemoveEntryCore(device);
+        }
+    }
+
+    private static void RemoveEntryCore(string device)
     {
         Backup();
 
@@ -191,8 +237,9 @@ public static class FstabService
         var temp = Path.GetTempFileName();
         File.WriteAllLines(temp, cleaned);
 
-        ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{FstabPath}\"");
-        ShellHelper.EjecutarComoRoot($"chmod 644 \"{FstabPath}\"");
-        ShellHelper.EjecutarComoRoot($"chown root:root \"{FstabPath}\"");
+        ShellHelper.RunRoot("cp", temp, FstabPath);
+        ShellHelper.RunRoot("chmod", "644", FstabPath);
+        ShellHelper.RunRoot("chown", "root:root", FstabPath);
+        SystemIntegrationService.ReloadSystemdAsync().GetAwaiter().GetResult();
     }
 }

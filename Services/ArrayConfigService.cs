@@ -23,18 +23,8 @@ public static class ArrayConfigService
     // ============================
     // ⭐ NUEVO: Normalizar clave real del array
     // ============================
-    private static string NormalizeArrayKey(string arrayName)
-    {
-        // Caso: /dev/md/host:md0 → host:md0
-        if (arrayName.StartsWith("/dev/"))
-        {
-            var last = Path.GetFileName(arrayName); // host:md0
-            return Normalize(last);
-        }
-
-        // Caso: host:md0 → OK
-        return Normalize(arrayName);
-    }
+    private static string NormalizeArrayKey(string arrayName) =>
+        Normalize(MountOptionsService.ArrayKey(arrayName));
 
     // ============================
     // 2) Ruta completa del archivo
@@ -53,7 +43,7 @@ public static class ArrayConfigService
         try
         {
             // Garantizar directorio
-            ShellHelper.EjecutarComoRoot($"mkdir -p \"{BasePath}\"");
+            ShellHelper.RunRoot("mkdir", "-p", BasePath);
 
             var path = GetPath(arrayName);
 
@@ -106,7 +96,7 @@ public static class ArrayConfigService
             var dir = BasePath;
 
             // Crear carpeta root
-            ShellHelper.EjecutarComoRoot($"mkdir -p \"{dir}\"");
+            ShellHelper.RunRoot("mkdir", "-p", dir);
 
             // Serializar JSON
             var json = JsonConvert.SerializeObject(cfg, Formatting.Indented);
@@ -119,16 +109,16 @@ public static class ArrayConfigService
             if (File.Exists(path))
             {
                 var backup = path + ".bak";
-                ShellHelper.EjecutarComoRoot($"cp \"{path}\" \"{backup}\"");
+                ShellHelper.RunRoot("cp", path, backup);
                 LogService.Info($"[CFG] Backup creado: {backup}");
             }
 
             // Copiar con permisos root
-            ShellHelper.EjecutarComoRoot($"cp \"{temp}\" \"{path}\"");
+            ShellHelper.RunRoot("cp", temp, path);
 
             // Permisos correctos
-            ShellHelper.EjecutarComoRoot($"chmod 644 \"{path}\"");
-            ShellHelper.EjecutarComoRoot($"chown root:root \"{path}\"");
+            ShellHelper.RunRoot("chmod", "644", path);
+            ShellHelper.RunRoot("chown", "root:root", path);
 
             LogService.Info($"[CFG] Config guardada correctamente: {path}");
         }

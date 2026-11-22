@@ -49,8 +49,13 @@ public static class MdadmService
     // ============================================================
     public static void SetResyncSpeed(int min, int max)
     {
-        ShellHelper.EjecutarComoRoot($"bash -c \"echo {min} > /proc/sys/dev/raid/speed_limit_min\"");
-        ShellHelper.EjecutarComoRoot($"bash -c \"echo {max} > /proc/sys/dev/raid/speed_limit_max\"");
+        if (min < 0 || max < min)
+            throw new ArgumentOutOfRangeException(nameof(min), "Velocidades de resincronización no válidas.");
+
+        // El intérprete lo elige CommandRunner (bash o sh). No hace falta anidar
+        // otro bash -c, que además no existe en distros minimalistas como Alpine.
+        ShellHelper.EjecutarComoRoot($"echo {min} > /proc/sys/dev/raid/speed_limit_min");
+        ShellHelper.EjecutarComoRoot($"echo {max} > /proc/sys/dev/raid/speed_limit_max");
     }
 
     // ============================================================
@@ -144,9 +149,14 @@ public static class MdadmService
 
             if (fs.StartsWith("ext"))
             {
-                ShellHelper.EjecutarComoRoot(
-                    $"/usr/sbin/e2label \"{device}\" \"{cfg.FsLabel}\""
-                );
+                var labelError = InputValidation.ValidateLabel(cfg.FsLabel, allowEmpty: false);
+                if (labelError is not null)
+                    throw new ArgumentException(labelError, nameof(cfg));
+
+                ShellHelper.RunRoot(
+                    ToolLocator.ResolveOrThrow("e2label"),
+                    device,
+                    cfg.FsLabel);
             }
         }
     }

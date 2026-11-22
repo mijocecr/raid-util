@@ -117,7 +117,14 @@ public static class DiskService
     {
         try
         {
-            var r = ShellHelper.EjecutarComoRoot($"smartctl -H /dev/{diskName}");
+            if (InputValidation.ValidateDeviceName(diskName) is not null)
+                return "Unknown";
+
+            // Argumentos separados: sin shell y sin depender de /bin/bash.
+            var r = ShellHelper.RunRoot(
+                ToolLocator.ResolveOrThrow("smartctl"),
+                "-H",
+                InputValidation.NormalizeDevicePath(diskName));
             var text = (r.Stdout + "\n" + r.Stderr).Trim().ToLowerInvariant();
 
             if (text.Contains("passed"))
