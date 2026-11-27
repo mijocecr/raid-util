@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using Avalonia;
+using Avalonia.Media;
 using RAID_Util.Helpers;
 
 namespace RAID_Util;
@@ -51,6 +52,9 @@ internal class Program
         return AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
+            // Usar Inter como familia por defecto para no depender de las
+            // fuentes del sistema (contenedores mínimos / servidores headless).
+            .With(new FontManagerOptions { DefaultFamilyName = "fonts:Inter#Inter" })
             .LogToTrace();
     }
 }

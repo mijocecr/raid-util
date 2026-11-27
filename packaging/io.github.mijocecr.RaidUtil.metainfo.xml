@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mijocecr.RaidUtil</id>
+
+  <name>RAID Util</name>
+  <summary>A simple and modern GUI for managing RAID</summary>
+
+  <developer id="io.github.mijocecr">
+    <name>Miguel Cerrato</name>
+  </developer>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      RAID Util is a graphical and terminal application to create, manage and
+      monitor software RAID arrays on Linux. It handles disks, arrays, events
+      and persistence, and also works headless through its numbered CLI.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.mijocecr.RaidUtil.desktop</launchable>
+
+  <url type="homepage">https://github.com/mijocecr/raid-util</url>
+  <url type="bugtracker">https://github.com/mijocecr/raid-util/issues</url>
+
+  <provides>
+    <binary>RAID-Util</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+  </categories>
+
+  <releases>
+    <release version="3.0.1" date="2026-11-27"/>
+    <release version="3.0.0" date="2026-11-03"/>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+</component>
