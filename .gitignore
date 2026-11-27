@@ -3,3 +3,5 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+# Artefactos de release generados por scripts/build-release.sh
+dist/
