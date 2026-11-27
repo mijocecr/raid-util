@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using RAID_Util.Helpers;
 using RAID_Util.Models;
 
 namespace RAID_Util.Services;
@@ -14,7 +16,7 @@ public static class RaidAlertService
     private static string _lastMdstat = "";
     private static string _lastDetail = "";
     private static string? _currentArray;
-    private static DateTime _lastAlertTime = DateTime.MinValue;
+    private static readonly Dictionary<string, DateTime> LastAlertTimes = new(StringComparer.Ordinal);
 
     // ============================================================
     // RESOLVER NOMBRE BASE (md0)
@@ -69,7 +71,9 @@ public static class RaidAlertService
                         // 3) Resync lento
                         if (cfg.AlertSlowResync && SafeIsResyncing(arrayName))
                         {
-                            var speedStr = ExtractSpeed(detail);
+                            // speed= vive en /proc/mdstat, no en mdadm --detail.
+                            var speedStr = ExtractSpeed(
+                                MdstatParser.GetProgressLine(mdstat, arrayName));
                             if (int.TryParse(speedStr, out var kb))
                                 if (kb > 0 && kb < cfg.ResyncMaxSpeed / 10)
                                     TryAlert(onAlert, $"Array {baseName} resync is slow ({kb} KB/s).");
@@ -101,6 +105,8 @@ public static class RaidAlertService
         _currentArray = null;
         _lastMdstat = "";
         _lastDetail = "";
+        lock (LastAlertTimes)
+            LastAlertTimes.Clear();
 
         LogService.Info("[RaidAlertService] Monitoring stopped");
     }
@@ -149,16 +155,22 @@ public static class RaidAlertService
     }
 
     // ============================================================
-    // ALERTA CON COOLDOWN GLOBAL
+    // ALERTA CON COOLDOWN POR MENSAJE
     // ============================================================
     private static void TryAlert(Action<string> onAlert, string message)
     {
         var now = DateTime.UtcNow;
 
-        if ((now - _lastAlertTime).TotalSeconds < AlertCooldownSeconds)
-            return;
+        // Antes un único timestamp global hacía que la primera alerta de un
+        // array suprimiera el resto durante 30 s, incluso las de otros arrays.
+        lock (LastAlertTimes)
+        {
+            if (LastAlertTimes.TryGetValue(message, out var last) &&
+                (now - last).TotalSeconds < AlertCooldownSeconds)
+                return;
 
-        _lastAlertTime = now;
+            LastAlertTimes[message] = now;
+        }
 
         try
         {
@@ -179,22 +191,7 @@ public static class RaidAlertService
         if (string.IsNullOrWhiteSpace(mdstat))
             return false;
 
-        var lines = mdstat.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        var line = lines.FirstOrDefault(l =>
-            l.StartsWith(baseName + " ", StringComparison.OrdinalIgnoreCase) ||
-            l.Contains(baseName + " :", StringComparison.OrdinalIgnoreCase));
-
-        if (line == null)
-            return false;
-
-        if (line.Contains("faulty", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (line.Contains("(F)", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return false;
+        return MdstatParser.HasFaultyMember(MdstatParser.GetArrayLine(mdstat, baseName));
     }
 
     // ============================================================

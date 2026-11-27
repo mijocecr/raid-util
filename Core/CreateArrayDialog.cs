@@ -8,6 +8,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using RAID_Util.Models;
+using RAID_Util.Helpers;
 using RAID_Util.Services;
 using RAID_Util.Views;
 
@@ -90,7 +91,7 @@ public class CreateArrayDialog : Window
         }
         else
         {
-            Console.WriteLine("[UI] JBOD (Linear) ocultado: el kernel no soporta linear.");
+            DebugConsole.WriteLine("[UI] JBOD (Linear) ocultado: el kernel no soporta linear.");
         }
 
         _levelSelector = new ComboBox

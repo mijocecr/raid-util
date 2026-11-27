@@ -17,6 +17,10 @@ public class RaidStateService
 
     private readonly object _lock = new();
 
+    // Operación observada en la LECTURA ANTERIOR. Solo se marca como terminada
+    // cuando una lectura nueva confirma que ya no aparece en mdstat.
+    private readonly HashSet<string> _operationsInProgress = new(StringComparer.Ordinal);
+
     public void ForceStateChanged()
     {
         StateChanged?.Invoke();
@@ -31,51 +35,51 @@ public class RaidStateService
             return;
         }
 
-        _ = Task.Run(async () =>
+        var raidService = RaidService.Instance;
+
+        var arrays = await raidService.GetArraysAsync().ConfigureAwait(false);
+        var disks = await raidService.GetAllDisksAsync().ConfigureAwait(false);
+
+        lock (_lock)
         {
-            var raidService = RaidService.Instance;
+            Arrays = arrays;
+            Disks = disks;
 
-            var arrays = await raidService.GetArraysAsync();
-            var disks = await raidService.GetAllDisksAsync();
-
-            lock (_lock)
-            {
-                Arrays = arrays;
-                Disks = disks;
-            }
-
-            // ⭐ Detectar FIN de operación aunque mdadm NO reporte 100%
+            // Se aplica sobre la lectura nueva, nunca sobre un progreso "atascado".
             NormalizeFinishedOperations();
+        }
 
-            StateChanged?.Invoke();
-        });
+        StateChanged?.Invoke();
     }
 
-    // ⭐⭐⭐ ESTA ES LA CLAVE ⭐⭐⭐
+    private static bool IsInOperation(RaidArrayInfo array) =>
+        array.State is RaidArrayState.Resync or RaidArrayState.Rebuilding or RaidArrayState.Recovering;
+
     private void NormalizeFinishedOperations()
     {
+        var stillRunning = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var array in Arrays)
         {
-            // Si mdadm dejó de reportar progreso pero no llegó a 100%
-            bool wasInOperation =
-                array.State == RaidArrayState.Resync ||
-                array.State == RaidArrayState.Rebuilding;
-
-            bool progressStuck =
-                array.RebuildProgress > 0 &&
-                array.RebuildProgress < 100;
-
-            if (wasInOperation && progressStuck)
+            if (IsInOperation(array))
             {
-                LogService.Debug($"[STATE] mdadm terminó sin reportar 100% → normalizando {array.Name}");
-
-                // ⭐ Forzar finalización correcta
-                array.RebuildProgress = 100;
-                array.RebuildETA = "0 min";
-
-                // ⭐ Estado final correcto
-                array.State = RaidArrayState.Clean;
+                stillRunning.Add(array.Name);
+                continue;
             }
+
+            // Solo cerrar si la lectura anterior sí mostró una operación activa.
+            if (!_operationsInProgress.Contains(array.Name))
+                continue;
+
+            LogService.Debug($"[STATE] Operación finalizada confirmada en {array.Name}");
+
+            array.RebuildProgress = 100;
+            array.RebuildETA = "0 min";
+            array.State = RaidArrayState.Clean;
         }
+
+        _operationsInProgress.Clear();
+        foreach (var name in stillRunning)
+            _operationsInProgress.Add(name);
     }
 }

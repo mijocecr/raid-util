@@ -53,11 +53,13 @@ public static class DiskService
                 Serial = dev.Serial,
                 Size = dev.Size,
 
-                // Tipo físico
-                IsRotational = dev.Rotational == "1",
+                // Tipo físico (ROTA puede ser booleano, número o texto según util-linux)
+                IsRotational = dev.Rotational,
                 IsNvme = dev.Name.StartsWith("nvme") || dev.Transport == "nvme",
                 IsUsb = dev.Transport == "usb",
-                IsVirtual = IsVirtualDisk(dev.Model) || dev.Transport == "none",
+                // TRAN="none" también aparece en discos SATA/USB reales: no basta
+                // para clasificar un disco como virtual.
+                IsVirtual = IsVirtualDisk(dev.Model),
                 IsIscsi = dev.Transport == "iscsi",
 
                 // Sistema de archivos
@@ -151,7 +153,7 @@ public static class DiskService
     // ============================================================
     // PARSEAR LSBKL (RECURSIVO)
     // ============================================================
-    private static List<LsblkEntry> ParseLsblk(string json)
+    internal static List<LsblkEntry> ParseLsblk(string json)
     {
         var list = new List<LsblkEntry>();
 
@@ -173,7 +175,9 @@ public static class DiskService
             Size = dev.GetProperty("size").GetString() ?? "",
             Model = dev.TryGetProperty("model", out var model) ? model.GetString() ?? "" : "",
             Serial = dev.TryGetProperty("serial", out var serial) ? serial.GetString() ?? "" : "",
-            Rotational = dev.TryGetProperty("rota", out var rota) ? rota.GetRawText() : "0",
+            Rotational = dev.TryGetProperty("rota", out var rota)
+                ? DiskTypeHelper.ParseRotational(rota)
+                : false,
             FsType = dev.TryGetProperty("fstype", out var fs) ? fs.GetString() ?? "" : "",
             MountPoint = dev.TryGetProperty("mountpoint", out var mp) ? mp.GetString() ?? "" : "",
             PkName = dev.TryGetProperty("pkname", out var pk) ? pk.GetString() ?? "" : "",
@@ -202,7 +206,7 @@ public class LsblkEntry
     public string Size { get; set; } = "";
     public string Model { get; set; } = "";
     public string Serial { get; set; } = "";
-    public string Rotational { get; set; } = "";
+    public bool Rotational { get; set; }
     public string FsType { get; set; } = "";
     public string MountPoint { get; set; } = "";
     public string PkName { get; set; } = "";

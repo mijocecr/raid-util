@@ -27,7 +27,7 @@ public static class NotificadorLinux
         {
             if (!NotifySendDisponible())
             {
-                Console.WriteLine($"[NOTIFICACIÓN] {mensaje}");
+                DebugConsole.WriteLine($"[NOTIFICACIÓN] {mensaje}");
                 return;
             }
 
@@ -53,7 +53,7 @@ public static class NotificadorLinux
         }
         catch
         {
-            Console.WriteLine($"[NOTIFICACIÓN] {mensaje}");
+            DebugConsole.WriteLine($"[NOTIFICACIÓN] {mensaje}");
         }
     }
 

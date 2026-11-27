@@ -14,8 +14,10 @@ public static class DiskIconService
         if (forced == "nvme")
             return "avares://RAID-Util/Assets/Icons/disk-nvme.png";
 
+        // No existe disk-usb.png en Assets/Icons; usar el icono genérico
+        // (antes se caía al fallback HDD y se registraba un error por cada disco).
         if (forced == "usb")
-            return "avares://RAID-Util/Assets/Icons/disk-usb.png";
+            return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
 
         if (forced == "iscsi")
             return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
@@ -32,7 +34,7 @@ public static class DiskIconService
 
         // 2) USB por modelo
         if (m.Contains("usb") || m.Contains("flash") || m.Contains("pen"))
-            return "avares://RAID-Util/Assets/Icons/disk-usb.png";
+            return "avares://RAID-Util/Assets/Icons/disk-virtual.png";
 
         // 3) iSCSI / FILEIO / LUN
         if (m.Contains("iscsi") || m.Contains("fileio") || m.Contains("lun"))

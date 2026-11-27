@@ -1463,14 +1463,14 @@ public partial class RaidView : UserControl
 
     private void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        Console.WriteLine("[RAIDVIEW] Attached → Auto-refresh iniciado");
+        DebugConsole.WriteLine("[RAIDVIEW] Attached → Auto-refresh iniciado");
         StartProgressAutoRefresh();
         
     }
 
     private void OnDetached(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        Console.WriteLine("[RAIDVIEW] Detached → Auto-refresh detenido");
+        DebugConsole.WriteLine("[RAIDVIEW] Detached → Auto-refresh detenido");
         StopProgressAutoRefresh();
         
     }
@@ -1833,19 +1833,19 @@ public partial class RaidView : UserControl
 
             if (!ok)
             {
-                Console.WriteLine("[REAL] ERROR: mdadm no pudo crear el array.");
+                DebugConsole.WriteLine("[REAL] ERROR: mdadm no pudo crear el array.");
                 return false;
             }
 
-            Console.WriteLine("[REAL] Array creado correctamente. Cargando RAID...");
+            DebugConsole.WriteLine("[REAL] Array creado correctamente. Cargando RAID...");
             await LoadRaidAsync(true);
 
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[REAL] EXCEPCIÓN al crear array:");
-            Console.WriteLine(ex.ToString());
+            DebugConsole.WriteLine("[REAL] EXCEPCIÓN al crear array:");
+            DebugConsole.WriteLine(ex.ToString());
             return false;
         }
     }

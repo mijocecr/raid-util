@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,20 @@ public partial class StatusView : UserControl
 {
     private readonly StatusService _status;
     private CancellationTokenSource? _autoRefreshCts;
+    private int _refreshing;
+
+    private sealed record StatusSnapshot(
+        string RaidHealth,
+        string ArraysSummary,
+        string DisksSummary,
+        string RebuildSummary,
+        IList<ArrayRiskInfo> ArraysAtRisk,
+        IList<DiskAlertInfo> DiskAlerts,
+        IList<string> RecentEvents,
+        string Uptime,
+        int Cpu,
+        int Memory,
+        int DiskFree);
 
     public StatusView()
     {
@@ -47,16 +62,11 @@ public partial class StatusView : UserControl
                     bool isVisible = await Dispatcher.UIThread.InvokeAsync(() => this.IsVisible);
 
                     if (isVisible && Credentials.AllowRaidCalls)
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(async () =>
-                        {
-                            await RefreshStatusAsync();
-                        });
-                    }
+                        await RefreshStatusAsync();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[STATUS] Auto-refresh error: {ex}");
+                    DebugConsole.WriteLine($"[STATUS] Auto-refresh error: {ex}");
                 }
 
                 await Task.Delay(5000, token); // refresco cada 5s
@@ -81,7 +91,7 @@ public partial class StatusView : UserControl
     {
         if (!Credentials.AllowRaidCalls)
         {
-            Console.WriteLine("[STATUS] Sudo not ready → skipping initial load.");
+            DebugConsole.WriteLine("[STATUS] Sudo not ready → skipping initial load.");
             return;
         }
 
@@ -103,11 +113,23 @@ public partial class StatusView : UserControl
     {
         if (!Credentials.AllowRaidCalls)
         {
-            Console.WriteLine("[STATUS] Refresh blocked → sudo not ready.");
+            DebugConsole.WriteLine("[STATUS] Refresh blocked → sudo not ready.");
             return;
         }
 
-        await LoadStatusAsync();
+        // Evita solapar refrescos del timer con el botón manual: sin esto se
+        // podían mezclar datos de dos lecturas distintas en la misma pantalla.
+        if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0)
+            return;
+
+        try
+        {
+            await LoadStatusAsync();
+        }
+        finally
+        {
+            Volatile.Write(ref _refreshing, 0);
+        }
     }
 
     private async void OnRefreshClick(object? sender, RoutedEventArgs e)
@@ -126,62 +148,69 @@ public partial class StatusView : UserControl
     private async Task LoadStatusAsync()
     {
         var swTotal = Stopwatch.StartNew();
-        Console.WriteLine("\n===============================");
-        Console.WriteLine("[STATUS] REFRESH START");
-        Console.WriteLine("===============================");
 
         try
         {
-            if (!Credentials.AllowRaidCalls)
+            // Toda la consulta (incluido el muestreo de CPU de 1 s) se hace
+            // fuera del hilo UI; antes bloqueaba la ventana cada 5 s.
+            var snapshot = await Task.Run(async () =>
             {
-                Console.WriteLine("[STATUS] LoadStatusAsync aborted → sudo not ready.");
-                return;
-            }
+                var raidHealth = await _status.GetOverallRaidHealthAsync();
+                var arraysSummary = await _status.GetArraysSummaryAsync();
+                var disksSummary = await _status.GetDisksSummaryAsync();
+                var rebuildSummary = await _status.GetRebuildSummaryAsync();
+                var arraysAtRisk = await _status.GetArraysAtRiskAsync();
+                var diskAlerts = await _status.GetDiskAlertsAsync();
+                var recentEvents = await _status.GetRecentEventsAsync();
 
-            // RAID INFO
-            var raidHealth = await _status.GetOverallRaidHealthAsync();
-            var arraysSummary = await _status.GetArraysSummaryAsync();
-            var disksSummary = await _status.GetDisksSummaryAsync();
-            var rebuildSummary = await _status.GetRebuildSummaryAsync();
-            var arraysAtRisk = await _status.GetArraysAtRiskAsync();
-            var diskAlerts = await _status.GetDiskAlertsAsync();
-            var recentEvents = await _status.GetRecentEventsAsync();
+                return new StatusSnapshot(
+                    raidHealth,
+                    arraysSummary,
+                    disksSummary,
+                    rebuildSummary,
+                    arraysAtRisk,
+                    diskAlerts,
+                    recentEvents,
+                    _status.GetSessionUptime(),
+                    _status.GetCpuUsage(),
+                    _status.GetMemoryUsage(),
+                    _status.GetDiskFree());
+            });
 
-            // SYSTEM INFO
-            var uptime = _status.GetSessionUptime();
-            var cpu = _status.GetCpuUsage();
-            var mem = _status.GetMemoryUsage();
-            var diskFree = _status.GetDiskFree();
-
-            // UI
-            UpdateRaidHealthUI(raidHealth);
-
-            TxtArraysSummary.Text = arraysSummary;
-            TxtDisksSummary.Text = disksSummary;
-            TxtRebuildSummary.Text = rebuildSummary;
-
-            ListArraysAtRisk.ItemsSource = arraysAtRisk;
-            ListDiskAlerts.ItemsSource = diskAlerts;
-            ListRecentEvents.ItemsSource = recentEvents;
-
-            TxtSystemUptime.Text = $"Uptime: {uptime}";
-            TxtSystemCpu.Text = $"CPU: {cpu}%";
-            TxtSystemRam.Text = $"RAM: {mem}%";
-            TxtSystemDisk.Text = $"Disk Free: {diskFree} GB";
+            await Dispatcher.UIThread.InvokeAsync(() => ApplySnapshot(snapshot));
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[STATUS] ERROR: {ex}");
-            TxtOverallRaidHealth.Text = $"Error: {ex.Message}";
-            RaidHealthCard.Background = this.FindResource("RaidCriticalBrush") as IBrush;
-            TxtOverallRaidHealth.Foreground = Brushes.IndianRed;
+            DebugConsole.WriteLine($"[STATUS] ERROR: {ex}");
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                TxtOverallRaidHealth.Text = $"Error: {ex.Message}";
+                RaidHealthCard.Background = this.FindResource("RaidCriticalBrush") as IBrush;
+                TxtOverallRaidHealth.Foreground = Brushes.IndianRed;
+            });
         }
 
         swTotal.Stop();
-        Console.WriteLine($"[STATUS] TOTAL REFRESH TIME = {swTotal.ElapsedMilliseconds} ms");
-        Console.WriteLine("===============================");
-        Console.WriteLine("[STATUS] REFRESH END");
-        Console.WriteLine("===============================\n");
+        DebugConsole.WriteLine($"[STATUS] REFRESH END ({swTotal.ElapsedMilliseconds} ms)");
+    }
+
+    private void ApplySnapshot(StatusSnapshot snapshot)
+    {
+        UpdateRaidHealthUI(snapshot.RaidHealth);
+
+        TxtArraysSummary.Text = snapshot.ArraysSummary;
+        TxtDisksSummary.Text = snapshot.DisksSummary;
+        TxtRebuildSummary.Text = snapshot.RebuildSummary;
+
+        ListArraysAtRisk.ItemsSource = snapshot.ArraysAtRisk;
+        ListDiskAlerts.ItemsSource = snapshot.DiskAlerts;
+        ListRecentEvents.ItemsSource = snapshot.RecentEvents;
+
+        TxtSystemUptime.Text = $"Uptime: {snapshot.Uptime}";
+        TxtSystemCpu.Text = $"CPU: {snapshot.Cpu}%";
+        TxtSystemRam.Text = $"RAM: {snapshot.Memory}%";
+        // DriveInfo("/") mide la raíz, no /home: evitar llamarlo "Disk Free".
+        TxtSystemDisk.Text = $"Root free: {snapshot.DiskFree} GB";
     }
 
     // ============================================================

@@ -249,8 +249,8 @@ public class RaidService
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[RAID] ValidateDiskForRaidAsync lsblk JSON error:");
-                Console.WriteLine(ex);
+                DebugConsole.WriteLine("[RAID] ValidateDiskForRaidAsync lsblk JSON error:");
+                DebugConsole.WriteLine(ex);
             }
 
         var mdadmInfo = await RunMdadmAsync("--examine", device);
@@ -276,42 +276,8 @@ public class RaidService
     // ============================================================
     //  PARSER ROBUSTO PARA ROTA
     // ============================================================
-    private bool ParseRota(dynamic rotaToken)
-    {
-        try
-        {
-            if (rotaToken == null)
-                return false;
-
-            if (rotaToken is bool b)
-                return b;
-
-            if (rotaToken is long l)
-                return l != 0;
-
-            string s = rotaToken.ToString().Trim().ToLowerInvariant();
-
-            if (s == "1" || s == "true" || s == "yes")
-                return true;
-
-            if (s == "0" || s == "false" || s == "no")
-                return false;
-
-            if (bool.TryParse(s, out var parsedBool))
-                return parsedBool;
-
-            if (int.TryParse(s, out var parsedInt))
-                return parsedInt != 0;
-
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("[RAID] ParseRota() EXCEPTION:");
-            Console.WriteLine(ex);
-            return false;
-        }
-    }
+    private static bool ParseRota(object? rotaToken) =>
+        DiskTypeHelper.ParseRotational(rotaToken);
 
     // ============================================================
     //  LECTURA DE ARRAYS
@@ -704,7 +670,7 @@ private RaidArrayState ParseArrayStateEnum(string detail)
 
 public async Task<bool> AutoAssemble()
 {
-    Console.WriteLine("========== AUTOASSEMBLE START ==========");
+    DebugConsole.WriteLine("========== AUTOASSEMBLE START ==========");
 
     try
     {
@@ -741,9 +707,9 @@ public async Task<bool> AutoAssemble()
 
         candidates = candidates.Distinct(StringComparer.Ordinal).ToList();
 
-        Console.WriteLine("[AA] Discos/particiones detectados:");
+        DebugConsole.WriteLine("[AA] Discos/particiones detectados:");
         foreach (var c in candidates)
-            Console.WriteLine("   " + c);
+            DebugConsole.WriteLine("   " + c);
 
         // 2) Leer metadata y agrupar por UUID
         var groups = new Dictionary<string, List<string>>();
@@ -760,7 +726,7 @@ public async Task<bool> AutoAssemble()
 
             string uuid = mUuid.Groups[1].Value;
 
-            Console.WriteLine($"[AA] {dev} → UUID={uuid}");
+            DebugConsole.WriteLine($"[AA] {dev} → UUID={uuid}");
 
             if (!groups.ContainsKey(uuid))
                 groups[uuid] = new List<string>();
@@ -774,22 +740,22 @@ public async Task<bool> AutoAssemble()
             string uuid = kv.Key;
             var devs = kv.Value;
 
-            Console.WriteLine($"[AA] Intentando ensamblar UUID={uuid}");
-            Console.WriteLine($"[AA] Discos: {string.Join(", ", devs)}");
+            DebugConsole.WriteLine($"[AA] Intentando ensamblar UUID={uuid}");
+            DebugConsole.WriteLine($"[AA] Discos: {string.Join(", ", devs)}");
 
             // Obtener nombre libre: md0, md1, md2...
             string mdName = GetNextFreeMdName();   // ⭐ TU FUNCIÓN OFICIAL
             string mdPath = "/dev/" + mdName;
 
-            Console.WriteLine($"[AA] Nombre asignado por GetNextFreeMdName(): {mdName}");
+            DebugConsole.WriteLine($"[AA] Nombre asignado por GetNextFreeMdName(): {mdName}");
 
             var assembleArgs = new List<string> { "--assemble", mdPath };
             assembleArgs.AddRange(devs);
             var result = ShellHelper.RunRoot(ToolLocator.ResolveOrThrow("mdadm"), assembleArgs.ToArray());
 
-            Console.WriteLine("[AA] EXIT=" + result.ExitCode);
-            Console.WriteLine("[AA] STDOUT:\n" + result.Stdout);
-            Console.WriteLine("[AA] STDERR:\n" + result.Stderr);
+            DebugConsole.WriteLine("[AA] EXIT=" + result.ExitCode);
+            DebugConsole.WriteLine("[AA] STDOUT:\n" + result.Stdout);
+            DebugConsole.WriteLine("[AA] STDERR:\n" + result.Stderr);
 
             if (!result.Success)
                 return false;
@@ -797,13 +763,13 @@ public async Task<bool> AutoAssemble()
 
         await SystemIntegrationService.SettleDevicesAsync();
 
-        Console.WriteLine("========== AUTOASSEMBLE END ==========");
+        DebugConsole.WriteLine("========== AUTOASSEMBLE END ==========");
         return true;
     }
     catch (Exception ex)
     {
-        Console.WriteLine("========== AUTOASSEMBLE EXCEPTION ==========");
-        Console.WriteLine(ex.ToString());
+        DebugConsole.WriteLine("========== AUTOASSEMBLE EXCEPTION ==========");
+        DebugConsole.WriteLine(ex.ToString());
         return false;
     }
 }
@@ -858,7 +824,7 @@ public async Task<bool> AutoAssemble()
 
         var mountPath = MountOptionsService.EffectiveArrayMountPoint(arrayName, cfg.MountPoint);
 
-        Console.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
+        DebugConsole.WriteLine($"[RAID] Inicializando {devPath} con FS={fsType}, label='{label}', mount={mountPath}");
 
         var mountList = await ShellHelper.RunRootAsync(
             ToolLocator.ResolveOrThrow("mount"), Array.Empty<string>());
@@ -867,12 +833,12 @@ public async Task<bool> AutoAssemble()
                 .FirstOrDefault() == devPath);
         if (isMounted)
         {
-            Console.WriteLine($"[RAID] {devPath} está montado. Desmontando...");
+            DebugConsole.WriteLine($"[RAID] {devPath} está montado. Desmontando...");
 
             var umount = ShellHelper.RunRoot(ToolLocator.ResolveOrThrow("umount"), "-f", devPath);
             if (umount.ExitCode != 0)
             {
-                Console.WriteLine($"[RAID] ERROR desmontando: {umount.Stderr}");
+                DebugConsole.WriteLine($"[RAID] ERROR desmontando: {umount.Stderr}");
                 return false;
             }
 
@@ -882,7 +848,7 @@ public async Task<bool> AutoAssemble()
 
         if (!File.Exists(devPath))
         {
-            Console.WriteLine($"[RAID] ERROR: {devPath} no existe.");
+            DebugConsole.WriteLine($"[RAID] ERROR: {devPath} no existe.");
             return false;
         }
 
@@ -891,7 +857,7 @@ public async Task<bool> AutoAssemble()
         var mkfs = ShellHelper.RunRoot(mkfsTool, mkfsArgs);
         if (mkfs.ExitCode != 0)
         {
-            Console.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
+            DebugConsole.WriteLine($"[RAID] ERROR formateando: {mkfs.Stderr}");
             return false;
         }
 
@@ -932,7 +898,7 @@ public async Task<bool> AutoAssemble()
                 ToolLocator.ResolveOrThrow("mount"), new[] { "-o", mountOpts, devPath, mountPath });
             if (mount.ExitCode != 0)
             {
-                Console.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
+                DebugConsole.WriteLine($"[RAID] ERROR montando: {mount.Stderr}");
                 return false;
             }
 
@@ -963,7 +929,7 @@ public async Task<bool> AutoAssemble()
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[RAID] ERROR en InitializeArrayAsync: {ex}");
+        DebugConsole.WriteLine($"[RAID] ERROR en InitializeArrayAsync: {ex}");
         return false;
     }
 }
@@ -1216,11 +1182,25 @@ public async Task<bool> AutoAssemble()
         }
     }
 
-    // Icono
-    var icon = DiskIconService.GetIcon(name, model, isRotational);
-
     // Transporte
     string tran = (dev.tran ?? "").ToString().ToLowerInvariant();
+
+    bool isVirtual =
+        model.Contains("VMware", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("QEMU", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("VBOX", StringComparison.OrdinalIgnoreCase);
+
+    // Icono: pasar pistas explícitas, no el nombre del dispositivo. Antes se
+    // pasaba "name" ("nvme0n1"), que no coincide con la pista "nvme" y hacía
+    // que un NVMe apareciera con icono de SSD.
+    string? iconHint =
+        name.StartsWith("nvme", StringComparison.OrdinalIgnoreCase) ? "nvme" :
+        tran == "usb" ? "usb" :
+        tran == "iscsi" ? "iscsi" :
+        isVirtual ? "virtual" :
+        null;
+    var icon = DiskIconService.GetIcon(iconHint, model, isRotational);
 
     return new RaidDiskInfo
     {
@@ -1235,11 +1215,7 @@ public async Task<bool> AutoAssemble()
         IsNvme = name.StartsWith("nvme", StringComparison.OrdinalIgnoreCase),
         IsUsb = tran == "usb",
         IsIscsi = tran == "iscsi",
-        IsVirtual =
-            model.Contains("VMware", StringComparison.OrdinalIgnoreCase) ||
-            model.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
-            model.Contains("QEMU", StringComparison.OrdinalIgnoreCase) ||
-            model.Contains("VBOX", StringComparison.OrdinalIgnoreCase),
+        IsVirtual = isVirtual,
 
         // Sistema de archivos
         FsType = fstype,
@@ -1270,8 +1246,8 @@ public async Task<bool> AutoAssemble()
             Model = "Unknown",
             Size = "Unknown",
 
-            // Icono genérico
-            Icon = DiskIconService.GetIcon(name, "Unknown", false),
+            // Icono genérico (HDD por defecto, sin pistas basadas en el nombre)
+            Icon = DiskIconService.GetIcon(null, "Unknown", true),
 
             // Tipo físico (desconocido)
             IsRotational = false,
@@ -2335,7 +2311,7 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     // ⭐ Si el array NO existe como dispositivo → está detenido → es SEGURO adoptarlo
     if (!File.Exists(devPath))
     {
-        Console.WriteLine($"[SAFE] {devPath} no existe → array detenido → permitido.");
+        DebugConsole.WriteLine($"[SAFE] {devPath} no existe → array detenido → permitido.");
         return true;
     }
 
@@ -2384,27 +2360,27 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
     {
         try
         {
-            Console.Clear();
-            Console.WriteLine("========== ADOPT ARRAY START ==========");
-            Console.WriteLine($"[ADOPT] currentName = {currentName}");
-            Console.WriteLine($"[ADOPT] requested newName = {newName}");
-            Console.WriteLine($"[ADOPT] devices = {string.Join(", ", devices)}");
+            DebugConsole.Clear();
+            DebugConsole.WriteLine("========== ADOPT ARRAY START ==========");
+            DebugConsole.WriteLine($"[ADOPT] currentName = {currentName}");
+            DebugConsole.WriteLine($"[ADOPT] requested newName = {newName}");
+            DebugConsole.WriteLine($"[ADOPT] devices = {string.Join(", ", devices)}");
 
             var mdadmTool = ToolLocator.ResolveOrThrow("mdadm");
             var currentPath = InputValidation.NormalizeDevicePath(currentName);
 
             // 1) Obtener detalle del array actual
-            Console.WriteLine($"[ADOPT] Ejecutando: mdadm --detail {currentPath}");
+            DebugConsole.WriteLine($"[ADOPT] Ejecutando: mdadm --detail {currentPath}");
 
             var detail = ShellHelper.RunRoot(mdadmTool, "--detail", currentPath);
 
-            Console.WriteLine($"[ADOPT] detail EXIT={detail.ExitCode}");
-            Console.WriteLine($"[ADOPT] detail STDOUT:\n{detail.Stdout}");
-            Console.WriteLine($"[ADOPT] detail STDERR:\n{detail.Stderr}");
+            DebugConsole.WriteLine($"[ADOPT] detail EXIT={detail.ExitCode}");
+            DebugConsole.WriteLine($"[ADOPT] detail STDOUT:\n{detail.Stdout}");
+            DebugConsole.WriteLine($"[ADOPT] detail STDERR:\n{detail.Stderr}");
 
             if (detail.ExitCode != 0)
             {
-                Console.WriteLine("[ADOPT] ERROR: mdadm --detail falló → no existe el array.");
+                DebugConsole.WriteLine("[ADOPT] ERROR: mdadm --detail falló → no existe el array.");
                 return false;
             }
 
@@ -2412,12 +2388,12 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             bool isActive = detail.Stdout.Contains("Active Devices :");
 
             if (isClean || isActive)
-                Console.WriteLine("[ADOPT] Array está CLEAN/ACTIVE → permitido si NO está montado.");
+                DebugConsole.WriteLine("[ADOPT] Array está CLEAN/ACTIVE → permitido si NO está montado.");
             else
-                Console.WriteLine("[ADOPT] Array no está CLEAN/ACTIVE → igualmente permitido si no está montado.");
+                DebugConsole.WriteLine("[ADOPT] Array no está CLEAN/ACTIVE → igualmente permitido si no está montado.");
 
             // 3) Normalizar dispositivos
-            Console.WriteLine("[ADOPT] Normalizando dispositivos…");
+            DebugConsole.WriteLine("[ADOPT] Normalizando dispositivos…");
 
             var normalized = devices
                 .Where(d => !string.IsNullOrWhiteSpace(d))
@@ -2433,32 +2409,32 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
                 })
                 .ToList();
 
-            Console.WriteLine($"[ADOPT] Normalized = {string.Join(", ", normalized)}");
+            DebugConsole.WriteLine($"[ADOPT] Normalized = {string.Join(", ", normalized)}");
 
             if (normalized.Count == 0)
             {
-                Console.WriteLine("[ADOPT] ERROR: No hay dispositivos válidos.");
+                DebugConsole.WriteLine("[ADOPT] ERROR: No hay dispositivos válidos.");
                 return false;
             }
 
             // 4) Detener array actual
-            Console.WriteLine($"[ADOPT] Ejecutando: mdadm --stop {currentPath}");
+            DebugConsole.WriteLine($"[ADOPT] Ejecutando: mdadm --stop {currentPath}");
 
             var stopResult = ShellHelper.RunRoot(mdadmTool, "--stop", currentPath);
 
-            Console.WriteLine($"[ADOPT] stop EXIT={stopResult.ExitCode}");
-            Console.WriteLine($"[ADOPT] stop STDOUT:\n{stopResult.Stdout}");
-            Console.WriteLine($"[ADOPT] stop STDERR:\n{stopResult.Stderr}");
+            DebugConsole.WriteLine($"[ADOPT] stop EXIT={stopResult.ExitCode}");
+            DebugConsole.WriteLine($"[ADOPT] stop STDOUT:\n{stopResult.Stdout}");
+            DebugConsole.WriteLine($"[ADOPT] stop STDERR:\n{stopResult.Stderr}");
 
             if (stopResult.ExitCode != 0)
             {
-                Console.WriteLine("[ADOPT] ERROR: No se pudo detener el array.");
+                DebugConsole.WriteLine("[ADOPT] ERROR: No se pudo detener el array.");
                 return false;
             }
 
             // 5) Obtener nombre libre usando tu función oficial
             string freeName = GetNextFreeMdName();
-            Console.WriteLine($"[ADOPT] Nombre asignado por GetNextFreeMdName(): {freeName}");
+            DebugConsole.WriteLine($"[ADOPT] Nombre asignado por GetNextFreeMdName(): {freeName}");
 
             string mdPath = "/dev/" + freeName;
 
@@ -2466,22 +2442,22 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
             var assembleArgs = new List<string> { "--assemble", mdPath };
             assembleArgs.AddRange(normalized);
 
-            Console.WriteLine($"[ADOPT] Ejecutando: mdadm {string.Join(" ", assembleArgs)}");
+            DebugConsole.WriteLine($"[ADOPT] Ejecutando: mdadm {string.Join(" ", assembleArgs)}");
 
             var assembleResult = ShellHelper.RunRoot(mdadmTool, assembleArgs.ToArray());
 
-            Console.WriteLine($"[ADOPT] assemble EXIT={assembleResult.ExitCode}");
-            Console.WriteLine($"[ADOPT] assemble STDOUT:\n{assembleResult.Stdout}");
-            Console.WriteLine($"[ADOPT] assemble STDERR:\n{assembleResult.Stderr}");
+            DebugConsole.WriteLine($"[ADOPT] assemble EXIT={assembleResult.ExitCode}");
+            DebugConsole.WriteLine($"[ADOPT] assemble STDOUT:\n{assembleResult.Stdout}");
+            DebugConsole.WriteLine($"[ADOPT] assemble STDERR:\n{assembleResult.Stderr}");
 
-            Console.WriteLine("========== ADOPT ARRAY END ==========");
+            DebugConsole.WriteLine("========== ADOPT ARRAY END ==========");
 
             return assembleResult.ExitCode == 0;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("========== ADOPT ARRAY EXCEPTION ==========");
-            Console.WriteLine(ex.ToString());
+            DebugConsole.WriteLine("========== ADOPT ARRAY EXCEPTION ==========");
+            DebugConsole.WriteLine(ex.ToString());
             return false;
         }
     });
@@ -2492,46 +2468,46 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 {
     try
     {
-        Console.WriteLine("=== PersistMountAsync ===");
-        Console.WriteLine($"Array.Path = {array.Path}");
-        Console.WriteLine($"Array.Name = {array.Name}");
+        DebugConsole.WriteLine("=== PersistMountAsync ===");
+        DebugConsole.WriteLine($"Array.Path = {array.Path}");
+        DebugConsole.WriteLine($"Array.Name = {array.Name}");
 
         // Obtener UUID del filesystem
         var uuidCmd = ShellHelper.RunRoot(
             ToolLocator.ResolveOrThrow("blkid"), new[] { "-s", "UUID", "-o", "value", array.Path });
-        Console.WriteLine($"blkid exit = {uuidCmd.ExitCode}");
-        Console.WriteLine($"blkid stdout = {uuidCmd.Stdout}");
-        Console.WriteLine($"blkid stderr = {uuidCmd.Stderr}");
+        DebugConsole.WriteLine($"blkid exit = {uuidCmd.ExitCode}");
+        DebugConsole.WriteLine($"blkid stdout = {uuidCmd.Stdout}");
+        DebugConsole.WriteLine($"blkid stderr = {uuidCmd.Stderr}");
 
         if (uuidCmd.ExitCode != 0 || string.IsNullOrWhiteSpace(uuidCmd.Stdout))
         {
-            Console.WriteLine("ERROR: blkid no devolvió UUID válido.");
+            DebugConsole.WriteLine("ERROR: blkid no devolvió UUID válido.");
             return false;
         }
 
         var uuid = uuidCmd.Stdout.Trim().ToLowerInvariant();
-        Console.WriteLine($"Detected UUID = {uuid}");
+        DebugConsole.WriteLine($"Detected UUID = {uuid}");
 
         // Obtener filesystem TYPE
         var fsCmd = ShellHelper.RunRoot(
             ToolLocator.ResolveOrThrow("blkid"), new[] { "-s", "TYPE", "-o", "value", array.Path });
-        Console.WriteLine($"blkid TYPE exit = {fsCmd.ExitCode}");
-        Console.WriteLine($"blkid TYPE stdout = {fsCmd.Stdout}");
-        Console.WriteLine($"blkid TYPE stderr = {fsCmd.Stderr}");
+        DebugConsole.WriteLine($"blkid TYPE exit = {fsCmd.ExitCode}");
+        DebugConsole.WriteLine($"blkid TYPE stdout = {fsCmd.Stdout}");
+        DebugConsole.WriteLine($"blkid TYPE stderr = {fsCmd.Stderr}");
 
         if (fsCmd.ExitCode != 0 || string.IsNullOrWhiteSpace(fsCmd.Stdout))
         {
-            Console.WriteLine("ERROR: blkid no devolvió TYPE válido.");
+            DebugConsole.WriteLine("ERROR: blkid no devolvió TYPE válido.");
             return false;
         }
 
         var fsType = fsCmd.Stdout.Trim();
-        Console.WriteLine($"Detected fsType = {fsType}");
+        DebugConsole.WriteLine($"Detected fsType = {fsType}");
 
         // Punto de montaje canónico y configuración compartida con GUI/CLI.
         var cfg = ArrayConfigService.Load(array.BaseName);
         var mountPoint = MountOptionsService.EffectiveArrayMountPoint(array.Name, cfg.MountPoint);
-        Console.WriteLine($"Creating mount point: {mountPoint}");
+        DebugConsole.WriteLine($"Creating mount point: {mountPoint}");
         ShellHelper.RunRoot("mkdir", "-p", mountPoint);
 
         // Una sola implementación de /etc/fstab para GUI, CLI y persistencia,
@@ -2543,13 +2519,13 @@ public async Task<(bool Ok, string Message)> StopArraySafeAsync(string arrayName
 
         
 
-        Console.WriteLine("=== PersistMountAsync DONE ===");
+        DebugConsole.WriteLine("=== PersistMountAsync DONE ===");
         return true;
     }
     catch (Exception ex)
     {
-        Console.WriteLine("EXCEPTION in PersistMountAsync:");
-        Console.WriteLine(ex.ToString());
+        DebugConsole.WriteLine("EXCEPTION in PersistMountAsync:");
+        DebugConsole.WriteLine(ex.ToString());
         return false;
     }
 }

@@ -154,11 +154,11 @@ public static class CommandRunner
 
     private static void Log(long callId, string fileName, string arguments, CommandResult result, long elapsedMs)
     {
-        Console.WriteLine($"[CMD] #{callId} {fileName} {arguments}");
-        Console.WriteLine($"[CMD] #{callId} EXIT={result.ExitCode} ({elapsedMs} ms)");
+        DebugConsole.WriteLine($"[CMD] #{callId} {fileName} {arguments}");
+        DebugConsole.WriteLine($"[CMD] #{callId} EXIT={result.ExitCode} ({elapsedMs} ms)");
         if (!string.IsNullOrWhiteSpace(result.Stdout))
-            Console.WriteLine($"[CMD] #{callId} STDOUT:\n{result.Stdout}");
+            DebugConsole.WriteLine($"[CMD] #{callId} STDOUT:\n{result.Stdout}");
         if (!string.IsNullOrWhiteSpace(result.Stderr))
-            Console.WriteLine($"[CMD] #{callId} STDERR:\n{result.Stderr}");
+            DebugConsole.WriteLine($"[CMD] #{callId} STDERR:\n{result.Stderr}");
     }
 }

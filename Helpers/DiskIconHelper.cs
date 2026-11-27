@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using RAID_Util.Helpers;
 
 public static class DiskIconHelper
 {
@@ -30,7 +31,7 @@ public static class DiskIconHelper
     {
         if (string.IsNullOrWhiteSpace(uri) || !uri.StartsWith("avares://"))
         {
-            Console.WriteLine($"[ICONHELPER] Ruta inválida '{uri}', usando default.");
+            DebugConsole.WriteLine($"[ICONHELPER] Ruta inválida '{uri}', usando default.");
             return DefaultIcon;
         }
 
@@ -41,13 +42,13 @@ public static class DiskIconHelper
     {
         try
         {
-            Console.WriteLine($"[ICONHELPER] Cargando icono: {uri}");
+            DebugConsole.WriteLine($"[ICONHELPER] Cargando icono: {uri}");
             using var stream = AssetLoader.Open(new Uri(uri));
             return new Bitmap(stream);
         }
         catch
         {
-            Console.WriteLine($"[ICONHELPER] FALLO al abrir '{uri}', usando default.");
+            DebugConsole.WriteLine($"[ICONHELPER] FALLO al abrir '{uri}', usando default.");
 
             using var fallback = AssetLoader.Open(new Uri(DefaultIcon));
             return new Bitmap(fallback);

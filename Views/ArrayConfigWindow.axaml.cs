@@ -11,6 +11,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using RAID_Util.Models;
+using RAID_Util.Helpers;
 using RAID_Util.Services;
 using RAID_Util.Core;
 
@@ -36,12 +37,12 @@ public partial class ArrayConfigWindow : Window
 
     private void Log(string msg)
     {
-        Console.WriteLine($"[CFG] {msg}");
+        DebugConsole.WriteLine($"[CFG] {msg}");
     }
 
     private void LogThread(string tag)
     {
-        Console.WriteLine($"[THREAD] {tag} → ManagedThreadId={Environment.CurrentManagedThreadId}");
+        DebugConsole.WriteLine($"[THREAD] {tag} → ManagedThreadId={Environment.CurrentManagedThreadId}");
     }
 
     private void LoadUI()

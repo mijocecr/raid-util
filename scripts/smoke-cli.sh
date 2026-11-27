@@ -53,6 +53,11 @@ dotnet "$dll" --help | grep -q -- '--cli'
 
 menus="$(printf 'x\n9\n0\n' | PATH="$fake:$PATH" dotnet "$dll" --cli)"
 grep -q 'Please enter a number between 0 and 5.' <<<"$menus"
+# Los diagnósticos de servicios deben ir al archivo de log, no a la CLI.
+if grep -qE '\[(CMD|STATUS|RAID|AA|ICONHELPER|NOTIFICACIÓN)\]' <<<"$menus"; then
+  echo 'smoke-cli: FAIL — la CLI imprimió logs de diagnóstico' >&2
+  exit 1
+fi
 
 deep_clean="$(printf '3\n1\n1\n3\n1\n0\n0\n' | PATH="$fake:$PATH" timeout 30 dotnet "$dll" --cli)"
 grep -q 'Disk /dev/sdb has been thoroughly wiped and cleaned.' <<<"$deep_clean"

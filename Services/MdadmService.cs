@@ -40,7 +40,9 @@ public static class MdadmService
         var result = ShellHelper.RunRoot(
             ToolLocator.ResolveOrThrow("mdadm"), new[] { "--detail", path });
 
-        return (result.Stdout + "\n" + result.Stderr).Trim();
+        // Un error de mdadm NO es información del array: mezclar stderr con un
+        // detalle válido hacía que mensajes como "faulty" generaran alertas.
+        return result.Success ? result.Stdout.Trim() : string.Empty;
     }
 
     // ============================================================
@@ -63,10 +65,18 @@ public static class MdadmService
     // ============================================================
     public static string GetMdstat()
     {
-        if (!File.Exists("/proc/mdstat"))
-            return string.Empty;
+        try
+        {
+            if (!File.Exists("/proc/mdstat"))
+                return string.Empty;
 
-        return File.ReadAllText("/proc/mdstat");
+            return File.ReadAllText("/proc/mdstat");
+        }
+        catch (Exception ex)
+        {
+            DebugConsole.WriteLine($"[MDADM] No se pudo leer /proc/mdstat: {ex.Message}");
+            return string.Empty;
+        }
     }
 
     // ============================================================
@@ -74,36 +84,15 @@ public static class MdadmService
     // ============================================================
     public static bool IsDegraded(string arrayName)
     {
-        var md = GetMdstat().ToLower();
+        var md = GetMdstat();
+        if (string.IsNullOrWhiteSpace(md))
+            return false; // dato no disponible: no es una alerta
 
-        var baseName = arrayName.StartsWith("/dev/")
-            ? arrayName.Split('/').Last()
-            : arrayName;
+        var line = MdstatParser.GetArrayLine(md, arrayName);
+        if (line.Length == 0)
+            return false; // array aún no listado (arranque, contenedor): no alertar
 
-        if (!md.Contains(baseName.ToLower()))
-            return true;
-
-        var lines = md.Split('\n');
-        var line = Array.Find(lines, l => l.Contains(baseName.ToLower()));
-
-        if (line == null)
-            return true;
-
-        if (line.Contains("inactive") ||
-            line.Contains("failed") ||
-            line.Contains("faulty") ||
-            line.Contains("read-only") ||
-            line.Contains("broken"))
-            return true;
-
-        if (line.Contains("degraded") ||
-            line.Contains("removed") ||
-            line.Contains("missing") ||
-            line.Contains("(f)") ||
-            line.Contains("_"))
-            return true;
-
-        return false;
+        return MdstatParser.IsDegradedLine(line);
     }
 
     // ============================================================
@@ -111,19 +100,13 @@ public static class MdadmService
     // ============================================================
     public static bool IsResyncing(string arrayName)
     {
-        var md = GetMdstat().ToLower();
-
-        var baseName = arrayName.StartsWith("/dev/")
-            ? arrayName.Split('/').Last()
-            : arrayName;
-
-        if (!md.Contains(baseName.ToLower()))
+        var md = GetMdstat();
+        if (string.IsNullOrWhiteSpace(md))
             return false;
 
-        return md.Contains("resync") ||
-               md.Contains("recovery") ||
-               md.Contains("reshape") ||
-               md.Contains("rebuild");
+        // Solo la línea de progreso de ESTE array: antes un resync en md0
+        // marcaba también a md1 como "resyncing".
+        return MdstatParser.IsOperationInProgress(md, arrayName);
     }
 
     // ============================================================
