@@ -751,19 +751,31 @@ namespace RAID_Util.Helpers
             }
         }
 
-        private static bool ReadBoolean(string prompt, bool current)
+        internal static bool ReadBoolean(string prompt, bool current)
         {
-            Console.WriteLine($"\n{prompt} (current: {(current ? "Yes" : "No")})");
-            Console.WriteLine("1) Yes");
-            Console.WriteLine("2) No");
-            Console.WriteLine("0) Keep current");
-            Console.Write("Select an option: ");
-            return Console.ReadLine()?.Trim() switch
+            while (true)
             {
-                "1" => true,
-                "2" => false,
-                _ => current
-            };
+                Console.WriteLine($"\n{prompt} (current: {(current ? "Yes" : "No")})");
+                Console.WriteLine("1) Yes");
+                Console.WriteLine("2) No");
+                Console.WriteLine("0) Keep current");
+                Console.Write("Select an option: ");
+
+                var input = Console.ReadLine();
+                // EOF (entrada redirigida o tty cerrado): conservar el valor actual.
+                if (input is null)
+                    return current;
+
+                switch (input.Trim())
+                {
+                    case "1": return true;
+                    case "2": return false;
+                    case "0": return current;
+                    default:
+                        Console.WriteLine("Please enter a number from 0 to 2.");
+                        break;
+                }
+            }
         }
 
         private static int ReadInt(string prompt, int current, int min, int max)
@@ -1044,12 +1056,21 @@ namespace RAID_Util.Helpers
         {
             var config = ConfigManager.Get();
             Console.WriteLine("=== Application settings ===\n");
-            config.LogsPath = ReadValue("Logs directory", config.LogsPath);
+            // No tocar el objeto compartido hasta saber que el usuario no cancela:
+            // ConfigManager.Get() devuelve la instancia global y ReadValue mutaría
+            // la configuración en memoria aunque luego no se guarde.
+            var logsPath = ReadValue("Logs directory", config.LogsPath);
             Console.WriteLine($"\nLog level (current: {config.LogLevel})");
             var levels = new[] { "ERROR", "INFO", "DEBUG" };
             var index = SelectIndex(levels, level => level, "Select log level");
-            if (index.HasValue)
-                config.LogLevel = index.Value;
+            if (!index.HasValue)
+            {
+                Console.WriteLine("Settings unchanged.");
+                return;
+            }
+
+            config.LogsPath = logsPath;
+            config.LogLevel = index.Value;
 
             try
             {
